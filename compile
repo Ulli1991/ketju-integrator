@@ -1,0 +1,2 @@
+mpiicc mst.c pn.c -std=c99 -Ofast -ipo  -o run60
+
