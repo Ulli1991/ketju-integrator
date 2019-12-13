@@ -1,19 +1,21 @@
 //#define SERIAL
 #define PARALLEL
+//#define PARALLEL_QSORT
 
 //#define CHAIN
 
 #define GLOBAL_ND 2
 #define GCONST 43007.1
 #define KMAX 8
+#define MAXSORTTASK 8
 
 #define M_PI 3.14159265358979323846264338327950288419716939937510582097494459230781640628620899862803482534211706798214
 #define SPEEDOFLIGHT 299792.0
 
 // structs
 
-//#undef USE_PN
-#define USE_PN
+#undef USE_PN
+//#define USE_PN
 
 enum velocity_type { PHYSICAL, AUXILIARY };
 enum variable_type { POSITION, VELOCITY, OTHER };
@@ -44,9 +46,35 @@ int NumTaskPerGbsGroup;
 int ThisGbsGroup;
 int ThisTask_in_GbsGroup;
 
+int NumTaskPerSortGroup;
+int NumSortGroup;
+int ThisSortGroup;
+int ThisTask_in_SortGroup;
+
+struct OctreeNode {
+    int ChildExists[8];
+    struct OctreeNode *Children[8];
+    struct OctreeNode *Parent;
+    double      Center[3];
+    double      HalfSize;
+    int *ObjectList;
+    int Npart;
+    int level;
+    int IsLeaf;
+    int ID;
+} *OctreeRootNode, **ParticleInNode;
+
+
 struct WeightIndex {
         double weight;
         int index;
+};
+struct WeightIndex2 {
+        double weight;
+        int index1;
+	int index2;
+	int id1;
+	int id2;
 };
 
 struct GraphEdge {
@@ -64,6 +92,7 @@ struct GraphVertex {
         int edgetoparent;
         int level;
         int inMST;
+	int cell[3];
 };
 
 struct RegularizedRegion {
@@ -86,8 +115,10 @@ struct RegularizedRegion {
 
 	struct GraphEdge *Edge;
         struct GraphEdge *LocalEdge;
+	struct GraphEdge *LocalEdgeSubset;
         struct GraphVertex *Vertex;
         int *MSTedgeList;
+	struct GraphEdge *EdgeInMST;
 
         double T;
         double U;
