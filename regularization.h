@@ -1,6 +1,7 @@
 #define SERIAL
 //#define PARALLEL
-//#define PARALLEL_QSORT
+//#define PRIM
+#define PRIM_DIVIDE_CONQUER
 
 #define GLOBAL_ND 2
 #define GCONST 43007.1
@@ -20,11 +21,6 @@ enum variable_type { POSITION, VELOCITY, OTHER };
 
 int Ntask;
 int ThisTask;
-
-int Niter;
-int Nredo;
-int MyC;
-clock_t wallclock[10];
 
 int NumGbsGroup;
 int NumTaskPerGbsGroup;
@@ -149,3 +145,8 @@ double E0;
 
 void compute_Post_Newtonian_Acc(struct RegularizedRegion *R, double *Vel);
 int check_relative_proximity( int v1, int v2, const int Nd, struct RegularizedRegion *R, int *d, int *path, int *sign);
+
+// misc
+
+int ok_steps;
+int failed_steps;

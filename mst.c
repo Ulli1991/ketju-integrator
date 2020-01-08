@@ -4,22 +4,20 @@
 #include <time.h>
 #include <float.h>
 #include <limits.h>
-#include "regularization.h"
 #include <string.h>
 #include <unistd.h>
-
-//#undef OLDPRIM
-#define OLDPRIM
+#ifdef PARALLEL
+	#include <mpi.h>
+#endif
+#include "regularization.h"
 
 #define mydouble double
 
 int **indexlist;
 int extrapolate_all_variables( int NumberOfSystems, int korder );
-int Nsearch;
 
 double GBSTOL;
-
-double loopt1,loopt2,loopt3,loopt4;
+int MAXPART;
 
 double *errorbuf;
 double *resultbuf;
@@ -27,12 +25,8 @@ double *y;
 double *yscal;
 double *maxerror;
 double **error,**result;
-
 double **gbsS;
 double *allerrors;
-
-int MAXPART;
-double ttlratio[8];
 
 #ifdef PARALLEL
 #include <mpi.h>
@@ -41,54 +35,23 @@ double ttlratio[8];
 #ifdef PARALLEL
 MPI_Comm MPI_COMM_GBS_GROUP;
 #endif
-#ifdef PARALLEL_QSORT
-MPI_Comm MPI_COMM_SORT;
-#endif
 
-
-int *fastindex;
-int *fastv1;
-int *fastv2;
-double *fastweight;
-
-
-int primfail;
-int primsucc;
-double sum_order;
-
-double tprim1,tprim2,tprim3,tprim4,tprim5,tprim6,tprim7;
-
-double time_edge;
-double time_coord1;
-double time_coord2;
-double time_coord3;
-double time_coord4;
+double tprim1,tprim2,tprim3,tprim4,tprim5;
+double time_coord;
 double time_force;
 double time_comm;
 double time_mst;
 double time_gbs;
 double time_gbscomm;
-
-double safety;
-double finalerror_energy;
-double realtime;
-double fictitioustime;
-
-int ok_steps;
-int failed_steps;
-double EN0,Lz0,a0,e0,theta0;
-double EN1,Lz1,a1,e1,theta1;
-
-FILE *output;
 clock_t wtime1,wtime0;
 clock_t msttime1,msttime0;
 
-void my_barrier(void){
+// The functions begin here...
 
+void my_barrier(void){
 #ifdef PARALLEL
         MPI_Barrier(MPI_COMM_WORLD);
 #endif
-
 }
 
 void die(void){
@@ -113,8 +76,6 @@ int cmp_weight_index2(const void *a, const void *b){
     else
         return 0;
 }
-
-
 int cmp_weight_index(const void *a, const void *b){
     struct WeightIndex *a1 = (struct WeightIndex *)a;
     struct WeightIndex *a2 = (struct WeightIndex *)b;
@@ -125,8 +86,6 @@ int cmp_weight_index(const void *a, const void *b){
     else
         return 0;
 }
-
-
 int cmp(const void *a, const void *b){
     struct GraphEdge *a1 = (struct GraphEdge *)a;
     struct GraphEdge *a2 = (struct GraphEdge *)b;
@@ -137,7 +96,6 @@ int cmp(const void *a, const void *b){
     else
         return 0;
 }
-
 int cmp_int( const void* a, const void* b){
      int int_a = * ( (int*) a );
      int int_b = * ( (int*) b );
@@ -145,285 +103,6 @@ int cmp_int( const void* a, const void* b){
      else if ( int_a < int_b ) return -1;
      else return 1;
 }
-
-#ifdef PARALLEL_QSORT
-
-void parallel_qsort_final_level( struct WeightIndex *W, int Nitem, struct WeightIndex *SortedW, int *SortedNitem, int TotalNitem ){
-
-	qsort( W, Nitem, sizeof(struct WeightIndex), cmp_weight_index );
-
-	int *Nitems = calloc(NumTaskPerSortGroup,sizeof(int));
-
-	Nitems[ThisTask] = Nitem;
-
-	MPI_Allreduce(MPI_IN_PLACE,Nitems,NumTaskPerSortGroup,MPI_INT,MPI_SUM,MPI_COMM_SORT);
-
-	int istart,istop;
-	int CumNitem = 0;
-
-	for(int i=0;i<NumTaskPerSortGroup;i++){
-		if(ThisTask==i) istart = CumNitem;
-		CumNitem += Nitems[i];
-		if(ThisTask==i) istop  = CumNitem;
-	}
-
-	double *Wweight = calloc(TotalNitem,sizeof(double));
-	int *Windex     = calloc(TotalNitem,sizeof(int));
-
-	for(int i=0;i<Nitem;i++){
-		Wweight[istart+i] = W[i].weight;
-		Windex[istart+i]  = W[i].index;
-	}
-
-	MPI_Allreduce(MPI_IN_PLACE,Wweight,TotalNitem,MPI_DOUBLE,MPI_SUM,MPI_COMM_SORT);
-	MPI_Allreduce(MPI_IN_PLACE,Windex, TotalNitem,MPI_INT,   MPI_SUM,MPI_COMM_SORT);
-
-	for(int i=0;i<TotalNitem;i++){
-		SortedW[i].weight = Wweight[i];
-		SortedW[i].index  = Windex[i];
-	}
-
-	*SortedNitem = Nitem;
-
-	free(Nitems);
-	free(Wweight);
-	free(Windex);
-	free(W);
-}
-
-void parallel_qsort( struct WeightIndex *W, int Nitem, int NumSortTask, int ThisSortTask, int *ActualTaskNumbers, struct WeightIndex *SortedW, int *SortedNitem, int round, int TotalNitem ){
-
-	if(Nitem==0) printf("sort: Nitem cannot be zero. Round = %d, TotalNitem = %d.\n",round,TotalNitem);
-
-	double pivots[NumTaskPerSortGroup];
-	for(int i=0;i<NumTaskPerSortGroup;i++){
-		pivots[i] = 0;
-	}
-
-	if( ThisTask == ActualTaskNumbers[0] ){
-		int index_pivot = rand()%(Nitem+1);
-		pivots[ThisTask] = W[index_pivot].weight;
-	}
-
-	MPI_Allreduce( MPI_IN_PLACE, pivots, NumTaskPerSortGroup, MPI_DOUBLE, MPI_SUM, MPI_COMM_SORT );
-	double pivot = pivots[ThisTask-ThisSortTask];
-
-	struct WeightIndex *Lo = calloc(10*Nitem,sizeof(struct WeightIndex));
-	struct WeightIndex *Hi = calloc(10*Nitem,sizeof(struct WeightIndex));
-
-	int Nlo = 0, Nhi = 0;
-	for(int i=0;i<Nitem;i++){
-
-		if( W[i].weight < pivot ){
-			Lo[Nlo].weight = W[i].weight;
-			Lo[Nlo].index  = W[i].index;
-			Nlo++;
-		} else {
-			Hi[Nhi].weight = W[i].weight;
-                        Hi[Nhi].index  = W[i].index;
-                        Nhi++;
-		}
-	}
-
-	free(W);
-
-
-	int Nsend=0,Nrecv=0,from=-1,to=0;
-	if(ThisSortTask<NumSortTask/2){
-		Nsend = Nhi;
-		to    = ActualTaskNumbers[ ThisSortTask + NumSortTask/2 ];
-		from  = to;
-	} else {
-		Nsend = Nlo;
-		to    = ActualTaskNumbers[ ThisSortTask - NumSortTask/2 ];
-                from  = to;
-	}
-
-	if(ThisSortTask<NumSortTask/2){
-		MPI_Send(&Nsend, 1, MPI_INT, to,   0, MPI_COMM_SORT);
-	} else {
-		MPI_Recv(&Nrecv, 1, MPI_INT, from, 0, MPI_COMM_SORT,MPI_STATUS_IGNORE);
-	}
-
-	if(ThisSortTask>=NumSortTask/2){
-                MPI_Send(&Nsend, 1, MPI_INT, to,   0, MPI_COMM_SORT);
-        } else {
-                MPI_Recv(&Nrecv, 1, MPI_INT, from, 0, MPI_COMM_SORT,MPI_STATUS_IGNORE);
-        }
-
-	if(ThisSortTask>=NumSortTask/2){
-		if(Nhi+Nrecv>10*Nitem){
-			printf("Too many numbers by fac %lf\n", (1.0*Nhi+1.0*Nrecv)/(10*Nitem) );
-		}
-	} else {
-		if(Nlo+Nrecv>10*Nitem){
-                        printf("Too many numbers by fac %lf\n", (1.0*Nlo+1.0*Nrecv)/(10*Nitem));
-                }
-	}
-
-	if(ThisSortTask<NumSortTask/2){
-if(Nsend>0)                 MPI_Send(Hi, 	   Nsend, MPI_DOUBLE_INT, to,   0, MPI_COMM_SORT);
-        } else {
-if(Nrecv>0)                 MPI_Recv(&Hi[Nhi], Nrecv, MPI_DOUBLE_INT, from, 0, MPI_COMM_SORT,MPI_STATUS_IGNORE);
-        }
-	if(ThisSortTask>=NumSortTask/2){
-if(Nsend>0)                 MPI_Send(Lo,       Nsend, MPI_DOUBLE_INT, to,   0, MPI_COMM_SORT);
-        } else {
-if(Nrecv>0)                 MPI_Recv(&Lo[Nlo], Nrecv, MPI_DOUBLE_INT, from, 0, MPI_COMM_SORT,MPI_STATUS_IGNORE);
-        }
-
-	int NextActualTaskNumbers[NumSortTask/2];
-
-	if(NumSortTask>-1){
-
-		if(ThisSortTask>=NumSortTask/2){
-			Nlo  = 0;
-			free(Lo);
-			Nhi += Nrecv;
-			for(int i=0;i<NumSortTask/2;i++){
-                        	NextActualTaskNumbers[i] = ActualTaskNumbers[i+NumSortTask/2];
-                	}
-        	} else {
-			Nhi  = 0;
-			free(Hi);
-			Nlo += Nrecv;
-			for(int i=0;i<NumSortTask/2;i++){
-				NextActualTaskNumbers[i] = ActualTaskNumbers[i];
-			}
-        	}
-
-	}
-
-#if 1
-	if( NumSortTask>2 ){
-
-		if(ThisSortTask<NumSortTask/2){
-			parallel_qsort( Lo, Nlo, NumSortTask/2, ThisSortTask, NextActualTaskNumbers, SortedW, SortedNitem, round+1, TotalNitem );
-		} else {
-			parallel_qsort( Hi, Nhi, NumSortTask/2, ThisSortTask-NumSortTask/2, NextActualTaskNumbers, SortedW, SortedNitem, round+1, TotalNitem );
-		}
-
-	} else {
-
-		if(ThisSortTask<NumSortTask/2){
-	                parallel_qsort_final_level( Lo, Nlo, SortedW, SortedNitem, TotalNitem );
-		} else {
-			parallel_qsort_final_level( Hi, Nhi, SortedW, SortedNitem, TotalNitem );
-		}
-                return;
-
-	}
-#endif
-
-
-}
-
-void run_parallel_qsort( struct WeightIndex *W, int Nitem){
-
-	my_barrier();
-	if(ThisTask==0) printf("start: %d\n", Nitem);
-
-	double *Wweight = calloc(Nitem,sizeof(double));
-        int    *Windex  = calloc(Nitem,sizeof(int));
-
-	srand((unsigned) 2019);
-
-	if( ThisSortGroup == 0 ){
-
-		int SortedNitem = 0;
-
-		struct WeightIndex *ThisW    = calloc(Nitem,sizeof(struct WeightIndex));		
-		struct WeightIndex *SortedW  = calloc(Nitem,sizeof(struct WeightIndex));
-
-		int block  = Nitem/NumTaskPerSortGroup;
-		int istart = ThisTask*block;
-		int istop  = (ThisTask+1)*block;
-
-		if(ThisTask==NumTaskPerSortGroup-1) istop = Nitem; 
-		int ThisNitem = 0;
-
-		for(int i=istart;i<istop;i++){
-			ThisW[ThisNitem].weight = W[i].weight;
-			ThisW[ThisNitem].index  = W[i].index;
-			ThisNitem++;
-		}
-
-		int ActualTaskNumbers[NumTaskPerSortGroup];
-		for(int i=0;i<NumTaskPerSortGroup;i++){
-			ActualTaskNumbers[i] = i;
-		}
-
-		//parallel_qsort( ThisW, ThisNitem, NumTaskPerSortGroup, ThisTask, ActualTaskNumbers, SortedW, &SortedNitem, 0, Nitem);
-
-		if(ThisTask==0){
-			for(int i=0;i<Nitem;i++){
-                		Wweight[i] = SortedW[i].weight;
-                		Windex[i]  = SortedW[i].index;
-	        	}
-		}
-
-		free(SortedW);
-
-	}
-
-	my_barrier();
-        if(ThisTask==0) printf("before comm\n");
-	my_barrier();
-
-        MPI_Allreduce(MPI_IN_PLACE,Wweight,Nitem,MPI_DOUBLE,MPI_SUM,MPI_COMM_WORLD);
-        MPI_Allreduce(MPI_IN_PLACE,Windex, Nitem,MPI_INT,   MPI_SUM,MPI_COMM_WORLD);
-
-	my_barrier();
-        if(ThisTask==0) printf("before comm\n");
-        my_barrier();
-
-        for(int i=0;i<Nitem;i++){
-                W[i].weight = Wweight[i];
-                W[i].index  = Windex[i];
-        }
-
-        free(Wweight);
-        free(Windex);
-
-	my_barrier();
-	if(ThisTask==0) printf("stop\n");
-
-}
-#endif
-
-#ifdef PARALLEL_QSORT
-void initialize_sort_comm(void){
-
-        MPI_Group WORLD_GROUP, SORT_GROUP;
-        MPI_Comm_group(MPI_COMM_WORLD, &WORLD_GROUP);
-        int *myranks;
-
-	NumTaskPerSortGroup   = (int) MAXSORTTASK;
-        ThisSortGroup         = (int) floor(ThisTask/NumTaskPerSortGroup);
-	NumSortGroup	      = (int) floor(Ntask/NumTaskPerSortGroup)+1;
-        ThisTask_in_SortGroup = ThisTask%NumTaskPerSortGroup;
-	if(ThisSortGroup==NumSortGroup-1) NumTaskPerSortGroup -= (NumSortGroup*NumTaskPerSortGroup-Ntask);
-
-        myranks = calloc(NumTaskPerSortGroup, sizeof(int));
-
-        for(int i=0;i<NumTaskPerSortGroup;i++){
-                myranks[i] = ThisTask - ThisTask_in_SortGroup + i;
-        }
-        for(int i=0;i<NumSortGroup;i++){
-                if(i == ThisSortGroup){
-                        MPI_Group_incl(WORLD_GROUP, NumTaskPerSortGroup, myranks, &SORT_GROUP);
-                }
-        }
-
-        MPI_Comm_create(MPI_COMM_WORLD, SORT_GROUP, &MPI_COMM_SORT);
-        MPI_Group_free(&SORT_GROUP);
-        free(myranks);
-
-        MPI_Group_free(&WORLD_GROUP);
-
-}
-#endif
-
 
 #ifdef PARALLEL
 void initialize_node_comm(void){
@@ -468,6 +147,14 @@ void initialize_mpi_or_serial(void){
         printf("Please select EITHER parallel OR serial. Currently none selected.\n");
         exit(0);
 #endif
+#if defined(PRIM) && defined(PRIM_DIVIDE_CONQUER)
+        printf("Please select EITHER prim OR prim_divide_conquer. Currently both selected.\n");
+	exit(0);
+#endif
+#if !defined(PRIM) && !defined(PRIM_DIVIDE_CONQUER)
+	printf("Please select EITHER prim OR prim_divide_conquer. Currently none selected.\n");
+	exit(0);
+#endif
 
 // Init MPI if needed
 #ifdef PARALLEL
@@ -497,10 +184,6 @@ void initialize_mpi_or_serial(void){
 	ThisGbsGroup = 0;
 	ThisTask_in_GbsGroup = 0;
 	NumTaskPerGbsGroup   = 1;
-#endif
-
-#ifdef PARALLEL_QSORT
-	initialize_sort_comm();
 #endif
 
 }
@@ -539,7 +222,7 @@ int check_relative_proximity_ND_2( int v1, int v2, struct RegularizedRegion *R, 
                 return 0;
         } else if( diff == 0 ){
 		if( R->Vertex[v1].parent == R->Vertex[v2].parent ){
-			*d = 2;		
+			*d = 2;
 			sign[0] = -1;
 			sign[1] = +1;
 			path[0] = R->Vertex[v2].edgetoparent;
@@ -547,8 +230,7 @@ int check_relative_proximity_ND_2( int v1, int v2, struct RegularizedRegion *R, 
 			return 1;
 		}
 		return 0;
-	} 
-
+	}
 	return 0;
 }
 
@@ -652,15 +334,12 @@ void get_v1_v2( int N, int target, int *v1, int *v2){
 	int elements_on_this_row;
 
 	for(int row=0;row<N-1;row++){
-
 		if(row == 0){
 			elements_on_this_row = N-2-row;
 		} else {
 			elements_on_this_row = N-1-row;
 		}
-
 		final_element_on_row += elements_on_this_row;
-
 		if(target <= final_element_on_row){
 			*v1 = row;
 			int diff = final_element_on_row - target;
@@ -668,9 +347,7 @@ void get_v1_v2( int N, int target, int *v1, int *v2){
 			break;
 		}
 	}
-
 }
-
 
 int sign(double x){
 	if (x >= 0) return 1;
@@ -879,7 +556,7 @@ void octree( struct RegularizedRegion *R, struct OctreeNode *Node, int MaxLeafSi
 		for(int k=0;k<3;k++){
 			triplet[k] = sign( R->Pos[3*j+k]-Node->Center[k] );
 		}
-		int oct   = get_octant(triplet); 
+		int oct   = get_octant(triplet);
 
 		if(NpartOctant[oct]==0){
 			allocate_new_octree_node( Node, oct, label );
@@ -955,7 +632,7 @@ void spatialpartition( struct RegularizedRegion *R, int MaxLeafSize ){
 	for(int i=0;i<R->NumVertex;i++){
 		OctreeRootNode->ObjectList[i] = i;
 	}
-	
+
 	int label = 1;
 	octree( R, OctreeRootNode, MaxLeafSize, &label );
 }
@@ -1095,7 +772,7 @@ void SolveMetaMST( struct RegularizedRegion *R, int Nleafs, int *Npart, int **Pa
 
                         weights[CumNumEdge+counter] = r;
                         ind1s[CumNumEdge+counter] = ind1;
-                        ind2s[CumNumEdge+counter] = ind2;	
+                        ind2s[CumNumEdge+counter] = ind2;
                         counter++;
 
 #ifdef PARALLEL
@@ -1134,13 +811,12 @@ void SolveMetaMST( struct RegularizedRegion *R, int Nleafs, int *Npart, int **Pa
 	free(weights);
 	free(ind1s);
 	free(ind2s);
-	
 
 	istart = 0;
 	int istop = Nedge;
 #ifdef PARALLEL
 	int block     = (int) floor(Nedge/Ntask);
-	istart        = ThisTask*block; 
+	istart        = ThisTask*block;
 	istop     = (ThisTask+1)*block;
 	if(ThisTask==Ntask-1) istop = Nedge;
 #endif
@@ -1175,9 +851,7 @@ void SolveMetaMST( struct RegularizedRegion *R, int Nleafs, int *Npart, int **Pa
 
 			flag[elong] = 1;
 			W[elong].weight *= -1;
-
 		}
-
 	}
 
 
@@ -1189,9 +863,7 @@ void SolveMetaMST( struct RegularizedRegion *R, int Nleafs, int *Npart, int **Pa
 		if(flag[e1]==0) Noff++;
 	}
 
-
 	struct WeightIndex2 *Wfilter = calloc(Nedge-Noff,sizeof(struct WeightIndex2));
-
 
 	counter = 0;
 	for(int e1=0;e1<Nedge;e1++){
@@ -1205,14 +877,11 @@ void SolveMetaMST( struct RegularizedRegion *R, int Nleafs, int *Npart, int **Pa
 		}
         }
 
-
 	Nedge -= Noff;
 	free(W);
 	free(flag);
 
-
-
-qsort(Wfilter,Nedge,sizeof(struct WeightIndex2),cmp_weight_index2);
+	qsort(Wfilter,Nedge,sizeof(struct WeightIndex2),cmp_weight_index2);
 
 	InMst[0] = 1;
 
@@ -1227,8 +896,6 @@ qsort(Wfilter,Nedge,sizeof(struct WeightIndex2),cmp_weight_index2);
 #endif
 
         do {
-
-
 		struct WeightIndex wi;
 		wi.weight = 1e10;
                 wi.index  = -1;
@@ -1257,10 +924,6 @@ qsort(Wfilter,Nedge,sizeof(struct WeightIndex2),cmp_weight_index2);
 
         	remaining--;
         } while( remaining>0 );
-
-
-        //if(ThisTask==0) fflush(fout);
-        //if(ThisTask==0) fclose(fout);
 
 	free(Wfilter);
 	free(InMst);
@@ -1295,12 +958,7 @@ void SolveSubMST( struct RegularizedRegion *R, int Npart, int *Particles, int la
 		}
 	}
 
-	clock_t aika0 = clock();
-
 	qsort(W,Nedge,sizeof(struct WeightIndex2),cmp_weight_index2);
-	clock_t aika1 = clock();
-
-	loopt4 += (double) (aika1-aika0)/CLOCKS_PER_SEC;
 
 	InMst[0] = 1;
 
@@ -1328,9 +986,6 @@ void SolveSubMST( struct RegularizedRegion *R, int Npart, int *Particles, int la
 
 	remaining--;
         } while( remaining>0 );
-
-	//if(ThisTask==0) fflush(fout);
-	//if(ThisTask==0) fclose(fout);
 
         free(W);
         free(InMst);
@@ -1366,14 +1021,12 @@ void CombineAllMST( struct RegularizedRegion *R, int NumEdge ){
                         rmin = sqrt(r2);
                         next = i;
                 }
-
         }
 
 	int counter=0;
 	R->Vertex[next].inMST = 1;
 
         int istop = NumEdge;
-	double sumweight = 0;
 
 	do {
 
@@ -1391,8 +1044,6 @@ void CombineAllMST( struct RegularizedRegion *R, int NumEdge ){
 				}
 			}
 		}
-
-		sumweight += wi.weight;
 
 		int new = R->EdgeInMST[wi.index].vertex1;
 		int old = R->EdgeInMST[wi.index].vertex2;
@@ -1423,7 +1074,6 @@ void DivideAndConquerPrim( struct RegularizedRegion *R ){
 	my_barrier();
 	clock_t t0 = clock();
 
-
         for(int i=0;i<R->NumVertex;i++){
                 R->Vertex[i].id = i;
                 R->Vertex[i].degree = 0;
@@ -1446,13 +1096,11 @@ void DivideAndConquerPrim( struct RegularizedRegion *R ){
 	clock_t t11 = clock();
         tprim1 += (double) (t11-t10)/CLOCKS_PER_SEC;
 
-
 	clock_t t20 = clock();
 	Nleafs = 0;
 	list_octree_level(OctreeRootNode, LeafSizes, LeafParticles, &Nleafs );
 	clock_t t21 = clock();
         tprim2 += (double) (t21-t20)/CLOCKS_PER_SEC;
-
 
 	clock_t t30 = clock();
 	int NumEdge = 0;
@@ -1462,12 +1110,10 @@ void DivideAndConquerPrim( struct RegularizedRegion *R ){
 	clock_t t31 = clock();
         tprim3 += (double) (t31-t30)/CLOCKS_PER_SEC;
 
-
 	clock_t t40 = clock();
 	SolveMetaMST(R, Nleafs, LeafSizes, LeafParticles, &NumEdge );
 	clock_t t41 = clock();
         tprim4 += (double) (t41-t40)/CLOCKS_PER_SEC;
-
 
 	clock_t t50 = clock();
 	CombineAllMST( R, NumEdge );
@@ -1487,9 +1133,9 @@ void DivideAndConquerPrim( struct RegularizedRegion *R ){
 }
 
 
-int EdgeSearchForPrimSlow( struct RegularizedRegion *R, int NumLocalEdges, double *w ){
+int EdgeSearchForPrimSlow( struct RegularizedRegion *R, int NumLocalEdges ){
 
-		clock_t mikkolatime = clock();
+		clock_t edgesearch_time0 = clock();
 		struct WeightIndex wi;
 
                 wi.weight = 1e10;
@@ -1502,19 +1148,16 @@ int EdgeSearchForPrimSlow( struct RegularizedRegion *R, int NumLocalEdges, doubl
                         }
                 }
 
+                clock_t edgesearch_time1 = clock();
+                tprim3 += (double) (edgesearch_time1-edgesearch_time0)/CLOCKS_PER_SEC;
 
-                clock_t sverretime = clock();
-                tprim3 += (double) (sverretime-mikkolatime)/CLOCKS_PER_SEC;
-
-                mikkolatime = clock();
+                edgesearch_time0 = clock();
 #ifdef PARALLEL
                 MPI_Allreduce( MPI_IN_PLACE, &wi, 1, MPI_DOUBLE_INT, MPI_MINLOC, MPI_COMM_WORLD );
 #endif
 
-		*w = wi.weight;
-
-                sverretime = clock();
-                tprim4 += (double) (sverretime-mikkolatime)/CLOCKS_PER_SEC;
+                edgesearch_time0 = clock();
+                tprim4 += (double) (edgesearch_time1-edgesearch_time0)/CLOCKS_PER_SEC;
 
 		return wi.index;
 
@@ -1629,15 +1272,10 @@ void PrimMST(struct RegularizedRegion *R){
 
         R->Vertex[last].inMST = 1;
 
-	double sumweight = 0;
-
 	c=0;
 	do {
 
-		double myw;
-		int NextEdge = EdgeSearchForPrimSlow( R, NumLocalEdges, &myw );
-
-		sumweight += myw;
+		int NextEdge = EdgeSearchForPrimSlow( R, NumLocalEdges );
 
 		int v1=-1,v2=-1;
 		get_v1_v2( R->NumVertex, NextEdge, &v1,&v2 );
@@ -1712,10 +1350,8 @@ void compute_U(struct RegularizedRegion *R){
 		for(int j=i+1;j<R->NumVertex;j++){
 #endif
 			double mj = R->Mass[j];
-                	int    Lj = R->Vertex[j].level;
-
+	               	int    Lj = R->Vertex[j].level;
 			double r2=0;
-
 			int proximity = 0;
 
                         if( fabs(Li-Lj) < Nd ){
@@ -1773,18 +1409,6 @@ void compute_U(struct RegularizedRegion *R){
 	clock_t thistime1 = clock();
         time_force += (double) (thistime1-thistime0)/CLOCKS_PER_SEC;
 
-}
-
-double estimate_timestep( struct RegularizedRegion *R ){
-
-	double min_dt = DBL_MAX;
-	for(int j=0;j<R->NumVertex;j++){
-		double dt = sqrt( R->State[j]/R->MSTedgeAcc[j] );
-		if( dt < min_dt  ){
-			min_dt = dt;
-		}
-	}
-	return min_dt;
 }
 
 void compute_U_and_Newtonian_Acc(struct RegularizedRegion *R){
@@ -1968,7 +1592,7 @@ void into_Cartesian_from_MST(struct RegularizedRegion *R){
 	free(CoV);
 
 	clock_t timing1 = clock();
-        time_coord1 += (double) (timing1-timing0)/CLOCKS_PER_SEC;
+        time_coord += (double) (timing1-timing0)/CLOCKS_PER_SEC;
 }
 
 void into_CoM_frame(struct RegularizedRegion *R){
@@ -1999,7 +1623,7 @@ void into_CoM_frame(struct RegularizedRegion *R){
 	}
 
 	clock_t timing1 = clock();
-        time_coord2 += (double) (timing1-timing0)/CLOCKS_PER_SEC;
+        time_coord += (double) (timing1-timing0)/CLOCKS_PER_SEC;
 }
 
 void compute_T(struct RegularizedRegion *R){
@@ -2066,7 +1690,7 @@ void update_pos(struct RegularizedRegion *R){
 	free(CoM);
 
 	clock_t timing1 = clock();
-	time_coord3 += (double) (timing1-timing0)/CLOCKS_PER_SEC;
+	time_coord += (double) (timing1-timing0)/CLOCKS_PER_SEC;
 }
 
 void update_vel(struct RegularizedRegion *R, double *Vel, enum velocity_type propagated_velocity){
@@ -2124,7 +1748,7 @@ if( propagated_velocity == PHYSICAL ){
 	free(CoV);
 
 	clock_t timing1 = clock();
-	time_coord4 += (double) (timing1-timing0)/CLOCKS_PER_SEC;
+	time_coord += (double) (timing1-timing0)/CLOCKS_PER_SEC;
 
 }
 
@@ -2554,7 +2178,7 @@ clock_t aika0= clock(),aika1;
 			int old_epoch = epoch;
 			epoch = (int) floor( time/percent );
 			if( epoch != old_epoch ){
-#ifdef OLDPRIM
+#ifdef PRIM
 				PrimMST(&R[0]);
 #else
 				DivideAndConquerPrim( &R[0] );
@@ -2618,11 +2242,6 @@ void allocate_armst_structs( struct RegularizedRegion **R, int NumberOfSystems, 
         for(int i=0;i<KMAX;i++){
                 gbsS[i] = calloc(KMAX,sizeof(double));
         }
-	int Nbuf = 5;
-        fastindex  = calloc(Nbuf*Ntask,sizeof(int));
-        fastv1     = calloc(Nbuf*Ntask,sizeof(int));
-        fastv2     = calloc(Nbuf*Ntask,sizeof(int));
-        fastweight = calloc(Nbuf*Ntask,sizeof(double));
 
 	int korder = 8;
 	int NumDynVariables = MaxDynamicalVariables;
@@ -2677,6 +2296,7 @@ void read_ic_from_file( struct RegularizedRegion *R, char *INPUTFILE ){
         }
 		my_barrier();
         }
+	my_barrier();
 }
 
 // The test main function
@@ -2689,33 +2309,25 @@ int main(int argc, char *argv[]){
         GBSTOL    = atof(argv[3]);
         MAXPART   = atoi(argv[2]);
 
-	Niter = 0;
-	Nredo = 0;
-	MyC = 0;
-	realtime = 0;
-	fictitioustime=0;
 	failed_steps = 0;
 	ok_steps = 0;
 	time_force = 0;
 	time_comm  = 0;
-	sum_order = 0;
+
 	time_mst = 0;
 	time_gbs = 0;
 	time_gbscomm = 0;
-	time_edge = 0;
-	time_coord1 = 0;
-	time_coord2 = 0;
-	time_coord3 = 0;
-	time_coord4 = 0;
-	tprim1=0,tprim2=0,tprim3=0,tprim4=0,tprim5=0,tprim6=0,tprim7=0;
-	primfail=0,primsucc=0;
-	loopt1=0,loopt2=0,loopt3=0,loopt4=0;
+	time_coord = 0;
+	tprim1=0,tprim2=0,tprim3=0,tprim4=0,tprim5=0;
 
 	my_barrier();
 
 	/////////////////////////////////////////
+
 	struct RegularizedRegion *R;
+
         int NumberOfSystems = 1;
+
         int MaxNumPart = MAXPART;
 
 	allerrors = calloc(6*(MaxNumPart-1)*2,sizeof(double));
@@ -2723,7 +2335,7 @@ int main(int argc, char *argv[]){
 
 	read_ic_from_file( &R[0], argv[1] );
 
-	my_barrier();
+
 
 	double IntegrationTime = 1e-5;
 
@@ -2733,21 +2345,17 @@ int main(int argc, char *argv[]){
 
 	wtime0 = clock();
 
-#ifdef OLDPRIM
+#ifdef PRIM
 	PrimMST(&R[0]);
 #else
 	DivideAndConquerPrim( &R[0] );
 #endif
 
-	compute_total_energy( &R[0] );
-
 	run_integrator(R,IntegrationTime,1);
 
-	compute_total_energy( &R[0] );
-
 	wtime1 = clock();
+
 	double elapsed = (double) (wtime1-wtime0)/CLOCKS_PER_SEC;
-	double time_coord = time_coord1 +time_coord2+time_coord3+time_coord4;
 
 	if(ThisTask==0){
 		printf("%d %d %d %.10e %.10e %.10e %.10e %.10e %.10e %.10e\n",Ntask,MAXPART,ok_steps+failed_steps,time_force-time_comm,time_comm,elapsed,time_mst,time_gbs,time_gbscomm,time_coord);
@@ -2761,15 +2369,14 @@ int main(int argc, char *argv[]){
 		printf("coord  :   %lf\n",100*(time_coord)/elapsed);
 
 		printf("\n--- prim ---\n");
-#ifdef OLDPRIM
+#ifdef PRIM
 		printf("%lf %lf %lf %lf %lf\n",100*tprim1/elapsed,100*tprim2/elapsed,100*(tprim3)/elapsed,100*tprim4/elapsed,100*tprim5/elapsed);
 #else
 		printf("octree           %lf\n",100*tprim1/elapsed);
 		printf("octree particles %lf\n",100*tprim2/elapsed);
 		printf("sub-msts         %lf\n",100*tprim3/elapsed);
-		printf("meta-mst         %lf ---> %lf and %lf\n",100*tprim4/elapsed, 100*tprim6/elapsed, 100*tprim7/elapsed);
+		printf("meta-mst         %lf\n",100*tprim4/elapsed);
 		printf("combine msts     %lf\n",100*tprim5/elapsed);
-		printf("meta loops: %lf %lf %lf %lf\n", loopt1,loopt2,loopt3,loopt4);
 #endif
 		fflush(stdout);
 #endif
