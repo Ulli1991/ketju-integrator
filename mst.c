@@ -28,10 +28,8 @@ double *yscal;
 double *maxerror;
 double **error,**result;
 
-
 double **gbsS;
 double *allerrors;
-double total_memory;
 
 int MAXPART;
 double ttlratio[8];
@@ -59,7 +57,6 @@ int primsucc;
 double sum_order;
 
 double tprim1,tprim2,tprim3,tprim4,tprim5,tprim6,tprim7;
-double text1,text2,text3;
 
 double time_edge;
 double time_coord1;
@@ -147,12 +144,6 @@ int cmp_int( const void* a, const void* b){
      if ( int_a == int_b ) return 0;
      else if ( int_a < int_b ) return -1;
      else return 1;
-}
-
-int cmp_double( const void* a_in, const void* b_in){
-     double a = * ( (double*) a_in );
-     double b = * ( (double*) b_in );
-
 }
 
 #ifdef PARALLEL_QSORT
@@ -299,7 +290,7 @@ if(Nrecv>0)                 MPI_Recv(&Lo[Nlo], Nrecv, MPI_DOUBLE_INT, from, 0, M
 			for(int i=0;i<NumSortTask/2;i++){
 				NextActualTaskNumbers[i] = ActualTaskNumbers[i];
 			}
-        	}	
+        	}
 
 	}
 
@@ -340,7 +331,7 @@ void run_parallel_qsort( struct WeightIndex *W, int Nitem){
 	if( ThisSortGroup == 0 ){
 
 		int SortedNitem = 0;
-        	
+
 		struct WeightIndex *ThisW    = calloc(Nitem,sizeof(struct WeightIndex));		
 		struct WeightIndex *SortedW  = calloc(Nitem,sizeof(struct WeightIndex));
 
@@ -578,7 +569,7 @@ int check_relative_proximity( int v1, int v2, const int Nd, struct RegularizedRe
 		}
 
 		int halfNd = (int) floor(0.5*Nd);
-	        int *pathend = calloc(Nd,sizeof(int));	total_memory += Nd*sizeof(int);
+	        int *pathend = calloc(Nd,sizeof(int));
 
 		for(int i=0;i<halfNd;i++){
 			sign[i] = +1;
@@ -599,7 +590,7 @@ int check_relative_proximity( int v1, int v2, const int Nd, struct RegularizedRe
 			}
 		}
 
-		free(pathend);		total_memory -= Nd*sizeof(int);
+		free(pathend);
 
 	} else {
 		*d = abs(R->Vertex[v1].level - R->Vertex[v2].level);
@@ -1005,13 +996,14 @@ void SolveMetaMST( struct RegularizedRegion *R, int Nleafs, int *Npart, int **Pa
 	struct WeightIndex2 *W       = calloc(Nedge,sizeof(struct WeightIndex2));
         int *InMst = calloc(Nleafs,sizeof(int));
 
-	int ThisBlock,CumNumEdge=0,istart=0,jstart;
+	int CumNumEdge=0,istart=0;
 #ifdef PARALLEL
+	int ThisBlock, jstart;
         loop_scheduling_N2(Nleafs,Ntask,&istart,&jstart,&ThisBlock,&CumNumEdge,ThisTask);
 #endif
 
 	struct OctreeNode *Node_i, *Node_j;
-        int counter = 0, ind1, ind2, loop=1;
+        int counter = 0, ind1=-1, ind2=-1;
 
 	int    *ind1s   = calloc(Nedge,sizeof(int));
 	int    *ind2s   = calloc(Nedge,sizeof(int));
@@ -1037,12 +1029,11 @@ void SolveMetaMST( struct RegularizedRegion *R, int Nleafs, int *Npart, int **Pa
 			for(int k=0;k<3;k++){
 				double ds = Node_i->Center[k]-Node_j->Center[k];
 				r2 = ds*ds;
-			}        
+			}
 			double NodeSeparation = sqrt(r2);
 			double NodeSize       = 1.01*sqrt(2)*(Node_i->HalfSize+Node_j->HalfSize);  // with safety buffer
 
 			if( NodeSeparation <= NodeSize ){
-
 
 	                	double MinWeight = 1e10;
                         	for(int q=0;q<Npart[i];q++){
@@ -1093,8 +1084,6 @@ void SolveMetaMST( struct RegularizedRegion *R, int Nleafs, int *Npart, int **Pa
                                                 ind2 = i2;
                                         }
                                 }
-
-
 			}
 
 			r2 = 0;
@@ -1187,13 +1176,6 @@ void SolveMetaMST( struct RegularizedRegion *R, int Nleafs, int *Npart, int **Pa
 			flag[elong] = 1;
 			W[elong].weight *= -1;
 
-			//int v3 = W[e2].index1;
-                	//int v4 = W[e2].index2;
-			//int v5 = W[e3].index1;
-                        //int v6 = W[e3].index2;
-
-			//if(ThisTask==0) printf("(%d,%d)  (%d,%d)  (%d,%d)\n",v1,v2,v3,v4,v5,v6);
-
 		}
 
 	}
@@ -1232,15 +1214,9 @@ void SolveMetaMST( struct RegularizedRegion *R, int Nleafs, int *Npart, int **Pa
 
 qsort(Wfilter,Nedge,sizeof(struct WeightIndex2),cmp_weight_index2);
 
-InMst[0] = 1;
+	InMst[0] = 1;
 
         int remaining = Nleafs-1;
-
-        //FILE *fout;
-        //char filename[100];
-        //sprintf(filename,"output_mst/meta_mst.txt");
-        //if(ThisTask==0) fout = fopen(filename,"w");
-
 	istart = 0;
 	istop = Nedge;
 #ifdef PARALLEL
@@ -1294,10 +1270,9 @@ InMst[0] = 1;
 void SolveSubMST( struct RegularizedRegion *R, int Npart, int *Particles, int label, int *NumEdge ){
 
 	if(Npart==1) return;
-	//if(ThisTask==0) printf("---> SOLVE SUBMST: %d particles\n", Npart);
 
 	int Nedge  = Npart*(Npart-1)/2;
-	struct WeightIndex2 *W = calloc(Nedge,sizeof(struct WeightIndex2)); 
+	struct WeightIndex2 *W = calloc(Nedge,sizeof(struct WeightIndex2));
 	int *InMst = calloc(Npart,sizeof(int));
 
 	int counter = 0;
@@ -1331,11 +1306,6 @@ void SolveSubMST( struct RegularizedRegion *R, int Npart, int *Particles, int la
 
 	int remaining = Npart-1;
 
-	//FILE *fout;
-	//char filename[100];
-	//sprintf(filename,"output_mst/mst_%04d.txt",label);
-	//if(ThisTask==0) fout = fopen(filename,"w");
-
 	do {
 
 	for(int i=0;i<Nedge;i++){
@@ -1352,8 +1322,6 @@ void SolveSubMST( struct RegularizedRegion *R, int Npart, int *Particles, int la
 	                R->EdgeInMST[*NumEdge].vertex2 = W[i].id2;
 			R->EdgeInMST[*NumEdge].weight  = W[i].weight;
 			(*NumEdge)++;
-
-			//if(ThisTask==0) fprintf(fout, "%.20lf %.20lf %.20lf %.20lf %d %d\n", R->Pos[3*W[i].id1+0], R->Pos[3*W[i].id1+1], R->Pos[3*W[i].id2+0], R->Pos[3*W[i].id2+1], h1, h2);
 			break;
 		}
 	}
@@ -1386,7 +1354,7 @@ void SwapEdge( struct RegularizedRegion *R, int i, int j ){
 
 void CombineAllMST( struct RegularizedRegion *R, int NumEdge ){
 
-	int next;
+	int next=-1;
 	double rmin=DBL_MAX;
 	for(int i=0;i<R->NumVertex;i++){
 		double r2=0;
@@ -1404,15 +1372,7 @@ void CombineAllMST( struct RegularizedRegion *R, int NumEdge ){
 	int counter=0;
 	R->Vertex[next].inMST = 1;
 
-        int istart = 0;
         int istop = NumEdge;
-#ifdef PARALLELBUG
-        int block = (int) floor(NumEdge/Ntask);
-        istart = ThisTask*block;
-        istop  = (ThisTask+1)*block;
-        if(ThisTask==Ntask-1) istop = NumEdge;
-#endif
-
 	double sumweight = 0;
 
 	do {
@@ -1431,10 +1391,6 @@ void CombineAllMST( struct RegularizedRegion *R, int NumEdge ){
 				}
 			}
 		}
-
-#ifdef PARALLELBUG
-                MPI_Allreduce( MPI_IN_PLACE, &wi, 1, MPI_DOUBLE_INT, MPI_MINLOC, MPI_COMM_WORLD );
-#endif
 
 		sumweight += wi.weight;
 
@@ -1459,25 +1415,6 @@ void CombineAllMST( struct RegularizedRegion *R, int NumEdge ){
 		counter++;
 
 	} while(counter<NumEdge);
-
-
-	if(ThisTask==0){
-		printf("%.10e\n",sumweight);
-		fflush(stdout);
-	}
-
-
-
-#if 0
-	for(int i=0;i<NumEdge;i++){
-		int v1 = R->EdgeInMST[i].vertex1;
-		int v2 = R->EdgeInMST[i].vertex2;
-		if(ThisTask==0){
-			printf("%.20lf %.20lf %.20lf %.20lf\n", R->Pos[3*v1+0], R->Pos[3*v1+1], R->Pos[3*v2+0], R->Pos[3*v2+1]);
-		}
-	}
-#endif
-
 }
 
 
@@ -1613,15 +1550,15 @@ int get_heaviest( double a[3], int b1,int b2,int b3 ){
 void PrimMST(struct RegularizedRegion *R){
 
 	msttime0 = clock();
-	clock_t mytime0  = clock();
 
-	int ThisBlock,CumNumEdge=0,istart=0,jstart;
+	int CumNumEdge=0,istart=0;
 #ifdef PARALLEL
+	int loop=1, ThisBlock, jstart;
 	loop_scheduling_N2(R->NumVertex,Ntask,&istart,&jstart,&ThisBlock,&CumNumEdge,ThisTask);
 #endif
-	int NumLocalEdges=0; int loop=1; int c=0,counter=0;
+	int NumLocalEdges=0; int c=0,counter=0;
 
-	double rmin=1e10,r2,rmax=0;
+	double rmin=1e10,r2;
 	int last = -1;
 
 	        for(int i=0;i<R->NumVertex;i++){
@@ -1661,7 +1598,7 @@ void PrimMST(struct RegularizedRegion *R){
 
 			NumLocalEdges++;
 			c++;
-			
+
 #ifdef PARALLEL
 			if(counter == ThisBlock ){
 				loop=0;
@@ -1680,8 +1617,6 @@ void PrimMST(struct RegularizedRegion *R){
 	qsort(R->LocalEdge,NumLocalEdges,sizeof(struct GraphEdge),cmp);
 
 	int remaining = 0;
-
-	struct WeightIndex wi;
 
 	for(int i=0;i<R->NumVertex;i++){
 		R->Vertex[i].id = i;
@@ -1704,7 +1639,7 @@ void PrimMST(struct RegularizedRegion *R){
 
 		sumweight += myw;
 
-		int v1,v2;	
+		int v1=-1,v2=-1;
 		get_v1_v2( R->NumVertex, NextEdge, &v1,&v2 );
 
 		R->EdgeInMST[c].vertex1 = v1;
@@ -1738,8 +1673,6 @@ void PrimMST(struct RegularizedRegion *R){
 		remaining++;
 	} while( remaining<R->NumVertex-1 );
 
-	if(ThisTask==0) printf("%.10e\n",sumweight);
-
 	msttime1 = clock();
         time_mst += (double) (msttime1-msttime0)/CLOCKS_PER_SEC;
 
@@ -1750,14 +1683,12 @@ void PrimMST(struct RegularizedRegion *R){
 
 void compute_U(struct RegularizedRegion *R){
 
-
-	measure_cpu_time( CPU_TIME_MISC );
-
 	clock_t thistime0 = clock();
 
 	R->U    = 0;
-	int ThisBlock,CumNumEdge,istart=0,jstart;
+	int istart=0;
 #ifdef PARALLEL
+	int CumNumEdge, ThisBlock, jstart;
         loop_scheduling_N2(R->NumVertex,NumTaskPerGbsGroup,&istart,&jstart,&ThisBlock,&CumNumEdge,ThisTask_in_GbsGroup);
         int loop=1;
 	int c=0;
@@ -1829,7 +1760,7 @@ void compute_U(struct RegularizedRegion *R){
 		MPI_Allreduce(MPI_IN_PLACE,&R->U,   1,MPI_DOUBLE,MPI_SUM,MPI_COMM_GBS_GROUP);
 	}
 #endif
-	clock_t ctime1 = clock();	
+	clock_t ctime1 = clock();
 	time_comm += (double) (ctime1-ctime0)/CLOCKS_PER_SEC;
 
 	if(!isfinite(R->U)){
@@ -1841,8 +1772,6 @@ void compute_U(struct RegularizedRegion *R){
 
 	clock_t thistime1 = clock();
         time_force += (double) (thistime1-thistime0)/CLOCKS_PER_SEC;
-
-	measure_cpu_time( CPU_TIME_POTENTIALENERGY );
 
 }
 
@@ -1862,18 +1791,14 @@ void compute_U_and_Newtonian_Acc(struct RegularizedRegion *R){
 
 	clock_t thistime0 = clock();
 
-	measure_cpu_time( CPU_TIME_MISC );
-
-	int ThisBlock,CumNumEdge,istart,jstart;
-	int istop = R->NumVertex, jstop = R->NumVertex;
-
+	int istart, istop = R->NumVertex, jstop = R->NumVertex;
 #ifdef PARALLEL
+	int ThisBlock,CumNumEdge,jstart;
         loop_scheduling_N2(R->NumVertex,NumTaskPerGbsGroup,&istart,&jstart,&ThisBlock,&CumNumEdge,ThisTask_in_GbsGroup);
         int loop=1;
         int c=0;
 #else
 	istart = 0;
-	jstart = 0;
 #endif
 	const int Nd = GLOBAL_ND;
         int d;
@@ -1887,7 +1812,7 @@ void compute_U_and_Newtonian_Acc(struct RegularizedRegion *R){
         R->U    = 0;
 	mydouble dr[3], r2;
 
-	double *Pos = R->Pos;	
+	double *Pos = R->Pos;
 	double *Mass = R->Mass;
 	struct GraphVertex *Vertex = R->Vertex;
 
@@ -1901,7 +1826,7 @@ void compute_U_and_Newtonian_Acc(struct RegularizedRegion *R){
 		for(int j=i+1;j<jstop;j++){
 #endif
 			r2 = 0;
-			const double mj = Mass[j];		
+			const double mj = Mass[j];
 			const int    Lj = Vertex[j].level;
 
 			int proximity = 0;
@@ -1920,7 +1845,7 @@ void compute_U_and_Newtonian_Acc(struct RegularizedRegion *R){
                         } else {
 				for(int k=0;k<3;k++){
 					dr[k] = Pos[3*j+k] - Pos[3*i+k];
-					r2 += dr[k]*dr[k];					
+					r2 += dr[k]*dr[k];
 				}
 			}
 
@@ -1980,8 +1905,6 @@ void compute_U_and_Newtonian_Acc(struct RegularizedRegion *R){
 
 	clock_t thistime1 = clock();
 	time_force += (double) (thistime1-thistime0)/CLOCKS_PER_SEC;
-
-	measure_cpu_time( CPU_TIME_ACC );
 }
 
 
@@ -2006,7 +1929,7 @@ void into_Cartesian_from_MST(struct RegularizedRegion *R){
 
 		get_v1_v2_fast( R, i, &v1,&v2 );
 
-		int sign,lo,hi;
+		int lo,hi;
 		if( R->Vertex[v1].level > R->Vertex[v2].level ){
 			lo   = v2;
 			hi   = v1;
@@ -2020,7 +1943,7 @@ void into_Cartesian_from_MST(struct RegularizedRegion *R){
         	}
 	}
 
-	double M=0,*CoM = calloc(3,sizeof(double)), *CoV = calloc(3,sizeof(double));	total_memory += 6*sizeof(double);
+	double M=0,*CoM = calloc(3,sizeof(double)), *CoV = calloc(3,sizeof(double));
 
         for(int i=0;i<R->NumVertex;i++){
                 M += R->Mass[i];
@@ -2042,7 +1965,7 @@ void into_Cartesian_from_MST(struct RegularizedRegion *R){
         }
 
 	free(CoM);
-	free(CoV);		total_memory -= 6*sizeof(double);
+	free(CoV);
 
 	clock_t timing1 = clock();
         time_coord1 += (double) (timing1-timing0)/CLOCKS_PER_SEC;
@@ -2112,7 +2035,7 @@ void update_pos(struct RegularizedRegion *R){
 
 		get_v1_v2_fast( R, i, &v1,&v2 );
 
-                int sign,lo,hi;
+                int lo,hi;
                 if( R->Vertex[v1].level > R->Vertex[v2].level ){
                         lo   = v2;
                         hi   = v1;
@@ -2125,7 +2048,7 @@ void update_pos(struct RegularizedRegion *R){
                 }
         }
 
-	double M=0,*CoM = calloc(3,sizeof(double));	total_memory += 3*sizeof(double);
+	double M=0,*CoM = calloc(3,sizeof(double));
         for(int i=0;i<R->NumVertex;i++){
                 M += R->Mass[i];
                 for(int k=0;k<3;k++){
@@ -2140,7 +2063,7 @@ void update_pos(struct RegularizedRegion *R){
                         R->Pos[3*i+k] -= CoM[k];
                 }
         }
-	free(CoM);		total_memory -= 3*sizeof(double);
+	free(CoM);
 
 	clock_t timing1 = clock();
 	time_coord3 += (double) (timing1-timing0)/CLOCKS_PER_SEC;
@@ -2166,7 +2089,7 @@ void update_vel(struct RegularizedRegion *R, double *Vel, enum velocity_type pro
 
 		get_v1_v2_fast( R, i, &v1,&v2 );
 
-                int sign,lo,hi;
+                int lo,hi;
                 if( R->Vertex[v1].level > R->Vertex[v2].level ){
                         lo   = v2;
                         hi   = v1;
@@ -2183,7 +2106,7 @@ if( propagated_velocity == PHYSICAL ){
                 }
         }
 
-        double M=0,*CoV = calloc(3,sizeof(double));		total_memory += 3*sizeof(double);
+        double M=0,*CoV = calloc(3,sizeof(double));
         for(int i=0;i<R->NumVertex;i++){
                 M += R->Mass[i];
                 for(int k=0;k<3;k++){
@@ -2198,7 +2121,7 @@ if( propagated_velocity == PHYSICAL ){
                         Vel[3*i+k] -= CoV[k];
                 }
         }
-	free(CoV);		total_memory -= 3*sizeof(double);
+	free(CoV);
 
 	clock_t timing1 = clock();
 	time_coord4 += (double) (timing1-timing0)/CLOCKS_PER_SEC;
@@ -2219,6 +2142,8 @@ void drift( double ds, struct RegularizedRegion *R ){
 	update_pos(R);
 
 }
+
+#ifdef USE_PN
 
 void set_auxiliary_variables( struct RegularizedRegion *R ){
 
@@ -2264,14 +2189,14 @@ void auxiliary_kick( double dt, struct RegularizedRegion *R ){
                 }
         }
 }
-
+#endif
 
 void kick( double ds, struct RegularizedRegion *R ){
 
 	compute_U_and_Newtonian_Acc(R);
 	double dt = ds/R->U;
 
-#if 1
+#ifndef USE_PN
 	for(int i=0;i<R->NumVertex-1;i++){
                 for(int k=0;k<3;k++){
                         R->State[3*(R->NumVertex-1)+3*i+k] += dt * R->MSTedgeAcc[3*i+k];
@@ -2311,13 +2236,11 @@ int gbs_group_with_min_workload( int *GbsGroupWorkLoad ){
 
 void divide_computational_load( struct RegularizedRegion *R, int NumberOfSystems ){
 
-	int *GbsGroupWorkLoad = calloc(NumGbsGroup,sizeof(int));	total_memory += NumGbsGroup*sizeof(int);
-
+	int *GbsGroupWorkLoad = calloc(NumGbsGroup,sizeof(int));
 	int counter = 0;
 	for(int region=0;region<NumberOfSystems;region++){
-		int N = R[region].NumVertex;
 		for(int i=KMAX-1;i>=0;i--){
-			int ThisSubdivisionCost 				    = get_n_int(i);	// *N*(N-1)/2;
+			int ThisSubdivisionCost 				    = get_n_int(i);
 			int GroupIndex 						    = gbs_group_with_min_workload(GbsGroupWorkLoad);
 			GbsGroupWorkLoad[GroupIndex] 				   += ThisSubdivisionCost;
 			ComputationToDoList.ComputationalTask[i].WhichRegion 	    = region;
@@ -2329,18 +2252,7 @@ void divide_computational_load( struct RegularizedRegion *R, int NumberOfSystems
 	}
 	ComputationToDoList.NumberOfComputationalTasks = counter;
 
-	free(GbsGroupWorkLoad);		total_memory -= NumGbsGroup*sizeof(int);
-
-#if 0
-	for(int i=0;i<NumberOfSystems*KMAX;i++){
-		if(ThisTask==0){
-			printf("system %d responsible group %d substeps %d\n",ComputationToDoList.ComputationalTask[i].WhichRegion,ComputationToDoList.ComputationalTask[i].GroupToPerformTask, ComputationToDoList.ComputationalTask[i].NumberOfSubsteps );
-			fflush(stdout);
-		}
-	}
-	exit(0);
-#endif
-
+	free(GbsGroupWorkLoad);
 }
 
 
@@ -2354,10 +2266,13 @@ void compute_total_energy( struct RegularizedRegion *R ){
 }
 
 
-void mst_leapfrog( struct RegularizedRegion *R, double Hstep, int NumberOfSubsteps, int *flag ){
+void mst_leapfrog( struct RegularizedRegion *R, double Hstep, int NumberOfSubsteps ){
+
+#ifdef USE_PN
+	set_auxiliary_variables(R);
+#endif
 
 	double h = Hstep/NumberOfSubsteps;
-	set_auxiliary_variables(R);
 
         drift(h/2,R);
         for(int step=0;step<NumberOfSubsteps-1;step++){
@@ -2366,27 +2281,6 @@ void mst_leapfrog( struct RegularizedRegion *R, double Hstep, int NumberOfSubste
         }
         kick(h,R);
         drift(h/2,R);
-
-#if 0
-
-	if(NumberOfSubsteps>2) return;
-
-	*flag = 0;
-
-	compute_U( R );
-	double U = R->U;
-	double T = R->T;
-	double B = R->State[ R->BIndex ];
-
-	int index = (NumberOfSubsteps/2)-1;
-	ttlratio[index] = fabs( U/(T+B) - 1.0 );
-
-	if( ttlratio[index] > 1e-3 ){
-		*flag = 1;
-	}
-
-#endif
-
 }
 
 void copy_regularized_region( struct RegularizedRegion *Orig, struct RegularizedRegion *Copy ){
@@ -2452,36 +2346,16 @@ void extrapolate_single_variable( double *y, const int N, double *result, double
 
 }
 
-void get_scaling( int N, double *Mass, double *R, double *V, double T, double U ){
-
-	double M = 0;
-
-	for(int i=0;i<N;i++){
-		M += Mass[i];
-	}
-	*V = sqrt(2*T/M);
-	*R = fabs(GCONST*M*M/(2*U));
-
-
-	if(ThisTask==0) printf("%e %e crossing time %.10e --- %e %e\n", 2*(*R)/(*V), *V, *R, T, U);
-
-}
-
 int extrapolate_all_variables( int NumberOfSystems, int korder ){
 
-	clock_t aika0 = clock();
-
-	int status;
-	measure_cpu_time( CPU_TIME_MISC );
-
+	int status=-1;
 	for(int region=0;region<NumberOfSystems;region++){
 
-		struct RegularizedRegion *ThisR;
-
-		int *SubStepDivision = calloc(korder,sizeof(int));	total_memory += korder*sizeof(int);
+		struct RegularizedRegion *ThisR = NULL;
+		int *SubStepDivision = calloc(korder,sizeof(int));
 
 		int counter = 0;
-		int NumDynVariables;
+		int NumDynVariables=0;
 		for(int i=0;i<NumberOfSystems*korder;i++){
 			if( region == ComputationToDoList.ComputationalTask[i].WhichRegion ){
 				ThisR = ComputationToDoList.ComputationalTask[i].ThisR;
@@ -2490,37 +2364,13 @@ int extrapolate_all_variables( int NumberOfSystems, int korder ){
 				counter++;
 			}
 		}
-#if 0
-                double *errorbuf  = calloc(NumDynVariables,sizeof(double));
-                double *resultbuf = calloc(NumDynVariables,sizeof(double));
 
-		double *y = calloc(korder,sizeof(double));		total_memory += korder*sizeof(double);
-		double *yscal = calloc(korder,sizeof(double));		total_memory += korder*sizeof(double);
-		double *maxerror = calloc(korder-1,sizeof(double));	total_memory += (korder-1)*sizeof(double);
-
-		double **error,**result;
-		error = calloc(NumDynVariables,sizeof(double *));	total_memory += NumDynVariables*sizeof(double *);
-		result = calloc(NumDynVariables,sizeof(double *));	total_memory += NumDynVariables*sizeof(double *);
-		for(int i=0;i<NumDynVariables;i++){
-			error[i] = calloc(korder-1,sizeof(double));	total_memory += (korder-1)*sizeof(double);
-			result[i] = calloc(korder-1,sizeof(double));	total_memory += (korder-1)*sizeof(double);
-		}
-#endif
-
-		int block      = (int) floor(NumDynVariables/Ntask); 
+		int block      = (int) floor(NumDynVariables/Ntask);
 		int loop_start = block*ThisTask;
 		int loop_end   = block*(ThisTask+1);
 		if(ThisTask==Ntask-1){
 			loop_end = NumDynVariables;
 		}
-
-		clock_t mytime = clock();
-        	text1 += (double) (mytime-aika0)/CLOCKS_PER_SEC;
-        	aika0 =  clock();
-
-		//loop_start = 0;
-		//loop_end = NumDynVariables;
-
 
 		for(int v=loop_start;v<loop_end;v++){
 			for(int i=0;i<korder;i++){
@@ -2529,11 +2379,6 @@ int extrapolate_all_variables( int NumberOfSystems, int korder ){
 			}
 			extrapolate_single_variable( y, korder, result[v], error[v], yscal );
 		}
-
-
-                mytime = clock();
-                text2 += (double) (mytime-aika0)/CLOCKS_PER_SEC;
-                aika0 =  clock();
 
 		for(int i=0;i<NumDynVariables;i++){
                         errorbuf[i]  = 0;
@@ -2545,7 +2390,7 @@ int extrapolate_all_variables( int NumberOfSystems, int korder ){
 			resultbuf[i] = result[i][korder-2];
 		}
 
-#ifdef PARALLEL	
+#ifdef PARALLEL
 		MPI_Allreduce(MPI_IN_PLACE,errorbuf, NumDynVariables,MPI_DOUBLE,MPI_SUM,MPI_COMM_WORLD);
 		MPI_Allreduce(MPI_IN_PLACE,resultbuf,NumDynVariables,MPI_DOUBLE,MPI_SUM,MPI_COMM_WORLD);
 #endif
@@ -2583,20 +2428,10 @@ int extrapolate_all_variables( int NumberOfSystems, int korder ){
 
 		}
 
-		int flag = 0;
-		if( gbs_error <= gbs_tolerance ){
-			flag = 1;
-		}
-
 		double km = index+2;
-
                 double Hnextfac = 0.94*pow( 0.65/(gbs_error/gbs_tolerance), 1.0 / (2*km+1));
 
-		double H = ThisR->Hstep;
-
 		if( gbs_error <= gbs_tolerance ){
-
-			//if(ThisTask==0) printf("error %e/%e --> converged --- %d\n",gbs_error, gbs_tolerance, NumDynVariables);
 
 			status = 1;
 
@@ -2607,144 +2442,23 @@ int extrapolate_all_variables( int NumberOfSystems, int korder ){
                         	Hnextfac = 5.0;
                 	}
 
-			double Hprev = ThisR->Hstep;
 			ThisR->Hstep *= Hnextfac;
 			into_Cartesian_from_MST(ThisR);
 
 			ok_steps++;
 
-
-#if 0
-
-			analysis_for_output( ThisR, &a1, &e1, &theta1, &EN1, &Lz1 );
-
-
-			double dEN     = fabs( (EN1-EN0)/EN0 );
-			double dLz    = fabs((Lz1-Lz0)/Lz0);
-			double dtheta = fabs(atan2(sin(theta1-theta0), cos(theta1-theta0)));
-			double da     = fabs((a1-a0)/a0);
-			double de     = fabs((e1-e0)/e0);
-
-			wtime1 = clock();
-			double elapsed = (double) (wtime1-wtime0)/CLOCKS_PER_SEC;
-
-
-			if(ThisTask==0){
-	                       	double time = ThisR->State[ThisR->TimeIndex];
-                        	//fprintf(output,"%.20e %.20e %.20e %.20e %.20e %.20e %.20e %.20e %.20e %.10e\n",time,gbs_error,dEN,dLz,dtheta,da,de,Hprev,elapsed,1.0*failed_steps/(ok_steps+failed_steps));
-				//printf("t %.10e gbs %.10e err %.10e Lz %.10e theta %.10e a %.10e e %.10e H %.10e walltime %.10e\n",time,gbs_error,dEN,dLz,dtheta,da,de,Hprev,elapsed);
-				//fflush(output);
-                	}
-
-#endif
-
-#if 0
-			if(ThisTask==0){
-
-				double x1 = ThisR->Pos[3*0+0];
-                                double y1 = ThisR->Pos[3*0+1];
-                                double x2 = ThisR->Pos[3*1+0];
-                                double y2 = ThisR->Pos[3*1+1];
-                                double x3 = ThisR->Pos[3*2+0];
-                                double y3 = ThisR->Pos[3*2+1];
-
-				double vx1 = ThisR->Vel[3*0+0];
-                                double vy1 = ThisR->Vel[3*0+1];
-                                double vx2 = ThisR->Vel[3*1+0];
-                                double vy2 = ThisR->Vel[3*1+1];
-                                double vx3 = ThisR->Vel[3*2+0];
-                                double vy3 = ThisR->Vel[3*2+1];
-				double m1 = 0.03,m2=0.04,m3=0.05;
-
-				double rvec[3] = {0}, vvec[3] = {0}, r2=0,v2=0,rdotv=0;
-				rvec[0] = x3-x2;	rvec[1] = y3-y2;	rvec[2] = 0;
-				vvec[0] = vx3-vx2;        vvec[1] = vy3-vy2;        vvec[2] = 0;
-				for(int k=0;k<3;k++){
-					r2 += rvec[k]*rvec[k];
-					v2 += vvec[k]*vvec[k];
-					rdotv += rvec[k]*vvec[k];
-				}
-				double r = sqrt(r2);
-
-				double beta = atan2(y1,x1)*180/M_PI;
-
-				double GM = GCONST*(m2+m3);
-                		double a = 1.0/(2.0/r - v2/GM);
-                		double ecc[3];
-                		double e=0;
-                		for(int k=0;k<3;k++){
-                        		ecc[k] = (1.0/r-1.0/(a))*rvec[k] - rdotv*vvec[k]/GM;
-                        		e += ecc[k]*ecc[k];
-                		}
-                		e = sqrt(e);
-                                double time = ThisR->State[ThisR->TimeIndex];
-
-                                fprintf(output,"%.20e %.20e %.20e %.20e %.20e %.20e %.20e %.20e %.20e %.20e\n",time,x1,y1,x2,y2,x3,y3,beta,a,e);
-                                fflush(output);
-                        }
-#endif
-
-
 		} else {
-
-			//if(ThisTask==0) printf("error %e/%e --> diverged, dH %e\n",gbs_error, gbs_tolerance, ThisR->Hstep);
-
 			status = 0;
-			double Hprev = ThisR->Hstep;
-
-                        //into_Cartesian_from_MST(ThisR);
-                        //analysis_for_output( ThisR, &a1, &e1, &theta1, &EN1, &Lz1 );
-
-                        //double dEN     = fabs( (EN1-EN0)/EN0 );
-                        //double dLz    = fabs((Lz1-Lz0)/Lz0);
-                        //double dtheta = fabs(atan2(sin(theta1-theta0), cos(theta1-theta0)));
-                        //double da     = fabs((a1-a0)/a0);
-                        //double de     = fabs((e1-e0)/e0);
-
-                        //wtime1 = clock();
-                        //double elapsed = (double) (wtime1-wtime0)/CLOCKS_PER_SEC;
-
-                        //if(ThisTask==0){
-                            //    double time = ThisR->State[ThisR->TimeIndex];
-                                //fprintf(output,"%.20e %.20e %.20e %.20e %.20e %.20e %.20e %.20e %.20e\n",time,gbs_error,dEN,dLz,dtheta,da,de,Hprev,elapsed);
-                                //printf("t %.10e gbs %.10e err %.10e Lz %.10e theta %.10e a %.10e e %.10e H %.10e walltime %.10e\n",time,gbs_error,dEN,dLz,dtheta,da,de,Hprev,elapsed);
-                                //fflush(output);
-                        //}
-
 			failed_steps++;
 
 			if( Hnextfac > 0.7 ){
                         	Hnextfac = 0.7;
                 	}
-
 			ThisR->Hstep *= Hnextfac;
 		}
-#if 0
-		for(int i=0;i<NumDynVariables;i++){
-                        free(error[i]);			total_memory -= (korder-1)*sizeof(double);
-                        free(result[i]);		total_memory -= (korder-1)*sizeof(double);
-                }
-                free(error);				total_memory -= NumDynVariables*sizeof(double);
-                free(result);				total_memory -= NumDynVariables*sizeof(double);
-#endif
-
-
-		free(SubStepDivision);			total_memory -= korder*sizeof(int);
-
-
-#if 0
-		free(y);				total_memory -= korder*sizeof(double);
-		free(yscal);				total_memory -= korder*sizeof(double);
-                free(errorbuf);
-                free(resultbuf);
-#endif
+		free(SubStepDivision);
 
 	}
-
-        clock_t mytime = clock();
-        text3 += (double) (mytime-aika0)/CLOCKS_PER_SEC;
-
-	measure_cpu_time( CPU_TIME_GBS );
 
 	return status;
 
@@ -2753,60 +2467,9 @@ int extrapolate_all_variables( int NumberOfSystems, int korder ){
 // Integrate the subsystems using AR-MST for the desired time interval
 void run_integrator( struct RegularizedRegion *R, double time_interval, int NumberOfSystems ){
 
-#if 0
-
-
-                        if(ThisTask==0){
-
-                                double x1 = R->Pos[3*0+0];
-                                double y1 = R->Pos[3*0+1];
-                                double x2 = R->Pos[3*1+0];
-                                double y2 = R->Pos[3*1+1];
-                                double x3 = R->Pos[3*2+0];
-                                double y3 = R->Pos[3*2+1];
-
-                                double vx1 = R->Vel[3*0+0];
-                                double vy1 = R->Vel[3*0+1];
-                                double vx2 = R->Vel[3*1+0];
-                                double vy2 = R->Vel[3*1+1];
-                                double vx3 = R->Vel[3*2+0];
-                                double vy3 = R->Vel[3*2+1];
-                                double m1 = 0.03,m2=0.04,m3=0.05;
-
-                                double rvec[3] = {0}, vvec[3] = {0}, r2=0,v2=0,rdotv=0;
-                                rvec[0] = x3-x2;        rvec[1] = y3-y2;        rvec[2] = 0;
-                                vvec[0] = vx3-vx2;        vvec[1] = vy3-vy2;        vvec[2] = 0;
-                                for(int k=0;k<3;k++){
-                                        r2 += rvec[k]*rvec[k];
-                                        v2 += vvec[k]*vvec[k];
-                                        rdotv += rvec[k]*vvec[k];
-                                }
-                                double r = sqrt(r2);
-
-                                double beta = atan2(y1,x1)*180/M_PI;
-
-                                double GM = GCONST*(m2+m3);
-                                double a = 1.0/(2.0/r - v2/GM);
-                                double ecc[3];
-                                double e=0;
-                                for(int k=0;k<3;k++){
-                                        ecc[k] = (1.0/r-1.0/(a))*rvec[k] - rdotv*vvec[k]/GM;
-                                        e += ecc[k]*ecc[k];
-                                }
-                                e = sqrt(e);
-                                double time = R->State[R->TimeIndex];
-
-                                fprintf(output,"%.20e %.20e %.20e %.20e %.20e %.20e %.20e %.20e %.20e %.20e\n",time,x1,y1,x2,y2,x3,y3,beta,a,e);
-                                fflush(output);
-                        }
-
-#endif
-
-
 	// Needed variables
 	double dt = 1e-7;
 	double Hstep;
-	double Hnext;
 
 	// Initialize systems to integrate
 	for(int i=0;i<NumberOfSystems;i++){
@@ -2820,10 +2483,8 @@ void run_integrator( struct RegularizedRegion *R, double time_interval, int Numb
 
 	// Now proceed to integration
 	int not_finished = 1;
-	int counter = 0;
 	int redo = 1;
 	int status;
-	int repeat = 0;
 
 	do {
 
@@ -2845,20 +2506,7 @@ void run_integrator( struct RegularizedRegion *R, double time_interval, int Numb
 
 					// leapfrog the substep division
 					Hstep = ComputationToDoList.CopyOfSingleRegion[ctask].Hstep;
-
-					int flag = 0;
-					clock_t timing0 = clock();
-					mst_leapfrog( &ComputationToDoList.CopyOfSingleRegion[ctask], Hstep, ComputationToDoList.ComputationalTask[ctask].NumberOfSubsteps, &flag );
-					clock_t timing1 = clock();
-
-#ifdef SERIALALALA
-					if( flag == 1 ){
-						ThisR->Hstep *= 0.5;
-						//failed_steps++;
-						redo = 1;
-						break;
-					}
-#endif
+					mst_leapfrog( &ComputationToDoList.CopyOfSingleRegion[ctask], Hstep, ComputationToDoList.ComputationalTask[ctask].NumberOfSubsteps );
 
 				}
 			}
@@ -2881,7 +2529,6 @@ clock_t aika0= clock(),aika1;
 				}
 			}
 			MPI_Bcast( commbuf, count, MPI_DOUBLE, root, MPI_COMM_WORLD );
-			//MPI_Allreduce(  MPI_IN_PLACE, commbuf, count, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD );
 		}
 		aika1 = clock();
 
@@ -2897,7 +2544,6 @@ clock_t aika0= clock(),aika1;
 		time_gbs += (double) (aika1-aika0)/CLOCKS_PER_SEC;
 
 		if( status == 1 ){
-		repeat = 0;
 
 		// Check whether we are ready
 		double time = R[0].State[R[0].TimeIndex];
@@ -2911,19 +2557,12 @@ clock_t aika0= clock(),aika1;
 #ifdef OLDPRIM
 				PrimMST(&R[0]);
 #else
-				DivideAndConquerPrim( &R[0] );				
+				DivideAndConquerPrim( &R[0] );
 #endif
 			}
 		}
 
-#if 0
-		if(ThisTask==0) printf("time %e --- dt %.10e\n",time,R[0].Hstep);
-#endif
-
-		} else {
-			repeat = 1;
 		}
-
 
 	} while( not_finished  );
 
@@ -2948,18 +2587,18 @@ void allocate_regularized_region(struct RegularizedRegion *S, int N){
         S->State        = calloc(S->NumDynVariables, sizeof(double));
         S->Mass         = calloc(N,       sizeof(double));
         S->Acc          = calloc(3*N,     sizeof(double));
-        S->MSTedgeAcc   = calloc(3*(N-1), sizeof(double));		total_memory += (3*N+3*N+2*S->NumDynVariables+N+3*N+3*(N-1))*sizeof(double);
+        S->MSTedgeAcc   = calloc(3*(N-1), sizeof(double));
 
         S->AccPN          = calloc(3*N,     sizeof(double));
         S->AuxVel         = calloc(3*N,     sizeof(double));
         S->AuxEdgeVel     = calloc(3*(N-1), sizeof(double));
-        S->MSTedgeAcc_PN  = calloc(3*(N-1), sizeof(double));		total_memory += ( 2*3*N + 2*3*(N-1) )*sizeof(double);
+        S->MSTedgeAcc_PN  = calloc(3*(N-1), sizeof(double));
 
-        S->Vertex          = calloc(N,          sizeof(struct GraphVertex));	total_memory += N*sizeof(struct GraphVertex);
-        
+        S->Vertex          = calloc(N,          sizeof(struct GraphVertex));
+
 	double safetybuf = 1.05;
 	int NumLocalEdge = (int) floor( safetybuf*S->NumEdge/Ntask );
-	S->LocalEdge       = calloc(NumLocalEdge, sizeof(struct GraphEdge));	total_memory += NumLocalEdge*sizeof(struct GraphEdge);
+	S->LocalEdge       = calloc(NumLocalEdge, sizeof(struct GraphEdge));
 	S->LocalEdgeSubset = calloc(NumLocalEdge, sizeof(struct GraphEdge));
 	S->EdgeInMST       = calloc(N-1, sizeof(struct GraphEdge));
 
@@ -2969,15 +2608,15 @@ void allocate_regularized_region(struct RegularizedRegion *S, int N){
 void allocate_armst_structs( struct RegularizedRegion **R, int NumberOfSystems, int MaxNumPart ){
 
 	int MaxDynamicalVariables = 6*(MaxNumPart-1)+2;
-	*R = calloc(NumberOfSystems,sizeof(struct RegularizedRegion));	total_memory += NumberOfSystems*sizeof(struct RegularizedRegion);
+	*R = calloc(NumberOfSystems,sizeof(struct RegularizedRegion));
 
         for(int i=0;i<NumberOfSystems;i++){
                 allocate_regularized_region( R[i], MaxNumPart );
         }
 
-        gbsS = calloc(KMAX,sizeof(double *));                 total_memory += KMAX*sizeof(double *);
+        gbsS = calloc(KMAX,sizeof(double *));
         for(int i=0;i<KMAX;i++){
-                gbsS[i] = calloc(KMAX,sizeof(double));        total_memory += KMAX*sizeof(double);
+                gbsS[i] = calloc(KMAX,sizeof(double));
         }
 	int Nbuf = 5;
         fastindex  = calloc(Nbuf*Ntask,sizeof(int));
@@ -2991,15 +2630,15 @@ void allocate_armst_structs( struct RegularizedRegion **R, int NumberOfSystems, 
 	        errorbuf  = calloc(NumDynVariables,sizeof(double));
                 resultbuf = calloc(NumDynVariables,sizeof(double));
 
-                y = calloc(korder,sizeof(double));              total_memory += korder*sizeof(double);
-                yscal = calloc(korder,sizeof(double));          total_memory += korder*sizeof(double);
-                maxerror = calloc(korder-1,sizeof(double));     total_memory += (korder-1)*sizeof(double);
+                y = calloc(korder,sizeof(double));
+                yscal = calloc(korder,sizeof(double));
+                maxerror = calloc(korder-1,sizeof(double));
 
-                error = calloc(NumDynVariables,sizeof(double *));       total_memory += NumDynVariables*sizeof(double *);
-                result = calloc(NumDynVariables,sizeof(double *));      total_memory += NumDynVariables*sizeof(double *);
+                error = calloc(NumDynVariables,sizeof(double *));
+                result = calloc(NumDynVariables,sizeof(double *));
                 for(int i=0;i<NumDynVariables;i++){
-                        error[i] = calloc(korder-1,sizeof(double));     total_memory += (korder-1)*sizeof(double);
-                        result[i] = calloc(korder-1,sizeof(double));    total_memory += (korder-1)*sizeof(double);
+                        error[i] = calloc(korder-1,sizeof(double));
+                        result[i] = calloc(korder-1,sizeof(double));
                 }
 
 	indexlist = calloc(8,sizeof(int *));
@@ -3008,135 +2647,39 @@ void allocate_armst_structs( struct RegularizedRegion **R, int NumberOfSystems, 
 	}
 	ParticleInNode = calloc(MaxNumPart,sizeof(struct OctreeNode *));
 
-	//double mtot = 0;
-        //MPI_Allreduce(&total_memory,&mtot,1,MPI_DOUBLE,MPI_SUM,MPI_COMM_WORLD);
-        //if(ThisTask==0) printf("Currently allocated memory: %.10lf GB\n",mtot/(1024*1024*1024));
-
 	int NumAlloc = NumberOfSystems*KMAX;
 
-        ComputationToDoList.ComputationalTask = calloc(NumAlloc,sizeof(struct ComTask));	total_memory += NumAlloc*KMAX*sizeof(struct ComTask);
+        ComputationToDoList.ComputationalTask = calloc(NumAlloc,sizeof(struct ComTask));
         for(int i=0;i<NumAlloc;i++){
-                ComputationToDoList.ComputationalTask[i].ResultState = calloc(MaxDynamicalVariables, sizeof(double));	total_memory += MaxDynamicalVariables*sizeof(double);
+                ComputationToDoList.ComputationalTask[i].ResultState = calloc(MaxDynamicalVariables, sizeof(double));
         }
-        ComputationToDoList.CopyOfSingleRegion = calloc(NumAlloc,sizeof(struct RegularizedRegion));	total_memory += NumAlloc*KMAX*sizeof(struct RegularizedRegion);
+        ComputationToDoList.CopyOfSingleRegion = calloc(NumAlloc,sizeof(struct RegularizedRegion));
 
         for(int i=0;i<NumAlloc;i++){
-                allocate_regularized_region( &ComputationToDoList.CopyOfSingleRegion[i], MaxNumPart );	
+                allocate_regularized_region( &ComputationToDoList.CopyOfSingleRegion[i], MaxNumPart );
         }
-
-	//mtot = 0;
-        //MPI_Allreduce(&total_memory,&mtot,1,MPI_DOUBLE,MPI_SUM,MPI_COMM_WORLD);
-        //if(ThisTask==0) printf("Currently allocated memory: %.10lf GB\n",mtot/(1024*1024*1024));
-
 }
 
+// Read in the test IC
 void read_ic_from_file( struct RegularizedRegion *R, char *INPUTFILE ){
-
-        // Read in the test IC
         FILE *fp;
         for(int task=0;task<Ntask;task++){
 		my_barrier();
-
         if(ThisTask==task){
                 fp = fopen(INPUTFILE,"r");
-                //for(int i=0;i<R->NumVertex;i++){
-		for(int i=R->NumVertex-1;i>-1;i--){
-int s = fscanf(fp,"%d %lf %lf %lf %lf %lf %lf %lf\n", &R->Vertex[i].type, &R->Mass[i], &R->Pos[3*i+0], &R->Pos[3*i+1], &R->Pos[3*i+2], &R->Vel[3*i+0], &R->Vel[3*i+1], &R->Vel[3*i+2]);
-		//R->Pos[3*i+2] = 0;
+                for(int i=0;i<R->NumVertex;i++){
+			int status = fscanf(fp,"%d %lf %lf %lf %lf %lf %lf %lf\n", &R->Vertex[i].type, &R->Mass[i], &R->Pos[3*i+0], &R->Pos[3*i+1], &R->Pos[3*i+2], &R->Vel[3*i+0], &R->Vel[3*i+1], &R->Vel[3*i+2]);
+			if( !(status>0) ){
+				die();
+			}
                 }
                 fclose(fp);
         }
 		my_barrier();
         }
-
 }
 
-void generate_binary_ic( struct RegularizedRegion *R, double Mbinary, double semimajor, double eccentric, double theta, double *Pkepler){
-
-	//double angle = (double) (1.0* (rand()%360));
-	//theta = angle;
-
-        double  x1 = +semimajor*(1+eccentric)/2;
-        double  x2 = -semimajor*(1+eccentric)/2;
-        double  z1 = 0;
-        double  z2 = 0;
-
-        double y1 = x1*sin(theta);
-        x1 *= cos(theta);
-        double y2 = x2*sin(theta);
-        x2 *= cos(theta);
-        double vy1 = +0.5*sqrt( (1-eccentric)/(1+eccentric) * GCONST*Mbinary/semimajor );
-        double vy2 = -0.5*sqrt( (1-eccentric)/(1+eccentric) * GCONST*Mbinary/semimajor );
-        double vx1 = -vy1*sin(theta);
-        vy1 *= cos(theta);
-        double vx2 = -vy2*sin(theta);
-        vy2 *= cos(theta);
-        double vz1 = 0;
-        double vz2 = 0;
-
-        R->Vertex[0].type = 5;
-        R->Vertex[0].id   = 0;
-        R->Mass[0]        = Mbinary/2;
-        R->Pos[3*0+0]     = x1;
-        R->Pos[3*0+1]     = y1;
-        R->Pos[3*0+2]     = z1;
-        R->Vel[3*0+0]     = vx1;
-        R->Vel[3*0+1]     = vy1;
-        R->Vel[3*0+2]     = vz1;
-        R->Vertex[1].type = 5;
-        R->Mass[1]        = Mbinary/2;
-        R->Vertex[1].id   = 1;
-        R->Pos[3*1+0]     = x2;
-        R->Pos[3*1+1]     = y2;
-        R->Pos[3*1+2]     = z2;
-        R->Vel[3*1+0]     = vx2;
-        R->Vel[3*1+1]     = vy2;
-        R->Vel[3*1+2]     = vz2;
-
-        *Pkepler = 2*M_PI*sqrt( semimajor*semimajor*semimajor/(GCONST*Mbinary));
-
-
-}
-
-
-void generate_pythagorean_triplet( struct RegularizedRegion *R ){
-
-	// point 1
-	R->Vertex[0].type = 5;
-        R->Vertex[0].id   = 0;
-        R->Mass[0]        = 0.03;	// m
-        R->Pos[3*0+0]     = 0;		// x
-        R->Pos[3*0+1]     = 0.04;	// y
-        R->Pos[3*0+2]     = 0;
-        R->Vel[3*0+0]     = 0;
-        R->Vel[3*0+1]     = 0;
-        R->Vel[3*0+2]     = 0;
-        // point 2
-        R->Vertex[1].type = 5;
-        R->Vertex[1].id   = 1;
-        R->Mass[1]        = 0.04;	// m
-        R->Pos[3*1+0]     = -0.03;	// x
-        R->Pos[3*1+1]     = 0;		// y
-        R->Pos[3*1+2]     = 0;
-        R->Vel[3*1+0]     = 0;
-        R->Vel[3*1+1]     = 0;
-        R->Vel[3*1+2]     = 0;
-        // point 3
-        R->Vertex[2].type = 5;
-        R->Vertex[2].id   = 2;
-        R->Mass[2]        = 0.05;	// m
-        R->Pos[3*2+0]     = 0;		// x
-        R->Pos[3*2+1]     = 0;		// y
-        R->Pos[3*2+2]     = 0;
-        R->Vel[3*2+0]     = 0;
-        R->Vel[3*2+1]     = 0;
-        R->Vel[3*2+2]     = 0;
-
-
-}
-
-
-
+// The test main function
 int main(int argc, char *argv[]){
 
 	initialize_mpi_or_serial();
@@ -3145,21 +2688,6 @@ int main(int argc, char *argv[]){
 
         GBSTOL    = atof(argv[3]);
         MAXPART   = atoi(argv[2]);
-
-	total_memory = 0;
-
-for(int loop=0;loop<=0;loop++){
-
-	char fname[99];
-	char str[99];
-	sprintf(str, "%.4d", loop);
-	sprintf(fname,"%s%s%s", "output/output_",str,".txt");
-
-	if(ThisTask==0){
-		//printf("%s %s\n",argv[1],argv[2]);
-		//output = fopen(fname,"w");
-		//fflush(stdout);
-	}
 
 	Niter = 0;
 	Nredo = 0;
@@ -3180,7 +2708,6 @@ for(int loop=0;loop<=0;loop++){
 	time_coord3 = 0;
 	time_coord4 = 0;
 	tprim1=0,tprim2=0,tprim3=0,tprim4=0,tprim5=0,tprim6=0,tprim7=0;
-	text1=0,text2=0,text3=0;
 	primfail=0,primsucc=0;
 	loopt1=0,loopt2=0,loopt3=0,loopt4=0;
 
@@ -3198,11 +2725,7 @@ for(int loop=0;loop<=0;loop++){
 
 	my_barrier();
 
-	previous_time = clock();
-        current_time = clock();
-	cpu_times = calloc(5,sizeof(clock_t));
-
-	double IntegrationTime = 1e-4;
+	double IntegrationTime = 1e-5;
 
 	into_CoM_frame( &R[0] );
 
@@ -3210,57 +2733,26 @@ for(int loop=0;loop<=0;loop++){
 
 	wtime0 = clock();
 
-
 #ifdef OLDPRIM
 	PrimMST(&R[0]);
 #else
 	DivideAndConquerPrim( &R[0] );
 #endif
 
-
-	//analysis_for_output( &R[0], &a0, &e0, &theta0, &EN0, &Lz0 );
-	//analysis_for_smallest_period_around_bh( &R[0] );
-
 	compute_total_energy( &R[0] );
-	double mye0 = R[0].H;
-
-	double a0,a1;
-	get_scaling( R[0].NumVertex, R[0].Mass, &a0,&a1, R[0].T, R[0].U );
-
-	//analysis_for_smallest_binary_period( &R[0] );
-
 
 	run_integrator(R,IntegrationTime,1);
 
 	compute_total_energy( &R[0] );
 
-        double mye1 = R[0].H;
-	double myerr = fabs((mye0-mye1)/mye0);
-
-	//analysis_for_smallest_period_around_bh( &R[0] );
-
 	wtime1 = clock();
 	double elapsed = (double) (wtime1-wtime0)/CLOCKS_PER_SEC;
-
-	measure_cpu_time( CPU_TIME_MISC );
-
-	double cputimes[5];
-	double tot_time = 0;
-	for(int i=0;i<5;i++){
-		cputimes[i] = (double) (1.0*cpu_times[i]) / CLOCKS_PER_SEC;
-		tot_time += cputimes[i];
-	}	
-	double tfrac[4];
-	for(int i=1;i<5;i++){
-		tfrac[i-1] = cputimes[i]/tot_time;
-	}
-
 	double time_coord = time_coord1 +time_coord2+time_coord3+time_coord4;
 
 	if(ThisTask==0){
 		printf("%d %d %d %.10e %.10e %.10e %.10e %.10e %.10e %.10e\n",Ntask,MAXPART,ok_steps+failed_steps,time_force-time_comm,time_comm,elapsed,time_mst,time_gbs,time_gbscomm,time_coord);
 
-#if 0
+#if 1
 		printf("force:     %lf\n",100*(time_force-time_comm)/elapsed);
 		printf("forcecomm: %lf\n",100*(time_comm)/elapsed);
 		printf("prim:      %lf\n",100*(time_mst)/elapsed);
@@ -3279,17 +2771,9 @@ for(int loop=0;loop<=0;loop++){
 		printf("combine msts     %lf\n",100*tprim5/elapsed);
 		printf("meta loops: %lf %lf %lf %lf\n", loopt1,loopt2,loopt3,loopt4);
 #endif
-		printf("\n--- exrt ---\n");
-                printf("%lf %lf %lf\n",100*text1/elapsed,100*text2/elapsed,100*text3/elapsed);
-
 		fflush(stdout);
 #endif
 	}
-
-	if(ThisTask==0){
-                //fclose(output);
-	}
-
 
 	// Free stuff
 
@@ -3309,7 +2793,6 @@ for(int loop=0;loop<=0;loop++){
 	free(R[0].EdgeInMST);
 	free(gbsS);
 
-}	// end loop
 
 #ifdef PARALLEL
 	MPI_Finalize();

@@ -6,6 +6,7 @@
 #include <limits.h>
 #include "regularization.h"
 
+#ifdef USE_PN
 
 // relative velocity of particle 1 seen from particle 2 = v_1 - v_2. return v_rel^2.
 inline static double relative_velocity(double *v1, double *v2,  double *v12) {
@@ -59,8 +60,8 @@ void compute_PN_twobody_Acc(struct RegularizedRegion *R, double *Vel, double *Ac
     // powers of r, v, rdot and G(m1+m2)/r
     double r2 = 0, r, r3, r4;
     double rdot2, rdot4, rdot6;
-    double v2 = 0, v4, v6;
-    double gmpr, gmpr2, gmpr3;
+    double v2=0, v4=0, v6=0;
+    double gmpr=0, gmpr2=0, gmpr3=0;
 
     // the PN acceleration coefficients
     double A1=0, A2=0, A2p5=0, A3=0, A3p5=0, Atot = 0, Agrad = 0;
@@ -184,7 +185,7 @@ void compute_Post_Newtonian_Acc(struct RegularizedRegion *R, double *Vel){
 
 	for(int i=0;i<Nbh;i++){
 		for(int j=i+1;j<Nbh;j++){
-			compute_PN_twobody_Acc(R,Vel,R->AccPN,bhindex[i],bhindex[j]);			
+			compute_PN_twobody_Acc(R,Vel,R->AccPN,bhindex[i],bhindex[j]);
 		}
 	}
 
@@ -209,3 +210,4 @@ void compute_Post_Newtonian_Acc(struct RegularizedRegion *R, double *Vel){
 
 }
 
+#endif

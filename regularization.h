@@ -1,8 +1,6 @@
-//#define SERIAL
-#define PARALLEL
+#define SERIAL
+//#define PARALLEL
 //#define PARALLEL_QSORT
-
-//#define CHAIN
 
 #define GLOBAL_ND 2
 #define GCONST 43007.1
@@ -19,19 +17,6 @@
 
 enum velocity_type { PHYSICAL, AUXILIARY };
 enum variable_type { POSITION, VELOCITY, OTHER };
-
-
-enum timing_type {
-CPU_TIME_MISC,
-CPU_TIME_ACC,
-CPU_TIME_POTENTIALENERGY,
-CPU_TIME_PRIM,
-CPU_TIME_GBS
-};
-
-clock_t *cpu_times;
-clock_t previous_time, current_time;
-
 
 int Ntask;
 int ThisTask;
