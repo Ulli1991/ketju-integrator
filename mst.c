@@ -11,10 +11,8 @@
 #endif
 #include "regularization.h"
 
-#define mydouble double
 
 int **indexlist;
-int extrapolate_all_variables( int NumberOfSystems, int korder );
 
 double GBSTOL;
 int MAXPART;
@@ -162,7 +160,7 @@ void initialize_mpi_or_serial(void){
         MPI_Comm_size(MPI_COMM_WORLD, &Ntask);
         MPI_Comm_rank(MPI_COMM_WORLD, &ThisTask);
 
-	NumGbsGroup        = 4;	//antti
+	NumGbsGroup        = 4;
         NumTaskPerGbsGroup = (int) Ntask/NumGbsGroup;
 
 	if( NumGbsGroup*NumTaskPerGbsGroup != Ntask ){
@@ -1133,7 +1131,7 @@ void DivideAndConquerPrim( struct RegularizedRegion *R ){
 }
 
 
-int EdgeSearchForPrimSlow( struct RegularizedRegion *R, int NumLocalEdges ){
+int EdgeSearchForPrim( struct RegularizedRegion *R, int NumLocalEdges ){
 
 		clock_t edgesearch_time0 = clock();
 		struct WeightIndex wi;
@@ -1275,7 +1273,7 @@ void PrimMST(struct RegularizedRegion *R){
 	c=0;
 	do {
 
-		int NextEdge = EdgeSearchForPrimSlow( R, NumLocalEdges );
+		int NextEdge = EdgeSearchForPrim( R, NumLocalEdges );
 
 		int v1=-1,v2=-1;
 		get_v1_v2( R->NumVertex, NextEdge, &v1,&v2 );
@@ -1318,7 +1316,7 @@ void PrimMST(struct RegularizedRegion *R){
 
 
 
-
+// computes the force function for logh
 void compute_U(struct RegularizedRegion *R){
 
 	clock_t thistime0 = clock();
@@ -1411,6 +1409,7 @@ void compute_U(struct RegularizedRegion *R){
 
 }
 
+// computes the force function and newtonian acceleration
 void compute_U_and_Newtonian_Acc(struct RegularizedRegion *R){
 
 	clock_t thistime0 = clock();
@@ -1434,7 +1433,7 @@ void compute_U_and_Newtonian_Acc(struct RegularizedRegion *R){
         }
 
         R->U    = 0;
-	mydouble dr[3], r2;
+	double dr[3], r2;
 
 	double *Pos = R->Pos;
 	double *Mass = R->Mass;
@@ -1473,10 +1472,10 @@ void compute_U_and_Newtonian_Acc(struct RegularizedRegion *R){
 				}
 			}
 
-			const mydouble invr = 1.0/sqrt(r2);
+			const double invr = 1.0/sqrt(r2);
 			R->U += mi*mj*invr;
 
-			const mydouble invr3 = invr*invr*invr;
+			const double invr3 = invr*invr*invr;
 
                	        for(int k=0;k<3;k++){
 				double drinvr3 = dr[k]*invr3;
@@ -1567,7 +1566,7 @@ void into_Cartesian_from_MST(struct RegularizedRegion *R){
         	}
 	}
 
-	double M=0,*CoM = calloc(3,sizeof(double)), *CoV = calloc(3,sizeof(double));
+	double M=0,CoM[3] = {0}, CoV[3] = {0};
 
         for(int i=0;i<R->NumVertex;i++){
                 M += R->Mass[i];
@@ -1587,9 +1586,6 @@ void into_Cartesian_from_MST(struct RegularizedRegion *R){
                         R->Vel[3*i+k] -= CoV[k];
                 }
         }
-
-	free(CoM);
-	free(CoV);
 
 	clock_t timing1 = clock();
         time_coord += (double) (timing1-timing0)/CLOCKS_PER_SEC;
@@ -1672,7 +1668,7 @@ void update_pos(struct RegularizedRegion *R){
                 }
         }
 
-	double M=0,*CoM = calloc(3,sizeof(double));
+	double M=0,CoM[3] = {0};
         for(int i=0;i<R->NumVertex;i++){
                 M += R->Mass[i];
                 for(int k=0;k<3;k++){
@@ -1687,7 +1683,6 @@ void update_pos(struct RegularizedRegion *R){
                         R->Pos[3*i+k] -= CoM[k];
                 }
         }
-	free(CoM);
 
 	clock_t timing1 = clock();
 	time_coord += (double) (timing1-timing0)/CLOCKS_PER_SEC;
@@ -1730,7 +1725,7 @@ if( propagated_velocity == PHYSICAL ){
                 }
         }
 
-        double M=0,*CoV = calloc(3,sizeof(double));
+        double M=0,CoV[3] = {0};
         for(int i=0;i<R->NumVertex;i++){
                 M += R->Mass[i];
                 for(int k=0;k<3;k++){
@@ -1745,7 +1740,6 @@ if( propagated_velocity == PHYSICAL ){
                         Vel[3*i+k] -= CoV[k];
                 }
         }
-	free(CoV);
 
 	clock_t timing1 = clock();
 	time_coord += (double) (timing1-timing0)/CLOCKS_PER_SEC;
@@ -1970,119 +1964,89 @@ void extrapolate_single_variable( double *y, const int N, double *result, double
 
 }
 
-int extrapolate_all_variables( int NumberOfSystems, int korder ){
+int extrapolate_all_variables( int korder ){
 
 	int status=-1;
-	for(int region=0;region<NumberOfSystems;region++){
 
-		struct RegularizedRegion *ThisR = NULL;
-		int *SubStepDivision = calloc(korder,sizeof(int));
+	struct RegularizedRegion *ThisR = NULL;
+	int *SubStepDivision = calloc(korder,sizeof(int));
 
-		int counter = 0;
-		int NumDynVariables=0;
-		for(int i=0;i<NumberOfSystems*korder;i++){
-			if( region == ComputationToDoList.ComputationalTask[i].WhichRegion ){
-				ThisR = ComputationToDoList.ComputationalTask[i].ThisR;
-				NumDynVariables = ThisR->NumDynVariables;
-				SubStepDivision[counter] = i;
-				counter++;
-			}
+	int counter = 0;
+	int NumDynVariables=0;
+	for(int i=0;i<korder;i++){
+			ThisR = ComputationToDoList.ComputationalTask[i].ThisR;
+			NumDynVariables = ThisR->NumDynVariables;
+			SubStepDivision[counter] = i;
+			counter++;
+	}
+
+	int block      = (int) floor(NumDynVariables/Ntask);
+	int loop_start = block*ThisTask;
+	int loop_end   = block*(ThisTask+1);
+	if(ThisTask==Ntask-1){
+		loop_end = NumDynVariables;
+	}
+
+	for(int v=loop_start;v<loop_end;v++){
+		for(int i=0;i<korder;i++){
+			y[i]     =  ComputationToDoList.CopyOfSingleRegion[ SubStepDivision[i] ].State[v];
+			yscal[i] = fabs(y[i]);
 		}
+		extrapolate_single_variable( y, korder, result[v], error[v], yscal );
+	}
 
-		int block      = (int) floor(NumDynVariables/Ntask);
-		int loop_start = block*ThisTask;
-		int loop_end   = block*(ThisTask+1);
-		if(ThisTask==Ntask-1){
-			loop_end = NumDynVariables;
-		}
+	for(int i=0;i<NumDynVariables;i++){
+		errorbuf[i]  = 0;
+                resultbuf[i] = 0;
+	}
 
-		for(int v=loop_start;v<loop_end;v++){
-			for(int i=0;i<korder;i++){
-				y[i]     =  ComputationToDoList.CopyOfSingleRegion[ SubStepDivision[i] ].State[v];
-				yscal[i] = fabs(y[i]);
-			}
-			extrapolate_single_variable( y, korder, result[v], error[v], yscal );
-		}
-
-		for(int i=0;i<NumDynVariables;i++){
-                        errorbuf[i]  = 0;
-                        resultbuf[i] = 0;
-                }
-
-		for(int i=loop_start;i<loop_end;i++){
-			errorbuf[i]  = error[i][korder-2];
-			resultbuf[i] = result[i][korder-2];
-		}
+	for(int i=loop_start;i<loop_end;i++){
+		errorbuf[i]  = error[i][korder-2];
+		resultbuf[i] = result[i][korder-2];
+	}
 
 #ifdef PARALLEL
-		MPI_Allreduce(MPI_IN_PLACE,errorbuf, NumDynVariables,MPI_DOUBLE,MPI_SUM,MPI_COMM_WORLD);
-		MPI_Allreduce(MPI_IN_PLACE,resultbuf,NumDynVariables,MPI_DOUBLE,MPI_SUM,MPI_COMM_WORLD);
+	MPI_Allreduce(MPI_IN_PLACE,errorbuf, NumDynVariables,MPI_DOUBLE,MPI_SUM,MPI_COMM_WORLD);
+	MPI_Allreduce(MPI_IN_PLACE,resultbuf,NumDynVariables,MPI_DOUBLE,MPI_SUM,MPI_COMM_WORLD);
 #endif
 
-		for(int i=0;i<NumDynVariables;i++){
-                        error[i][korder-2]  = errorbuf[i];
-                        result[i][korder-2] = resultbuf[i];
-                }
+	double gbs_error = -1;
+	double gbs_tolerance = ComputationToDoList.ComputationalTask[SubStepDivision[0]].ThisR->gbs_tolerance;
 
-		double gbs_error = DBL_MAX;
-		int index=-1;
-
-		double gbs_tolerance = ComputationToDoList.ComputationalTask[SubStepDivision[0]].ThisR->gbs_tolerance;
-
-		for(int i=0;i<korder-1;i++){
-			maxerror[i] = 1e10;
+	for(int j=0;j<NumDynVariables;j++){
+		if( errorbuf[j] >= gbs_error ){
+			gbs_error = errorbuf[j];
 		}
-
-		for(int i=korder-2;i<korder-1;i++){
-			double error_in_this_level = -1;
-
-			for(int j=0;j<NumDynVariables;j++){
-
-				if( error[j][i] >= error_in_this_level ){
-					error_in_this_level = error[j][i];
-				}
-			}
-
-			if( error_in_this_level <= gbs_error ){
-				gbs_error = error_in_this_level;
-				index = i;
-			}
-
-			maxerror[i] =  error_in_this_level;
-
-		}
-
-		double km = index+2;
-                double Hnextfac = 0.94*pow( 0.65/(gbs_error/gbs_tolerance), 1.0 / (2*km+1));
-
-		if( gbs_error <= gbs_tolerance ){
-
-			status = 1;
-
-			for(int v=0;v<NumDynVariables;v++){
-				ThisR->State[v] = result[v][index];
-			}
-			if( Hnextfac > 5.0 ){
-                        	Hnextfac = 5.0;
-                	}
-
-			ThisR->Hstep *= Hnextfac;
-			into_Cartesian_from_MST(ThisR);
-
-			ok_steps++;
-
-		} else {
-			status = 0;
-			failed_steps++;
-
-			if( Hnextfac > 0.7 ){
-                        	Hnextfac = 0.7;
-                	}
-			ThisR->Hstep *= Hnextfac;
-		}
-		free(SubStepDivision);
-
 	}
+
+	double Hnextfac = 0.94*pow( 0.65/(gbs_error/gbs_tolerance), 1.0 / (2*korder+1));
+
+	if( gbs_error <= gbs_tolerance ){
+
+		status = 1;
+
+		for(int v=0;v<NumDynVariables;v++){
+			ThisR->State[v] = resultbuf[v];
+		}
+		if( Hnextfac > 5.0 ){
+                       	Hnextfac = 5.0;
+               	}
+
+		ThisR->Hstep *= Hnextfac;
+		into_Cartesian_from_MST(ThisR);
+
+		ok_steps++;
+
+	} else {
+		status = 0;
+		failed_steps++;
+
+		if( Hnextfac > 0.7 ){
+                       	Hnextfac = 0.7;
+               	}
+		ThisR->Hstep *= Hnextfac;
+	}
+	free(SubStepDivision);
 
 	return status;
 
@@ -2163,7 +2127,7 @@ clock_t aika0= clock(),aika1;
 
 		my_barrier();
 		aika0 = clock();
-		status = extrapolate_all_variables( NumberOfSystems, KMAX );
+		status = extrapolate_all_variables( KMAX );
 		aika1 = clock();
 		time_gbs += (double) (aika1-aika0)/CLOCKS_PER_SEC;
 
