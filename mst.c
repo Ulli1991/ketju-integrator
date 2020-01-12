@@ -2137,9 +2137,16 @@ clock_t aika0= clock(),aika1;
 
 		// Check whether we are ready
 		double time = R[0].State[R[0].TimeIndex];
-		if( time > time_interval ){
+		if( fabs(time-time_interval)/time_interval < R->output_time_tolerance ){
 			not_finished = 0;
 		} else {
+
+			compute_total_energy( R );
+			if( time>time_interval ){
+				R->Hstep = -R->U*( time-time_interval );
+			} else if( R->Hstep/R->U + time > time_interval ){
+                        	R->Hstep = R->U*( time_interval-time);
+                	}
 
 			int old_epoch = epoch;
 			epoch = (int) floor( time/percent );
@@ -2158,6 +2165,7 @@ clock_t aika0= clock(),aika1;
 
 
 }
+
 
 void allocate_regularized_region(struct RegularizedRegion *S, int N){
 
