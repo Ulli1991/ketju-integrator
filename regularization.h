@@ -128,7 +128,6 @@ struct RegularizedRegion {
 struct ComTask {
 	int GroupToPerformTask;
 	struct RegularizedRegion *ThisR;
-	int WhichRegion;
 	int NumberOfSubsteps;
 	double *ResultState;
 };

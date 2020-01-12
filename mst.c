@@ -11,7 +11,6 @@
 #endif
 #include "regularization.h"
 
-
 int **indexlist;
 
 double GBSTOL;
@@ -24,7 +23,6 @@ double *yscal;
 double *maxerror;
 double **error,**result;
 double **gbsS;
-double *allerrors;
 
 #ifdef PARALLEL
 #include <mpi.h>
@@ -60,9 +58,7 @@ void die(void){
         MPI_Finalize();
 #endif
         exit(0);
-
 }
-
 
 int cmp_weight_index2(const void *a, const void *b){
     struct WeightIndex2 *a1 = (struct WeightIndex2 *)a;
@@ -1852,22 +1848,21 @@ int gbs_group_with_min_workload( int *GbsGroupWorkLoad ){
 	return index;
 }
 
-void divide_computational_load( struct RegularizedRegion *R, int NumberOfSystems ){
+void divide_computational_load( struct RegularizedRegion *R ){
 
 	int *GbsGroupWorkLoad = calloc(NumGbsGroup,sizeof(int));
 	int counter = 0;
-	for(int region=0;region<NumberOfSystems;region++){
-		for(int i=KMAX-1;i>=0;i--){
-			int ThisSubdivisionCost 				    = get_n_int(i);
-			int GroupIndex 						    = gbs_group_with_min_workload(GbsGroupWorkLoad);
-			GbsGroupWorkLoad[GroupIndex] 				   += ThisSubdivisionCost;
-			ComputationToDoList.ComputationalTask[i].WhichRegion 	    = region;
-			ComputationToDoList.ComputationalTask[i].GroupToPerformTask = GroupIndex;
-			ComputationToDoList.ComputationalTask[i].ThisR 	            = &R[region];
-			ComputationToDoList.ComputationalTask[i].NumberOfSubsteps   = get_n_int(i);
-			counter++;
-		}
+
+	for(int i=KMAX-1;i>=0;i--){
+		int ThisSubdivisionCost 				    = get_n_int(i);
+		int GroupIndex 						    = gbs_group_with_min_workload(GbsGroupWorkLoad);
+		GbsGroupWorkLoad[GroupIndex] 				   += ThisSubdivisionCost;
+		ComputationToDoList.ComputationalTask[i].GroupToPerformTask = GroupIndex;
+		ComputationToDoList.ComputationalTask[i].ThisR 	            = R;
+		ComputationToDoList.ComputationalTask[i].NumberOfSubsteps   = get_n_int(i);
+		counter++;
 	}
+
 	ComputationToDoList.NumberOfComputationalTasks = counter;
 
 	free(GbsGroupWorkLoad);
@@ -2053,18 +2048,25 @@ int extrapolate_all_variables( int korder ){
 }
 
 // Integrate the subsystems using AR-MST for the desired time interval
-void run_integrator( struct RegularizedRegion *R, double time_interval, int NumberOfSystems ){
+void run_integrator( struct RegularizedRegion *R, double time_interval ){
 
 	// Needed variables
 	double dt = 1e-7;
 	double Hstep;
 
-	// Initialize systems to integrate
-	for(int i=0;i<NumberOfSystems;i++){
-		compute_total_energy( &R[i] );
-		R[i].Hstep = dt*R[i].U;
-		R[i].State[R[i].TimeIndex] = 0;
-	}
+	// Initialize the system to integrate
+
+	into_CoM_frame( R );
+
+#ifdef PRIM
+        PrimMST(R);
+#else
+        DivideAndConquerPrim( R );
+#endif
+
+	compute_total_energy( R );
+	R->Hstep = dt*R->U;
+	R->State[R->TimeIndex] = 0;
 
 	double percent = time_interval/50;
 	int epoch = -1;
@@ -2081,7 +2083,7 @@ void run_integrator( struct RegularizedRegion *R, double time_interval, int Numb
 			redo = 0;
 
 			// Divide the systems and substep divisions for tasks
-			divide_computational_load( R, NumberOfSystems );
+			divide_computational_load( R );
 
 			// Perform the leapfrog tasks
 			for(int ctask=0;ctask<ComputationToDoList.NumberOfComputationalTasks;ctask++){
@@ -2192,55 +2194,74 @@ void allocate_regularized_region(struct RegularizedRegion *S, int N){
 
 }
 
+void allocate_armst_structs( struct RegularizedRegion **R, int MaxNumPart ){
 
-void allocate_armst_structs( struct RegularizedRegion **R, int NumberOfSystems, int MaxNumPart ){
+        int MaxDynamicalVariables = 6*(MaxNumPart-1)+2;
+        *R = calloc(1,sizeof(struct RegularizedRegion));
 
-	int MaxDynamicalVariables = 6*(MaxNumPart-1)+2;
-	*R = calloc(NumberOfSystems,sizeof(struct RegularizedRegion));
-
-        for(int i=0;i<NumberOfSystems;i++){
-                allocate_regularized_region( R[i], MaxNumPart );
-        }
+        allocate_regularized_region( R[0], MaxNumPart );
 
         gbsS = calloc(KMAX,sizeof(double *));
         for(int i=0;i<KMAX;i++){
-                gbsS[i] = calloc(KMAX,sizeof(double));
+		gbsS[i] = calloc(KMAX,sizeof(double));
         }
 
-	int korder = 8;
-	int NumDynVariables = MaxDynamicalVariables;
+       int korder = 8;
+       int NumDynVariables = MaxDynamicalVariables;
 
-	        errorbuf  = calloc(NumDynVariables,sizeof(double));
-                resultbuf = calloc(NumDynVariables,sizeof(double));
+        errorbuf  = calloc(NumDynVariables,sizeof(double));
+        resultbuf = calloc(NumDynVariables,sizeof(double));
+        y = calloc(korder,sizeof(double));
+	yscal = calloc(korder,sizeof(double));
+        maxerror = calloc(korder-1,sizeof(double));
+        error = calloc(NumDynVariables,sizeof(double *));
+        result = calloc(NumDynVariables,sizeof(double *));
 
-                y = calloc(korder,sizeof(double));
-                yscal = calloc(korder,sizeof(double));
-                maxerror = calloc(korder-1,sizeof(double));
+        for(int i=0;i<NumDynVariables;i++){
+	        error[i] = calloc(korder-1,sizeof(double));
+                result[i] = calloc(korder-1,sizeof(double));
+        }
+        indexlist = calloc(8,sizeof(int *));
 
-                error = calloc(NumDynVariables,sizeof(double *));
-                result = calloc(NumDynVariables,sizeof(double *));
-                for(int i=0;i<NumDynVariables;i++){
-                        error[i] = calloc(korder-1,sizeof(double));
-                        result[i] = calloc(korder-1,sizeof(double));
-                }
-
-	indexlist = calloc(8,sizeof(int *));
-	for(int i=0;i<8;i++){
-		indexlist[i] = calloc(MaxNumPart, sizeof(int));
+        for(int i=0;i<8;i++){
+          indexlist[i] = calloc(MaxNumPart, sizeof(int));
 	}
-	ParticleInNode = calloc(MaxNumPart,sizeof(struct OctreeNode *));
 
-	int NumAlloc = NumberOfSystems*KMAX;
+
+	ParticleInNode = calloc(MaxNumPart,sizeof(struct OctreeNode *));
+        int NumAlloc = KMAX;
 
         ComputationToDoList.ComputationalTask = calloc(NumAlloc,sizeof(struct ComTask));
         for(int i=0;i<NumAlloc;i++){
                 ComputationToDoList.ComputationalTask[i].ResultState = calloc(MaxDynamicalVariables, sizeof(double));
         }
         ComputationToDoList.CopyOfSingleRegion = calloc(NumAlloc,sizeof(struct RegularizedRegion));
-
         for(int i=0;i<NumAlloc;i++){
                 allocate_regularized_region( &ComputationToDoList.CopyOfSingleRegion[i], MaxNumPart );
         }
+}
+
+// free
+void free_data( struct RegularizedRegion *R ){
+
+        for(int i=0;i<KMAX;i++){
+		free(ComputationToDoList.ComputationalTask[i].ResultState);
+        }
+        free(ComputationToDoList.ComputationalTask);
+
+        free(R->LocalEdge);
+        free(R->Vertex);
+        free(R->Pos);
+	free(R->Vel);
+        free(R->Acc);
+        free(R->Mass);
+        free(R->State);
+        free(R->MSTedgeAcc);
+        free(R->EdgeInMST);
+	free(R);
+
+	free(gbsS);
+
 }
 
 // Read in the test IC
@@ -2262,6 +2283,8 @@ void read_ic_from_file( struct RegularizedRegion *R, char *INPUTFILE ){
         }
 	my_barrier();
 }
+
+
 
 // The test main function
 int main(int argc, char *argv[]){
@@ -2289,35 +2312,18 @@ int main(int argc, char *argv[]){
 	/////////////////////////////////////////
 
 	struct RegularizedRegion *R;
-
-        int NumberOfSystems = 1;
-
         int MaxNumPart = MAXPART;
-
-	allerrors = calloc(6*(MaxNumPart-1)*2,sizeof(double));
-	allocate_armst_structs(&R,NumberOfSystems,MaxNumPart);
-
-	read_ic_from_file( &R[0], argv[1] );
-
-
-
+	allocate_armst_structs(&R,MaxNumPart);
+	read_ic_from_file( R, argv[1] );
 	double IntegrationTime = 1e-5;
 
-	into_CoM_frame( &R[0] );
-
-	// Build the MST and integrate for some time interval
+	// Integrate for some time interval
 
 	wtime0 = clock();
-
-#ifdef PRIM
-	PrimMST(&R[0]);
-#else
-	DivideAndConquerPrim( &R[0] );
-#endif
-
-	run_integrator(R,IntegrationTime,1);
-
+	run_integrator(R,IntegrationTime);
 	wtime1 = clock();
+
+	// Do some output
 
 	double elapsed = (double) (wtime1-wtime0)/CLOCKS_PER_SEC;
 
@@ -2346,28 +2352,10 @@ int main(int argc, char *argv[]){
 #endif
 	}
 
-	// Free stuff
-
-        for(int i=0;i<NumberOfSystems*KMAX;i++){
-                free(ComputationToDoList.ComputationalTask[i].ResultState);
-        }
-	free(ComputationToDoList.ComputationalTask);
-
-	free(R[0].LocalEdge);
-	free(R[0].Vertex);
-	free(R[0].Pos);
-	free(R[0].Vel);
-	free(R[0].Acc);
-	free(R[0].Mass);
-	free(R[0].State);
-	free(R[0].MSTedgeAcc);
-	free(R[0].EdgeInMST);
-	free(gbsS);
-
-
+// Free stuff and finalize
+	free_data( R );
 #ifdef PARALLEL
 	MPI_Finalize();
 #endif
-
 	return 0;
 }
