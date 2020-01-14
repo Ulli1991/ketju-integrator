@@ -1,0 +1,99 @@
+// The public interface header with all the user-facing types and function
+// prototypes.
+
+#ifndef KETJU_INTEGRATOR_H
+#define KETJU_INTEGRATOR_H
+
+// Types and enums
+
+struct ketju_integration_options {
+    double gbs_relative_tolerance;
+    double gbs_absolute_tolerance;
+
+    double output_time_relative_tolerance;
+    double output_time_absolute_tolerance;
+
+    unsigned int PN_flags; //< Bitflags for enabling different PN terms
+
+    int max_tree_distance;
+    //< Maximum separation in the tree structure before using CoM coordinate
+    //distances
+};
+
+struct ketju_natural_constants {
+    double G;
+    double c;
+};
+
+// Using bitflags for the PN terms allows more fine-grained control of the used
+// terms (e.g. only PN2.5 radiation reaction or only conservative terms).
+// XXX: this could end up being too complicated, but should be fairly easy to
+// use especially if all commonly used combinations are pre-defined.
+enum ketju_PN_flags {
+    KETJU_PN_1_0_ACC = 1 << 0,
+    KETJU_PN_2_0_ACC = 1 << 2,
+    KETJU_PN_2_5_ACC = 1 << 3,
+    KETJU_PN_3_0_ACC = 1 << 4,
+    KETJU_PN_3_5_ACC = 1 << 5,
+    KETJU_PN_CONSERVATIVE = KETJU_PN_1_0_ACC | KETJU_PN_2_0_ACC | KETJU_PN_3_0_ACC,
+    KETJU_PN_DYNAMIC_ALL = 0xFF, // all the spin independent terms, is this a good name?
+    
+
+    KETJU_PN_1_5_SPIN_ACC = 1 << 8,
+    KETJU_PN_2_0_SPIN_ACC = 1 << 9,
+    KETJU_PN_1_0_SPIN_EVOL = 1 << 10,
+    KETJU_PN_1_5_SPIN_EVOL = 1 << 11,
+    KETJU_PN_SPIN_ALL = 0xF00,
+
+    KETJU_PN_ALL = KETJU_PN_DYNAMIC_ALL | KETJU_PN_SPIN_ALL,
+};
+
+struct ketju_system_physical_state {
+    double time;
+    double *mass;
+    double (*pos)[3];
+    double (*vel)[3];
+    double (*spin)[3];
+};
+
+struct ketju_performance_counters {
+    double time_force;
+    double time_comm;
+    double time_coord;
+};
+
+struct ketju_system {
+    int num_particles; //< Total number of particles
+    int num_pn_particles; //< Number of PN enabled particles
+
+    struct ketju_system_physical_state *physical_state;
+    //< Physical state of the system (as a pointer for making temporary copies)
+
+    struct ketju_system_internal_state *internal_state; 
+    //< Internal state (implementation detail)
+
+    // TODO is it better to have this stuff (which doesn't need to be copied
+    // into temp variables) as direct members to avoid extra pointer derefs, or
+    // as pointers for consistency with the above and perhaps some cache
+    // behaviour benefits?
+    struct ketju_performance_counters *perf; 
+    struct ketju_integration_options *options;
+
+    struct ketju_natural_constants *constants;
+    //< Values of natural constants which define the unit system
+    
+
+    double initial_CoM_pos[3];
+    //< Position of the center of mass in the input coordinates
+    // (origin of physical_state.pos).
+    // Not updated during integration (TODO check).
+    double initial_CoM_vel[3];
+    //< Velocity of the center of mass in the input coordinates
+    // (origin of physical_state.vel)
+    // Not updated during integration (TODO check).
+
+};
+
+// Function prototypes
+
+#endif // KETJU_INTEGRATOR_H
