@@ -1,0 +1,103 @@
+#include <stdio.h>
+#include <stdlib.h>
+
+#include <mpi.h>
+
+#include "ketju_integrator/ketju_integrator.h"
+
+int ThisTask;
+
+void init_from_ic_file(struct ketju_system *R, char *ic_file_name) {
+    FILE *fp;
+    int num_pn_part, num_other_part;
+    fp = fopen(ic_file_name, "r");
+    if (!fp) {
+        printf("Error opening file %s on task %d\n", ic_file_name, ThisTask);
+        MPI_Abort(MPI_COMM_WORLD, -1);
+    }
+    int status = fscanf(fp, "%d %d\n", &num_pn_part, &num_other_part);
+    if (!status) {
+        printf("Error reading file %s on task %d\n", ic_file_name, ThisTask);
+        MPI_Abort(MPI_COMM_WORLD, -1);
+    }
+
+    ketju_create_system(R, num_pn_part, num_other_part, MPI_COMM_WORLD);
+    R->physical_state->time = 0;
+
+    for (int i = 0; i < num_pn_part; ++i) {
+        status = fscanf(
+            fp, "%lf %lf %lf %lf %lf %lf %lf %lf %lf %lf\n",
+            &R->physical_state->mass[i], &R->physical_state->pos[i][0],
+            &R->physical_state->pos[i][1], &R->physical_state->pos[i][2],
+            &R->physical_state->vel[i][0], &R->physical_state->vel[i][1],
+            &R->physical_state->vel[i][2], &R->physical_state->spin[i][0],
+            &R->physical_state->spin[i][1], &R->physical_state->spin[i][2]);
+        if (!status) {
+            printf("Error reading file %s on task %d\n", ic_file_name,
+                   ThisTask);
+            MPI_Abort(MPI_COMM_WORLD, -1);
+        }
+    }
+    for (int i = num_pn_part; i < R->num_particles; ++i) {
+        status = fscanf(
+            fp, "%lf %lf %lf %lf %lf %lf %lf\n", &R->physical_state->mass[i],
+            &R->physical_state->pos[i][0], &R->physical_state->pos[i][1],
+            &R->physical_state->pos[i][2], &R->physical_state->vel[i][0],
+            &R->physical_state->vel[i][1], &R->physical_state->vel[i][2]);
+        if (!status) {
+            printf("Error reading file %s on task %d\n", ic_file_name,
+                   ThisTask);
+            MPI_Abort(MPI_COMM_WORLD, -1);
+        }
+    }
+}
+
+int main(int argc, char *argv[]) {
+    MPI_Init(&argc, &argv);
+    MPI_Comm_rank(MPI_COMM_WORLD, &ThisTask);
+    if (argc != 3) {
+        if (ThisTask == 0) {
+            printf("Usage:\nnbody ic_file integration_time\n");
+        }
+        MPI_Finalize();
+        return -2;
+    }
+
+    struct ketju_system R;
+    init_from_ic_file(&R, argv[1]);
+    // TODO read param file
+
+    double time_interval = strtof(argv[2], NULL);
+    ketju_run_integrator(&R, time_interval);
+
+    if (ThisTask == 0) {
+        printf("Timers:\n");
+        printf(
+            "time_force:     %f\n"
+            "time_comm:      %f\n"
+            "time_coord:     %f\n"
+            "time_mst:       %f\n"
+            "time_gbscomm:   %f\n"
+            "time_gbsextr:   %f\n"
+            "time_total:     %f\n"
+            "succesful_steps: %d\n"
+            "failed_steps: %d\n"
+            "relative_energy_error: %e\n"
+            ,
+            R.perf->time_force, R.perf->time_comm, R.perf->time_coord,
+            R.perf->time_mst, R.perf->time_gbscomm, R.perf->time_gbsextr,
+            R.perf->time_total, R.perf->succesful_steps, R.perf->failed_steps,
+            R.perf->relative_energy_error);
+
+        printf("First particle pos = [%e, %e, %e]\n"
+               "               vel = [%e, %e, %e]\n",
+               R.physical_state->pos[0][0], R.physical_state->pos[0][1],
+               R.physical_state->pos[0][2], R.physical_state->vel[0][0],
+               R.physical_state->vel[0][1], R.physical_state->vel[0][2]);
+    }
+
+    ketju_free_system(&R);
+
+    MPI_Finalize();
+    return 0;
+}

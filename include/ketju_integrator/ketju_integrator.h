@@ -5,31 +5,12 @@
 #define KETJU_INTEGRATOR_H
 
 // Types and enums
-
-struct ketju_integration_options {
-    double gbs_relative_tolerance;
-    double gbs_absolute_tolerance;
-
-    double output_time_relative_tolerance;
-    double output_time_absolute_tolerance;
-
-    unsigned int PN_flags; //< Bitflags for enabling different PN terms
-
-    int max_tree_distance;
-    //< Maximum separation in the tree structure before using CoM coordinate
-    //distances
-};
-
-struct ketju_natural_constants {
-    double G;
-    double c;
-};
-
 // Using bitflags for the PN terms allows more fine-grained control of the used
 // terms (e.g. only PN2.5 radiation reaction or only conservative terms).
 // XXX: this could end up being too complicated, but should be fairly easy to
 // use especially if all commonly used combinations are pre-defined.
 enum ketju_PN_flags {
+    KETJU_PN_NONE = 0,
     KETJU_PN_1_0_ACC = 1 << 0,
     KETJU_PN_2_0_ACC = 1 << 2,
     KETJU_PN_2_5_ACC = 1 << 3,
@@ -48,18 +29,62 @@ enum ketju_PN_flags {
     KETJU_PN_ALL = KETJU_PN_DYNAMIC_ALL | KETJU_PN_SPIN_ALL,
 };
 
+struct ketju_integration_options {
+    int gbs_kmax;
+
+    double gbs_relative_tolerance;
+
+    double output_time_relative_tolerance;
+    double output_time_absolute_tolerance;
+
+    unsigned int PN_flags; //< Bitflags for enabling different PN terms
+
+    int max_tree_distance;
+    //< Maximum separation in the tree structure before using CoM coordinate
+    //distances
+};
+
+static const struct ketju_integration_options
+    ketju_default_integration_options = {
+        .gbs_kmax = 8,
+        .gbs_relative_tolerance = 1e-9,
+        .output_time_relative_tolerance = 1e-6,
+        .output_time_absolute_tolerance = 1e-15,
+        .PN_flags = KETJU_PN_NONE,
+        .max_tree_distance = 2,
+};
+
+struct ketju_natural_constants {
+    double G;
+    double c;
+};
+// Gadget default values for now
+static const struct ketju_natural_constants ketju_default_natural_constants = {
+    .G = 43007.1, .c = 299792.0};
+
 struct ketju_system_physical_state {
     double time;
     double *mass;
     double (*pos)[3];
     double (*vel)[3];
-    double (*spin)[3];
+    double (*spin)[3]; //spin only for pn particles
 };
 
 struct ketju_performance_counters {
     double time_force;
     double time_comm;
     double time_coord;
+    double time_mst;
+    double time_gbscomm;
+    double time_gbsextr;
+    double time_total;
+
+    // check what these actually mean
+    double tprim3, tprim4;
+
+    int succesful_steps;
+    int failed_steps;
+    double relative_energy_error;
 };
 
 struct ketju_system {
@@ -68,6 +93,8 @@ struct ketju_system {
 
     struct ketju_system_physical_state *physical_state;
     //< Physical state of the system (as a pointer for making temporary copies)
+    // TODO looking like we're not going to use the pointer nature for making
+    // copies, maybe make into a direct member?
 
     struct ketju_system_internal_state *internal_state; 
     //< Internal state (implementation detail)
@@ -83,17 +110,23 @@ struct ketju_system {
     //< Values of natural constants which define the unit system
     
 
-    double initial_CoM_pos[3];
+    double CoM_pos[3];
     //< Position of the center of mass in the input coordinates
     // (origin of physical_state.pos).
-    // Not updated during integration (TODO check).
-    double initial_CoM_vel[3];
+    // Not updated during integration.
+    // XXX: the integration works only in the chained coordinates, forcing the
+    // CoM to stay at the origin. Not compatible with perturbations that don't
+    // conserve the CoM right now
+    double CoM_vel[3];
     //< Velocity of the center of mass in the input coordinates
     // (origin of physical_state.vel)
-    // Not updated during integration (TODO check).
 
 };
 
 // Function prototypes
+void ketju_create_system(struct ketju_system *R, int num_pn_particles,
+                         int num_other_particles, MPI_Comm comm);
+void ketju_free_system(struct ketju_system *R);
+void ketju_run_integrator(struct ketju_system *R, double time_interval);
 
 #endif // KETJU_INTEGRATOR_H

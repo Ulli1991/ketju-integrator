@@ -84,6 +84,8 @@ target_compile_options(ketju-integrator
         >
 )
 
+target_link_libraries(ketju-integrator PUBLIC m) # math lib
+
 
 # Find packages
 
@@ -95,6 +97,12 @@ target_link_libraries(ketju-integrator PUBLIC ${MPI_C_LIBRARIES})
 # First need to strip extra whitespace in the MPI variable which causes errors
 string(STRIP ${MPI_C_LINK_FLAGS} MPI_C_LINK_FLAGS)
 target_link_libraries(ketju-integrator PUBLIC ${MPI_C_LINK_FLAGS})
+
+# standalone executable
+
+add_executable(nbody "nbody/main.c")
+target_link_libraries(nbody ketju-integrator)
+
 
 
 ## Generate install cmake files

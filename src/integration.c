@@ -1,12 +1,14 @@
 // Main integration and force calculation functions
 
 #include <limits.h>
+#include <math.h>
 #include <stdlib.h>
 #include <string.h>
-#include <math.h>
 
-#include "ketju_integrator/ketju_integrator.h"
+#include <mpi.h>
+
 #include "ketju_integrator/internal.h"
+#include "ketju_integrator/ketju_integrator.h"
 
 // This is needed only in this file
 enum velocity_type { PHYSICAL, AUXILIARY };
@@ -40,7 +42,7 @@ void loop_scheduling_N2(int Nrow, int Nt, int *istart, int *jstart,
 void compute_U(struct ketju_system *R) {
 
     tick(&R->perf->time_force);
-    
+
     struct ketju_system_internal_state *is = R->internal_state;
     struct spanning_tree_coordinate_system *mst = is->mst;
     struct ketju_system_physical_state *ps = R->physical_state;
@@ -48,7 +50,7 @@ void compute_U(struct ketju_system *R) {
     is->U = 0;
     int istart = 0;
     int CumNumEdge, ThisBlock, jstart;
-    loop_scheduling_N2(mst->num_vertex, is->task_info->gbs_group_size,
+    loop_scheduling_N2(mst->num_vertices, is->task_info->gbs_group_size,
                        &istart, &jstart, &ThisBlock, &CumNumEdge,
                        is->task_info->gbs_group_rank);
     int loop = 1;
@@ -59,12 +61,12 @@ void compute_U(struct ketju_system *R) {
     int path[2];
     int sign[2];
 
-    for (int i = istart; i < mst->num_vertex; i++) {
+    for (int i = istart; i < mst->num_vertices; i++) {
 
         double mi = ps->mass[i];
         int Li = mst->vertex[i].level;
         if (i > istart) { jstart = i + 1; }
-        for (int j = jstart; j < mst->num_vertex; j++) {
+        for (int j = jstart; j < mst->num_vertices; j++) {
             double mj = ps->mass[j];
             int Lj = mst->vertex[j].level;
             double r2 = 0;
@@ -109,9 +111,7 @@ void compute_U(struct ketju_system *R) {
     }
     tock(&R->perf->time_comm);
 
-    if (!isfinite(is->U)) {
-        terminate("U is not finite!");
-    }
+    if (!isfinite(is->U)) { terminate("U is not finite!"); }
 
     is->U *= R->constants->G;
 
@@ -127,11 +127,10 @@ void compute_U_and_Newtonian_Acc(struct ketju_system *R) {
     struct spanning_tree_coordinate_system *mst = is->mst;
     struct ketju_system_physical_state *ps = R->physical_state;
 
-
-    int istart, istop = mst->num_vertex, jstop = mst->num_vertex;
+    int istart, istop = mst->num_vertices, jstop = mst->num_vertices;
     int ThisBlock, CumNumEdge, jstart;
-    loop_scheduling_N2(mst->num_vertex, is->task_info->gbs_group_size, &istart,
-                       &jstart, &ThisBlock, &CumNumEdge,
+    loop_scheduling_N2(mst->num_vertices, is->task_info->gbs_group_size,
+                       &istart, &jstart, &ThisBlock, &CumNumEdge,
                        is->task_info->gbs_group_rank);
     int loop = 1;
     int c = 0;
@@ -140,11 +139,10 @@ void compute_U_and_Newtonian_Acc(struct ketju_system *R) {
     int path[Nd];
     int sign[Nd];
 
-    memset(is->acc, 0, sizeof(double[mst->num_vertex][3]));
+    memset(is->acc, 0, sizeof(double[mst->num_vertices][3]));
 
     is->U = 0;
     double dr[3], r2;
-
 
     for (int i = istart; i < istop; i++) {
         const double mi = ps->mass[i];
@@ -158,8 +156,8 @@ void compute_U_and_Newtonian_Acc(struct ketju_system *R) {
 
             int proximity = 0;
             if (abs(Li - Lj) <= Nd) {
-                proximity =
-                    ketju_check_relative_proximity_ND_2(j, i, R, &d, path, sign);
+                proximity = ketju_check_relative_proximity_ND_2(j, i, R, &d,
+                                                                path, sign);
             }
 
             if (proximity) {
@@ -198,7 +196,7 @@ void compute_U_and_Newtonian_Acc(struct ketju_system *R) {
 
     tick(&R->perf->time_comm);
     if (is->task_info->gbs_group_size > 1) {
-        MPI_Allreduce(MPI_IN_PLACE, is->acc, 3 * mst->num_vertex, MPI_DOUBLE,
+        MPI_Allreduce(MPI_IN_PLACE, is->acc, 3 * R->num_particles, MPI_DOUBLE,
                       MPI_SUM, is->task_info->gbs_comm);
         MPI_Allreduce(MPI_IN_PLACE, &is->U, 1, MPI_DOUBLE, MPI_SUM,
                       is->task_info->gbs_comm);
@@ -206,7 +204,7 @@ void compute_U_and_Newtonian_Acc(struct ketju_system *R) {
     tock(&R->perf->time_comm);
 
     int hi, lo;
-    for (int i = 0; i < mst->num_vertex - 1; i++) {
+    for (int i = 0; i < mst->num_vertices - 1; i++) {
 
         int v1, v2;
         get_v1_v2_fast(R, i, &v1, &v2);
@@ -229,7 +227,6 @@ void compute_U_and_Newtonian_Acc(struct ketju_system *R) {
     tock(&R->perf->time_force);
 }
 
-
 // TODO this could maybe go in mst.c
 void into_Cartesian_from_MST(struct ketju_system *R) {
 
@@ -251,7 +248,7 @@ void into_Cartesian_from_MST(struct ketju_system *R) {
         ps->pos[first][k] = 0.0;
         ps->vel[first][k] = 0.0;
     }
-    for (int i = 0; i < mst->num_vertex - 1; i++) {
+    for (int i = 0; i < mst->num_vertices - 1; i++) {
 
         get_v1_v2_fast(R, i, &v1, &v2);
 
@@ -269,8 +266,8 @@ void into_Cartesian_from_MST(struct ketju_system *R) {
         }
     }
 
-    // TODO maybe we do not want to force the CoM to stay at the origin, e.g. if
-    // there are some extra forces
+    // The coordinate system is defined to have the CoM at the origin, but at
+    // this point the root particle is at the origin. Fix the situation.
     double M = 0, CoM[3] = {0}, CoV[3] = {0};
 
     for (int i = 0; i < R->num_particles; i++) {
@@ -295,33 +292,32 @@ void into_Cartesian_from_MST(struct ketju_system *R) {
     tock(&R->perf->time_coord);
 }
 
-
-// puts the initial data to the CoM frame and sets the initial CoM pos and vel
+// puts the initial data to the CoM frame and sets the CoM pos and vel
 void into_CoM_frame(struct ketju_system *R) {
 
     tick(&R->perf->time_coord);
     struct ketju_system_physical_state *ps = R->physical_state;
 
     for (int k = 0; k < 3; k++) {
-        R->initial_CoM_pos[k] = 0;
-        R->initial_CoM_vel[k] = 0;
+        R->CoM_pos[k] = 0;
+        R->CoM_vel[k] = 0;
     }
     double M = 0;
     for (int i = 0; i < R->num_particles; i++) {
         M += ps->mass[i];
         for (int k = 0; k < 3; k++) {
-            R->initial_CoM_pos[k] += ps->mass[i] * ps->pos[i][k];
-            R->initial_CoM_vel[k] += ps->mass[i] * ps->vel[i][k];
+            R->CoM_pos[k] += ps->mass[i] * ps->pos[i][k];
+            R->CoM_vel[k] += ps->mass[i] * ps->vel[i][k];
         }
     }
     for (int k = 0; k < 3; k++) {
-        R->initial_CoM_pos[k] /= M;
-        R->initial_CoM_vel[k] /= M;
+        R->CoM_pos[k] /= M;
+        R->CoM_vel[k] /= M;
     }
     for (int i = 0; i < R->num_particles; i++) {
         for (int k = 0; k < 3; k++) {
-            ps->pos[i][k] -= R->initial_CoM_pos[k];
-            ps->vel[i][k] -= R->initial_CoM_vel[k];
+            ps->pos[i][k] -= R->CoM_pos[k];
+            ps->vel[i][k] -= R->CoM_vel[k];
         }
     }
 
@@ -361,7 +357,7 @@ void update_pos(struct ketju_system *R) {
     for (int k = 0; k < 3; k++) {
         ps->pos[first][k] = 0.0;
     }
-    for (int i = 0; i < mst->num_vertex - 1; i++) {
+    for (int i = 0; i < mst->num_vertices - 1; i++) {
 
         get_v1_v2_fast(R, i, &v1, &v2);
 
@@ -378,7 +374,6 @@ void update_pos(struct ketju_system *R) {
         }
     }
 
-    // TODO: maybe we don't want this forcing CoM to the origin constantly?
     double M = 0, CoM[3] = {0};
     for (int i = 0; i < R->num_particles; i++) {
         M += ps->mass[i];
@@ -419,7 +414,7 @@ void update_vel(struct ketju_system *R, double (*vel_to_update)[3],
     for (int k = 0; k < 3; k++) {
         vel_to_update[first][k] = 0.0;
     }
-    for (int i = 0; i < mst->num_vertex - 1; i++) {
+    for (int i = 0; i < mst->num_vertices - 1; i++) {
 
         get_v1_v2_fast(R, i, &v1, &v2);
 
@@ -442,7 +437,6 @@ void update_vel(struct ketju_system *R, double (*vel_to_update)[3],
         }
     }
 
-    // TODO: maybe we don't want this forcing CoM to the origin constantly?
     double M = 0, CoV[3] = {0};
     for (int i = 0; i < R->num_particles; i++) {
         M += ps->mass[i];
@@ -469,17 +463,16 @@ void drift(double ds, struct ketju_system *R) {
     struct ketju_system_physical_state *ps = R->physical_state;
 
     compute_T(R);
-    double dt = ds / (is->T + is->B); //TODO: isn't this just is->U?
+    double dt = ds / (is->T + is->B); // TODO: isn't this just is->U?
     ps->time += dt;
 
-    for (int i = 0; i < mst->num_vertex - 1; i++) {
+    for (int i = 0; i < mst->num_vertices - 1; i++) {
         for (int k = 0; k < 3; k++) {
             mst->edge_rel_pos[i][k] += dt * mst->edge_rel_vel[i][k];
         }
     }
     update_pos(R);
 }
-
 
 void set_auxiliary_variables(struct ketju_system *R) {
 
@@ -489,7 +482,7 @@ void set_auxiliary_variables(struct ketju_system *R) {
 
     memcpy(is->aux_vel, ps->vel, sizeof(double[R->num_particles][3]));
     memcpy(mst->edge_rel_aux_vel, mst->edge_rel_vel,
-           sizeof(double[mst->num_vertex][3]));
+           sizeof(double[mst->num_vertices][3]));
 }
 
 // TODO: move declarations / reorganize
@@ -512,7 +505,7 @@ void physical_kick(double dt, struct ketju_system *R) {
     }
     is->B -= dB * dt;
 
-    for (int i = 0; i < mst->num_vertex - 1; i++) {
+    for (int i = 0; i < mst->num_vertices - 1; i++) {
         for (int k = 0; k < 3; k++) {
             mst->edge_rel_vel[i][k] +=
                 dt * (mst->edge_rel_acc[i][k] + mst->edge_rel_acc_vd[i][k]);
@@ -529,7 +522,7 @@ void auxiliary_kick(double dt, struct ketju_system *R) {
     update_vel(R, ps->vel, PHYSICAL);
     compute_Post_Newtonian_Acc(R, ps->vel);
 
-    for (int i = 0; i < mst->num_vertex - 1; i++) {
+    for (int i = 0; i < mst->num_vertices - 1; i++) {
         for (int k = 0; k < 3; k++) {
             mst->edge_rel_aux_vel[i][k] +=
                 dt * (mst->edge_rel_acc[i][k] + mst->edge_rel_acc_vd[i][k]);
@@ -549,7 +542,7 @@ void kick(double ds, struct ketju_system *R) {
     if (!R->options->PN_flags) {
         // no velocity dependent forces (only PN for now), just the newtonian
         // part needed
-        for (int i = 0; i < mst->num_vertex - 1; i++) {
+        for (int i = 0; i < mst->num_vertices - 1; i++) {
             for (int k = 0; k < 3; k++) {
                 mst->edge_rel_vel[i][k] += dt * mst->edge_rel_acc[i][k];
             }
@@ -562,49 +555,6 @@ void kick(double ds, struct ketju_system *R) {
     update_vel(R, ps->vel, PHYSICAL);
 }
 
-double get_n_double(int i) { return (2.0 * (i + 1.0)); }
-int get_n_int(int i) { return (2.0 * (i + 1.0)); }
-
-double get_error(double a, double b) { return fabs(b - a); }
-
-int gbs_group_with_min_workload(int *GbsGroupWorkLoad, int num_gbs_group) {
-    int min_workload = INT_MAX;
-    int index = 0;
-    for (int i = 0; i < num_gbs_group; i++) {
-        if (GbsGroupWorkLoad[i] < min_workload) {
-            min_workload = GbsGroupWorkLoad[i];
-            index = i;
-        }
-    }
-    return index;
-}
-
-// TODO port this
-#if 0
-void divide_computational_load(struct ketju_system *R) {
-
-    int *GbsGroupWorkLoad = calloc(NumGbsGroup, sizeof(int));
-    int counter = 0;
-
-    const int KMAX = 8; // TODO make configurable
-    for (int i = KMAX - 1; i >= 0; i--) {
-        int ThisSubdivisionCost = get_n_int(i);
-        int GroupIndex = gbs_group_with_min_workload(GbsGroupWorkLoad);
-        GbsGroupWorkLoad[GroupIndex] += ThisSubdivisionCost;
-        ComputationToDoList.ComputationalTask[i].GroupToPerformTask =
-            GroupIndex;
-        ComputationToDoList.ComputationalTask[i].ThisR = R;
-        ComputationToDoList.ComputationalTask[i].NumberOfSubsteps =
-            get_n_int(i);
-        counter++;
-    }
-
-    ComputationToDoList.NumberOfComputationalTasks = counter;
-
-    free(GbsGroupWorkLoad);
-}
-#endif
-
 void compute_total_energy(struct ketju_system *R) {
 
     struct ketju_system_internal_state *is = R->internal_state;
@@ -615,11 +565,10 @@ void compute_total_energy(struct ketju_system *R) {
     is->B = -is->H;
     // TODO is there some reason that the B variable and the B value in the old
     // state are different like below?
-    //R->State[R->BIndex] = R->B;
+    // R->State[R->BIndex] = R->B;
 }
 
-void mst_leapfrog(struct ketju_system *R, double Hstep,
-                  int NumberOfSubsteps) {
+void mst_leapfrog(struct ketju_system *R, double Hstep, int NumberOfSubsteps) {
 
     if (R->options->PN_flags) { set_auxiliary_variables(R); }
 
@@ -634,59 +583,177 @@ void mst_leapfrog(struct ketju_system *R, double Hstep,
     drift(h / 2, R);
 }
 
-// TODO this section
-#if 0
+int num_gbs_substeps(int k) { return 2 * k; }
 
-// TODO we only want to copy the physical and internal state for temp variables
-void copy_regularized_region(struct ketju_system *Orig,
-                             struct ketju_system *Copy) {
+double get_error(double a, double b) { return fabs(b - a); }
 
-    Copy->gbs_tolerance = Orig->gbs_tolerance;
-    Copy->output_time_tolerance = Orig->output_time_tolerance;
-    Copy->NumVertex = Orig->NumVertex;
-    Copy->NumEdge = Orig->NumEdge;
-    Copy->NumDynVariables = Orig->NumDynVariables;
-    Copy->TimeIndex = Orig->TimeIndex;
-    Copy->BIndex = Orig->BIndex;
-    Copy->Hstep = Orig->Hstep;
+int argmin_int(int *arr, int size) {
+    int min = arr[0];
+    int ind = 0;
+    for (int i = 1; i < size; ++i) {
+        if (arr[i] < min) {
+            min = arr[i];
+            ind = i;
+        }
+    }
+    return ind;
+}
 
-    for (int j = 0; j < Orig->NumVertex; j++) {
-        Copy->Vertex[j].id = Orig->Vertex[j].id;
-        Copy->Vertex[j].degree = Orig->Vertex[j].degree;
-        Copy->Vertex[j].type = Orig->Vertex[j].type;
-        Copy->Vertex[j].parent = Orig->Vertex[j].parent;
-        Copy->Vertex[j].edgetoparent = Orig->Vertex[j].edgetoparent;
-        Copy->Vertex[j].level = Orig->Vertex[j].level;
-        Copy->Vertex[j].inMST = Orig->Vertex[j].inMST;
-    }
-    for (int j = 0; j < Orig->NumVertex - 1; j++) {
-        Copy->EdgeInMST[j].vertex1 = Orig->EdgeInMST[j].vertex1;
-        Copy->EdgeInMST[j].vertex2 = Orig->EdgeInMST[j].vertex2;
-    }
+// Get the values of k that are done by this gbs group.
+// The values are in descending order
+void get_gbs_ks_for_this_group(struct ketju_system *R,
+                               int *gbs_ks_for_this_group) {
+    const int kmax = R->options->gbs_kmax;
+    memset(gbs_ks_for_this_group, 0, sizeof(int[kmax]));
 
-    for (int j = 0; j < Orig->NumDynVariables; j++) {
-        Copy->State[j] = Orig->State[j];
-    }
-    for (int j = 0; j < 3 * Orig->NumVertex; j++) {
-        Copy->Pos[j] = Orig->Pos[j];
-        Copy->Vel[j] = Orig->Vel[j];
-        Copy->Acc[j] = Orig->Acc[j];
-        Copy->AuxVel[j] = Orig->AuxVel[j];
-        Copy->AccPN[j] = Orig->AccPN[j];
-    }
-    for (int j = 0; j < 3 * (Orig->NumVertex - 1); j++) {
-        Copy->MSTedgeAcc[j] = Orig->MSTedgeAcc[j];
-        Copy->AuxEdgeVel[j] = Orig->AuxEdgeVel[j];
-        Copy->MSTedgeAcc_PN[j] = Orig->MSTedgeAcc_PN[j];
-    }
-    for (int j = 0; j < Orig->NumVertex; j++) {
-        Copy->Mass[j] = Orig->Mass[j];
+    const int num_groups = R->internal_state->group_info->num_gbs_groups;
+    const int this_group_ind = R->internal_state->task_info->gbs_group_index;
+    int group_workloads[num_groups];
+    memset(group_workloads, 0, sizeof group_workloads);
+    int k_ind = 0;
+    // TODO could take into account group sizes also, or even divide the groups
+    // based on the most even division of gbs steps/task
+    for (int k = kmax; k > 0; --k) {
+        int cost = num_gbs_substeps(k);
+        int group_ind = argmin_int(group_workloads, num_groups);
+        group_workloads[group_ind] += cost;
+        if (group_ind == this_group_ind) { gbs_ks_for_this_group[k_ind++] = k; }
     }
 }
 
-void extrapolate_single_variable(double *y, const int N, double *result,
-                                 double *error, double *yscal) {
+struct state_backup {
+    double time, B, U, T;
+    double (*pos)[3];
+    double (*vel)[3];
+    double (*spin)[3];
+    double (*edge_rel_pos)[3];
+    double (*edge_rel_vel)[3];
+};
 
+void allocate_state_backup(struct state_backup *sb, int num_particles) {
+    sb->pos = malloc(sizeof(double[num_particles][3]));
+    sb->vel = malloc(sizeof(double[num_particles][3]));
+    sb->spin = malloc(sizeof(double[num_particles][3]));
+    sb->edge_rel_pos = malloc(sizeof(double[num_particles][3]));
+    sb->edge_rel_vel = malloc(sizeof(double[num_particles][3]));
+}
+
+void store_state_backup(struct state_backup *sb, const struct ketju_system *R) {
+    sb->time = R->physical_state->time;
+    sb->B = R->internal_state->B;
+    sb->U = R->internal_state->U;
+    sb->T = R->internal_state->T;
+
+    const int num_particles = R->num_particles;
+    memcpy(sb->pos, R->physical_state->pos, sizeof(double[num_particles][3]));
+    memcpy(sb->vel, R->physical_state->vel, sizeof(double[num_particles][3]));
+    memcpy(sb->spin, R->physical_state->spin, sizeof(double[num_particles][3]));
+    memcpy(sb->edge_rel_pos, R->internal_state->mst->edge_rel_pos,
+           sizeof(double[num_particles][3]));
+    memcpy(sb->edge_rel_vel, R->internal_state->mst->edge_rel_vel,
+           sizeof(double[num_particles][3]));
+}
+
+void restore_state_backup(struct state_backup *sb,
+                          const struct ketju_system *R) {
+    R->physical_state->time = sb->time;
+    R->internal_state->B = sb->B;
+    R->internal_state->U = sb->U;
+    R->internal_state->T = sb->T;
+
+    const int num_particles = R->num_particles;
+    memcpy(R->physical_state->pos, sb->pos, sizeof(double[num_particles][3]));
+    memcpy(R->physical_state->vel, sb->vel, sizeof(double[num_particles][3]));
+    memcpy(R->physical_state->spin, sb->spin, sizeof(double[num_particles][3]));
+    memcpy(R->internal_state->mst->edge_rel_pos, sb->edge_rel_pos,
+           sizeof(double[num_particles][3]));
+    memcpy(R->internal_state->mst->edge_rel_vel, sb->edge_rel_vel,
+           sizeof(double[num_particles][3]));
+}
+
+void free_state_backup(struct state_backup *sb) {
+    free(sb->pos);
+    free(sb->vel);
+    free(sb->edge_rel_pos);
+    free(sb->edge_rel_vel);
+}
+
+struct gbs_storage {
+    int num_vars;
+    int num_rows;
+    double *data;
+};
+
+void allocate_gbs_storage(struct gbs_storage *gs, int num_particles,
+                          int num_pn_particles, int kmax) {
+    gs->num_vars = (1 /*time*/ + 1 /*B*/ +
+                    (num_particles - 1) * (3 /*edge_pos*/ + 3 /*edge_vel*/) +
+                    num_pn_particles * (3 /*spin*/));
+    gs->num_rows = kmax + 1; // row for extrapolation result also
+    gs->data = calloc(1, sizeof(double[gs->num_vars * gs->num_rows]));
+}
+
+void free_gbs_storage(struct gbs_storage *gs) { free(gs->data); }
+
+// store the data for this k for extrapolation
+void store_gbs_data(struct gbs_storage *gs, const struct ketju_system *R,
+                    int k) {
+    double(*data)[gs->num_vars] = (double(*)[gs->num_vars])gs->data;
+    const int k_ind = k - 1; // TODO check that k starts at 1
+    data[k_ind][0] = R->physical_state->time;
+    data[k_ind][1] = R->internal_state->B;
+    int offset = 2;
+    const struct spanning_tree_coordinate_system *mst = R->internal_state->mst;
+    const size_t edge_vec_size = sizeof(double[mst->num_vertices-1][3]);
+    memcpy(&data[k_ind][offset], mst->edge_rel_pos, edge_vec_size);
+    offset += 3*(mst->num_vertices-1);
+    memcpy(&data[k_ind][offset], mst->edge_rel_vel, edge_vec_size);
+    offset += 3*(mst->num_vertices-1);
+    memcpy(&data[k_ind][offset], R->physical_state->spin,
+           sizeof(double[R->num_pn_particles]));
+}
+
+void comm_gbs_data(struct gbs_storage *gs, int *gbs_ks_for_this_group,
+                   const struct ketju_system *R) {
+    // TODO: can this be made more efficient? Do we need to?
+    tick(&R->perf->time_gbscomm);
+    // first gather all the data on the root (rank 0) task of the main comm from
+    // the root tasks of the gbs groups
+    double(*data)[gs->num_vars] = (double(*)[gs->num_vars])gs->data;
+    int k_ind = 0;
+    struct task_info *ti = R->internal_state->task_info;
+    for (int i = gs->num_rows - 2; i >= 0; --i) {
+        if (ti->main_group_rank == 0) {
+            // Receive if we don't already have the data
+            // TODO this will give some extra comms which could be avoided by
+            // figuring out in which gbs group the main group root is
+            if (ti->gbs_group_rank == 0 &&
+                gbs_ks_for_this_group[k_ind] == i + 1) {
+                k_ind += 1;
+            } else {
+                MPI_Status status;
+                // figuring out where the data will come seems complicated, so
+                // take it from any source with the right tag
+                MPI_Recv(data[i], gs->num_vars, MPI_DOUBLE, MPI_ANY_SOURCE, i,
+                         ti->main_comm, &status);
+            }
+        } else if (ti->gbs_group_rank == 0 &&
+                   gbs_ks_for_this_group[k_ind] == i + 1) {
+            k_ind += 1;
+            MPI_Send(data[i], gs->num_vars, MPI_DOUBLE, 0, i, ti->main_comm);
+        }
+    }
+    // Broadcast the collected data to all tasks
+    MPI_Bcast(data, gs->num_vars * (gs->num_rows - 1), MPI_DOUBLE, 0,
+              ti->main_comm);
+
+    tock(&R->perf->time_gbscomm);
+}
+
+double get_n_double(int i) { return (2.0 * (i + 1.0)); }
+void extrapolate_single_variable(double *y, double yscal, const int N,
+                                 double *result, double *error) {
+    double gbsS[N][N];
     for (int i = 0; i < N; i++) {
         gbsS[i][0] = y[i];
     }
@@ -697,230 +764,204 @@ void extrapolate_single_variable(double *y, const int N, double *result,
                 (nterm * gbsS[i + 1][j - 1] - gbsS[i][j - 1]) / (nterm - 1.0);
         }
     }
-    for (int i = 1; i < N; i++) {
-        result[i - 1] = gbsS[0][i];
-        error[i - 1] = fabs(gbsS[0][i] - gbsS[0][i - 1]) / yscal[i];
-    }
+    *result = gbsS[0][N - 1];
+    *error = fabs(gbsS[0][N - 1] - gbsS[0][N - 2]) / yscal;
 }
+// extrapolate a subset of variables on each
+// task, comm the results
+// Updates the fictitious timestep Hstep with the new estimate.
+bool gbs_extrapolate(struct gbs_storage *gs, double *Hstep,
+                     const struct ketju_system *R) {
+    tick(&R->perf->time_gbsextr);
+    // figure out which variables each task handles
+    // TODO this should stay the same during the integration (except mergers)
+    // so could be moved out of the inner loop
+    const int num_tasks = R->internal_state->task_info->main_group_size;
+    const int vars_per_task = gs->num_vars / num_tasks;
+    const int remainder =
+        gs->num_vars % R->internal_state->task_info->main_group_size;
 
-int extrapolate_all_variables(int korder) {
-
-    int status = -1;
-
-    struct ketju_system *ThisR = NULL;
-    int *SubStepDivision = calloc(korder, sizeof(int));
-
-    int counter = 0;
-    int NumDynVariables = 0;
-    for (int i = 0; i < korder; i++) {
-        ThisR = ComputationToDoList.ComputationalTask[i].ThisR;
-        NumDynVariables = ThisR->NumDynVariables;
-        SubStepDivision[counter] = i;
-        counter++;
+    int start_inds[num_tasks];
+    int var_counts[num_tasks];
+    for (int i = 0; i < num_tasks; ++i) {
+        start_inds[i] = i > 0 ? start_inds[i - 1] + var_counts[i - 1] : 0;
+        var_counts[i] = vars_per_task;
+        // handle the remainder on the last (remainder) tasks, one extra var
+        // each
+        if (i >= num_tasks - remainder) { var_counts[i] += 1; }
     }
 
-    int block = (int)floor(NumDynVariables / Ntask);
-    int loop_start = block * ThisTask;
-    int loop_end = block * (ThisTask + 1);
-    if (ThisTask == Ntask - 1) { loop_end = NumDynVariables; }
+    const int rank = R->internal_state->task_info->main_group_rank;
+    int start_ind = start_inds[rank];
+    int end_ind = start_ind + var_counts[rank];
 
-    for (int v = loop_start; v < loop_end; v++) {
-        for (int i = 0; i < korder; i++) {
-            y[i] = ComputationToDoList.CopyOfSingleRegion[SubStepDivision[i]]
-                       .State[v];
-            yscal[i] = fabs(y[i]);
+    // run the extrapolation
+    const int kmax = R->options->gbs_kmax;
+    double y[kmax];
+    double yscal;
+    double error;
+    double max_error = 0;
+    double result;
+    double(*data)[gs->num_vars] = (double(*)[gs->num_vars])gs->data;
+
+    // TODO make configurable
+    const double abs_tol = 1e-100;
+
+    for (int i = start_ind; i < end_ind; ++i) {
+        for (int j = 0; j < kmax; ++j) {
+            y[j] = data[j][i];
         }
-        extrapolate_single_variable(y, korder, result[v], error[v], yscal);
+        yscal = fabs(y[kmax-1]) + abs_tol;
+
+        if (i == 0) {
+            yscal += R->options->output_time_absolute_tolerance;
+        }
+        extrapolate_single_variable(y, yscal, kmax, &result, &error);
+        data[kmax][i] = result;
+        if (error > max_error) max_error = error;
     }
+    tock(&R->perf->time_gbsextr);
 
-    for (int i = 0; i < NumDynVariables; i++) {
-        errorbuf[i] = 0;
-        resultbuf[i] = 0;
-    }
-
-    for (int i = loop_start; i < loop_end; i++) {
-        errorbuf[i] = error[i][korder - 2];
-        resultbuf[i] = result[i][korder - 2];
-    }
-
-#ifdef PARALLEL
-    MPI_Allreduce(MPI_IN_PLACE, errorbuf, NumDynVariables, MPI_DOUBLE, MPI_SUM,
-                  MPI_COMM_WORLD);
-    MPI_Allreduce(MPI_IN_PLACE, resultbuf, NumDynVariables, MPI_DOUBLE, MPI_SUM,
-                  MPI_COMM_WORLD);
-#endif
-
-    double gbs_error = -1;
-    double gbs_tolerance =
-        ComputationToDoList.ComputationalTask[SubStepDivision[0]]
-            .ThisR->gbs_tolerance;
-
-    for (int j = 0; j < NumDynVariables; j++) {
-        if (errorbuf[j] >= gbs_error) { gbs_error = errorbuf[j]; }
-    }
+    tick(&R->perf->time_gbscomm);
+    // check convergence across all task
+    MPI_Allreduce(MPI_IN_PLACE, &max_error, 1, MPI_DOUBLE, MPI_MAX,
+                  R->internal_state->task_info->main_comm);
 
     double Hnextfac =
-        0.94 * pow(0.65 / (gbs_error / gbs_tolerance), 1.0 / (2 * korder + 1));
+        0.94 * pow(0.65 / (max_error / R->options->gbs_relative_tolerance),
+                   1.0 / (2 * kmax + 1));
+    const bool converged = max_error < R->options->gbs_relative_tolerance;
+    if (converged) {
+        // success, communicate data and set new timestep
+        MPI_Allgatherv(MPI_IN_PLACE, 0, MPI_DATATYPE_NULL, data[kmax],
+                       var_counts, start_inds, MPI_DOUBLE,
+                       R->internal_state->task_info->main_comm);
 
-    if (gbs_error <= gbs_tolerance) {
-
-        status = 1;
-
-        for (int v = 0; v < NumDynVariables; v++) {
-            ThisR->State[v] = resultbuf[v];
-        }
         if (Hnextfac > 5.0) { Hnextfac = 5.0; }
-
-        ThisR->Hstep *= Hnextfac;
-        into_Cartesian_from_MST(ThisR);
-
-        ok_steps++;
-
+        *Hstep *= Hnextfac;
     } else {
-        status = 0;
-        failed_steps++;
-
         if (Hnextfac > 0.7) { Hnextfac = 0.7; }
-        ThisR->Hstep *= Hnextfac;
+        *Hstep *= Hnextfac;
     }
-    free(SubStepDivision);
 
-    return status;
+    tock(&R->perf->time_gbscomm);
+
+    return converged;
 }
 
-// Integrate the subsystems using AR-MST for the desired time interval
-void run_integrator(struct ketju_system *R, double time_interval) {
+void update_system_from_gbs_result(struct ketju_system *R,
+                                   struct gbs_storage *gs) {
+    double *data = ((double(*)[gs->num_vars])gs->data)[gs->num_rows - 1];
+    R->physical_state->time = data[0];
+    R->internal_state->B = data[1];
+    int offset = 2;
+    struct spanning_tree_coordinate_system *mst = R->internal_state->mst;
+    const size_t edge_vec_size = sizeof(double[mst->num_vertices-1][3]);
+    memcpy(mst->edge_rel_pos, &data[offset], edge_vec_size);
+    offset += 3*(mst->num_vertices-1);
+    memcpy(mst->edge_rel_vel, &data[offset], edge_vec_size);
+    offset += 3*(mst->num_vertices-1);
+    memcpy(R->physical_state->spin, &data[offset],
+           sizeof(double[R->num_pn_particles]));
 
-    // Needed variables
-    double dt = 1e-7;
-    double Hstep;
+    into_Cartesian_from_MST(R);
+}
 
+void ketju_run_integrator(struct ketju_system *R, double time_interval) {
+// TODO return status/error code
+
+    tick(&R->perf->time_total);
+    //TODO now the integrator can only be run once, so should separate this init
+    //stuff to a separate function
+    ketju_init_gbs_comms(R);
     // Initialize the system to integrate
-
     into_CoM_frame(R);
 
+#define PRIM // other method TODO
 #ifdef PRIM
     PrimMST(R);
 #else
     DivideAndConquerPrim(R);
 #endif
-
     compute_total_energy(R);
-    R->Hstep = dt * R->U;
-    R->State[R->TimeIndex] = 0;
 
-    double percent = time_interval / 50;
-    int epoch = -1;
+    double dt = 1e-7; // TODO better guess for initial step
+    double Hstep = dt * R->internal_state->U;
+    const double t_start = R->physical_state->time;
+    const double initial_B = R->internal_state->B;
 
-    // Now proceed to integration
-    int not_finished = 1;
-    int redo = 1;
-    int status;
+    const int kmax = R->options->gbs_kmax;
+    int gbs_ks_for_this_group[kmax];
+    get_gbs_ks_for_this_group(R, gbs_ks_for_this_group);
 
+    struct state_backup old_state;
+    allocate_state_backup(&old_state, R->num_particles);
+    store_state_backup(&old_state, R);
+
+    struct gbs_storage gbs_storage;
+    allocate_gbs_storage(&gbs_storage, R->num_particles, R->num_pn_particles,
+                         R->options->gbs_kmax);
+
+    bool finished = false;
     do {
+        // TODO check mergers (note that variable counts need to be changed in
+        // some of the temp state)
 
-        do {
-
-            redo = 0;
-
-            // Divide the systems and substep divisions for tasks
-            divide_computational_load(R);
-
-            // Perform the leapfrog tasks
-            for (int ctask = 0;
-                 ctask < ComputationToDoList.NumberOfComputationalTasks;
-                 ctask++) {
-                if (ThisGbsGroup == ComputationToDoList.ComputationalTask[ctask]
-                                        .GroupToPerformTask) {
-
-                    // copy the system in order not to overwrite the original
-                    // one
-                    struct ketju_system *ThisR =
-                        ComputationToDoList.ComputationalTask[ctask].ThisR;
-
-                    copy_regularized_region(
-                        ThisR, &ComputationToDoList.CopyOfSingleRegion[ctask]);
-
-                    // leapfrog the substep division
-                    Hstep = ComputationToDoList.CopyOfSingleRegion[ctask].Hstep;
-                    mst_leapfrog(&ComputationToDoList.CopyOfSingleRegion[ctask],
-                                 Hstep,
-                                 ComputationToDoList.ComputationalTask[ctask]
-                                     .NumberOfSubsteps);
-                }
+        for (int i = 0; gbs_ks_for_this_group[i] && i < kmax; ++i) {
+            if (i) {
+                // not needed on the first round
+                restore_state_backup(&old_state, R);
             }
-
-        } while (redo);
-
-        my_barrier();
-        clock_t aika0 = clock(), aika1;
-
-#ifdef PARALLEL
-        // We need to communicate the results
-        for (int ctask = 0;
-             ctask < ComputationToDoList.NumberOfComputationalTasks; ctask++) {
-            int root = ComputationToDoList.ComputationalTask[ctask]
-                           .GroupToPerformTask *
-                       NumTaskPerGbsGroup;
-            double *commbuf =
-                ComputationToDoList.CopyOfSingleRegion[ctask].State;
-
-            int count =
-                ComputationToDoList.CopyOfSingleRegion[ctask].NumDynVariables;
-            if (ThisTask != root) {
-                for (int i = 0; i < count; i++) {
-                    commbuf[i] = 0;
-                }
-            }
-            MPI_Bcast(commbuf, count, MPI_DOUBLE, root, MPI_COMM_WORLD);
+            int k = gbs_ks_for_this_group[i];
+            mst_leapfrog(R, Hstep, num_gbs_substeps(k));
+            store_gbs_data(&gbs_storage, R, k);
         }
-        aika1 = clock();
+        comm_gbs_data(&gbs_storage, gbs_ks_for_this_group, R);
+        bool converged = gbs_extrapolate(&gbs_storage, &Hstep, R);
 
-        time_gbscomm += (double)(aika1 - aika0) / CLOCKS_PER_SEC;
-#endif
+        if (converged) {
+            update_system_from_gbs_result(R, &gbs_storage);
 
-        // Now preform the GBS extrapolation, check convergence and obtain next
-        // timestep
-
-        my_barrier();
-        aika0 = clock();
-        status = extrapolate_all_variables(KMAX);
-        aika1 = clock();
-        time_gbs += (double)(aika1 - aika0) / CLOCKS_PER_SEC;
-
-        if (status == 1) {
-
-            // Check whether we are ready
-            double time = R[0].State[R[0].TimeIndex];
-            if (fabs(time - time_interval) / time_interval <
-                R->output_time_tolerance) {
-                not_finished = 0;
+            double remaining_time =
+                time_interval - (R->physical_state->time - t_start);
+            if (fabs(remaining_time / time_interval) <
+                    R->options->output_time_relative_tolerance ||
+                fabs(remaining_time) <
+                    R->options->output_time_absolute_tolerance) {
+                finished = true;
             } else {
-
+                store_state_backup(&old_state, R);
+                // Check that we're not overstepping and alter timestep if
+                // required
+                // Should work also for negative time intervals
+                // TODO this should be improved to allow for better accuracy in
+                // time
                 compute_total_energy(R);
-                if (time > time_interval) {
-                    R->Hstep = -R->U * (time - time_interval);
-                } else if (R->Hstep / R->U + time > time_interval) {
-                    R->Hstep = R->U * (time_interval - time);
+                if (fabs(remaining_time) < fabs(Hstep/R->internal_state->U) ||
+                    copysign(1, time_interval) * remaining_time < 0) {
+                    Hstep = R->internal_state->U * remaining_time;
                 }
+                // new stepsize set by gbs_extrapolate otherwise
+                R->perf->succesful_steps += 1;
 
-                int old_epoch = epoch;
-                epoch = (int)floor(time / percent);
-                if (epoch != old_epoch) {
-#ifdef PRIM
-                    PrimMST(&R[0]);
-#else
-                    DivideAndConquerPrim(&R[0]);
-#endif
-                }
+                // TODO mst reconstruction at configurable step interval
             }
+        } else {
+            restore_state_backup(&old_state, R);
+            // stepsize is updated by the extrapolation function
+
+            R->perf->failed_steps += 1;
         }
 
-    } while (not_finished);
+    } while (!finished);
+
+    // free temp storage
+    free_state_backup(&old_state);
+    free_gbs_storage(&gbs_storage);
+    
+    R->perf->relative_energy_error = (R->internal_state->B-initial_B) /initial_B;
+    tock(&R->perf->time_total);
 }
-
-#endif
-
 
 // XXX this PN stuff probably is good to put in this file as well for now at
 // least
@@ -1096,51 +1137,27 @@ void compute_PN_twobody_Acc(struct ketju_system *R, double (*Vel)[3],
     }
 }
 
-// TODO
-// The plan is to go with all the PN particles at the start of the particle
-// arrays, so that this can be simplified somewhat
-#if 0
-void compute_Post_Newtonian_Acc(struct ketju_system *R, double *Vel) {
+void compute_Post_Newtonian_Acc(struct ketju_system *R,
+                                double (*vel_to_use)[3]) {
+    if (!R->options->PN_flags) return;
 
-    // Init
-    for (int i = 0; i < 3 * R->NumVertex; i++) {
-        R->AccPN[i] = 0;
-    }
-
-    return;
-
-    // Find the SMBHs and their indexes
-    int Nbh = 0;
-    for (int i = 0; i < R->NumVertex; i++) {
-        if (R->Vertex[i].type == 5) { Nbh++; }
-    }
-    if (Nbh < 2) { return; }
-
-    int c = 0;
-    int bhindex[Nbh];
-    for (int i = 0; i < R->NumVertex; i++) {
-        if (R->Vertex[i].type == 5) {
-            bhindex[c] = i;
-            c++;
-        }
-    }
+    double(*acc_pn)[3] = R->internal_state->acc_vd;
+    memset(acc_pn, 0, sizeof(double[R->num_particles][3]));
 
     // Compute the PN accelerations for SMBHs
-
-    for (int i = 0; i < Nbh; i++) {
-        for (int j = i + 1; j < Nbh; j++) {
-            compute_PN_twobody_Acc(R, Vel, R->AccPN, bhindex[i], bhindex[j]);
+    for (int i = 0; i < R->num_pn_particles; i++) {
+        for (int j = i + 1; j < R->num_pn_particles; j++) {
+            compute_PN_twobody_Acc(R, vel_to_use, acc_pn, i, j);
         }
     }
 
     // Finally the chained PN accelerations
-
+    struct spanning_tree_coordinate_system *mst = R->internal_state->mst;
     int hi, lo;
-    for (int i = 0; i < R->NumVertex - 1; i++) {
-        int index = R->MSTedgeList[i];
-        int v1 = R->Edge[index].vertex1;
-        int v2 = R->Edge[index].vertex2;
-        if (R->Vertex[v1].level > R->Vertex[v2].level) {
+    for (int i = 0; i < mst->num_edges; i++) {
+        int v1, v2;
+        get_v1_v2_fast(R, i, &v1, &v2);
+        if (mst->vertex[v1].level > mst->vertex[v2].level) {
             hi = v1;
             lo = v2;
         } else {
@@ -1148,9 +1165,7 @@ void compute_Post_Newtonian_Acc(struct ketju_system *R, double *Vel) {
             lo = v1;
         }
         for (int k = 0; k < 3; k++) {
-            R->MSTedgeAcc_PN[3 * i + k] =
-                R->AccPN[3 * hi + k] - R->AccPN[3 * lo + k];
+            mst->edge_rel_acc_vd[i][k] = acc_pn[hi][k] - acc_pn[lo][k];
         }
     }
 }
-#endif

@@ -1,194 +1,120 @@
 // Functions for initialization of the integrator
 
+#include <math.h>
+#include <stdlib.h>
 
-#if 0
-// TODO leave only the parallel options
-#ifdef PARALLEL
-void initialize_node_comm(void){
+#include <mpi.h>
 
-	MPI_Group WORLD_GROUP, GBS_GROUP;
-	MPI_Comm_group(MPI_COMM_WORLD, &WORLD_GROUP);
-	int *myranks;
+#include "ketju_integrator/internal.h"
+#include "ketju_integrator/ketju_integrator.h"
 
-	ThisGbsGroup         = (int) floor(ThisTask/NumTaskPerGbsGroup);
-	ThisTask_in_GbsGroup = ThisTask%NumTaskPerGbsGroup;
+static void allocate_internal_state(struct ketju_system *R, int Ntask) {
+    R->internal_state = calloc(1, sizeof(struct ketju_system_internal_state));
+    R->internal_state->task_info = calloc(1, sizeof(struct task_info));
+    R->internal_state->group_info = calloc(1, sizeof(struct group_info));
+    // allocated when gbs comms inited
+    R->internal_state->group_info->gbs_group_sizes = NULL;
 
-        myranks = calloc(NumTaskPerGbsGroup, sizeof(int));
+    R->internal_state->mst =
+        calloc(1, sizeof(struct spanning_tree_coordinate_system));
+    struct spanning_tree_coordinate_system *mst = R->internal_state->mst;
+    mst->vertex = calloc(R->num_particles, sizeof(struct graph_vertex));
+    mst->num_vertices = R->num_particles;
+    mst->num_edges = 0; // is set when the tree is built
 
-        for(int i=0;i<NumTaskPerGbsGroup;i++){
-                myranks[i] = ThisTask - ThisTask_in_GbsGroup + i;
-	}
-	for(int i=0;i<NumGbsGroup;i++){
-		if(i == ThisGbsGroup){
-        		MPI_Group_incl(WORLD_GROUP, NumTaskPerGbsGroup, myranks, &GBS_GROUP);
-	    	}
-    	}
+    // XXX from old code, TODO is this always safe?
+    double safetybuf = 1.05;
+    int NumLocalEdge = (int)floor(
+        safetybuf * (mst->num_vertices * (mst->num_vertices - 1)) / Ntask);
+    mst->local_edge = calloc(NumLocalEdge, sizeof(struct graph_edge));
+    mst->local_edge_subset = calloc(NumLocalEdge, sizeof(struct graph_edge));
+    mst->edge_in_mst = calloc(mst->num_vertices - 1, sizeof(struct graph_edge));
 
-    	MPI_Comm_create(MPI_COMM_WORLD, GBS_GROUP, &MPI_COMM_GBS_GROUP);
-    	MPI_Group_free(&GBS_GROUP);
-    	free(myranks);
+    mst->edge_rel_pos = calloc(1, sizeof(double[mst->num_vertices-1][3]));
+    mst->edge_rel_vel = calloc(1, sizeof(double[mst->num_vertices-1][3]));
+    mst->edge_rel_aux_vel = calloc(1, sizeof(double[mst->num_vertices-1][3]));
+    mst->edge_rel_acc = calloc(1, sizeof(double[mst->num_vertices-1][3]));
+    mst->edge_rel_acc_vd = calloc(1, sizeof(double[mst->num_vertices-1][3]));
 
-    	MPI_Group_free(&WORLD_GROUP);
-    	MPI_Comm_size(MPI_COMM_GBS_GROUP, &NumTaskPerGbsGroup);
-    	MPI_Comm_rank(MPI_COMM_GBS_GROUP, &ThisTask_in_GbsGroup);
-
-}
-#endif
-
-void initialize_mpi_or_serial(void){
-
-// check for reasonable input
-#if defined(PARALLEL) && defined(SERIAL)
-	printf("Please select EITHER parallel OR serial. Currently both selected.\n");
-	exit(0);
-#endif
-#if !defined(PARALLEL) && !defined(SERIAL)
-        printf("Please select EITHER parallel OR serial. Currently none selected.\n");
-        exit(0);
-#endif
-#if defined(PRIM) && defined(PRIM_DIVIDE_CONQUER)
-        printf("Please select EITHER prim OR prim_divide_conquer. Currently both selected.\n");
-	exit(0);
-#endif
-#if !defined(PRIM) && !defined(PRIM_DIVIDE_CONQUER)
-	printf("Please select EITHER prim OR prim_divide_conquer. Currently none selected.\n");
-	exit(0);
-#endif
-
-// Init MPI if needed
-#ifdef PARALLEL
-	MPI_Init(NULL, NULL);
-        MPI_Comm_size(MPI_COMM_WORLD, &Ntask);
-        MPI_Comm_rank(MPI_COMM_WORLD, &ThisTask);
-
-	NumGbsGroup        = 4;
-        NumTaskPerGbsGroup = (int) Ntask/NumGbsGroup;
-
-	if( NumGbsGroup*NumTaskPerGbsGroup != Ntask ){
-		if(ThisTask==0){
-			printf("NumGbsGroup*NumTaskPerGbsGroup != Ntask.        NumGbsGroup = %d, NumTaskPerGbsGroup = %d.\n",NumGbsGroup,NumTaskPerGbsGroup);
-			exit(0);
-		}
-	}
-	if( NumTaskPerGbsGroup>1 ){
-		initialize_node_comm();
-	} else {
-		ThisGbsGroup = ThisTask;
-		ThisTask_in_GbsGroup = 0;
-	}
-#else
-	NumGbsGroup  = 1;
-	Ntask        = 1;
-	ThisTask     = 0;
-	ThisGbsGroup = 0;
-	ThisTask_in_GbsGroup = 0;
-	NumTaskPerGbsGroup   = 1;
-#endif
-
+    R->internal_state->aux_vel = calloc(1, sizeof(double[R->num_particles][3]));
+    R->internal_state->acc = calloc(1, sizeof(double[R->num_particles][3]));
+    R->internal_state->acc_vd = calloc(1, sizeof(double[R->num_particles][3]));
 }
 
-void allocate_regularized_region(struct RegularizedRegion *S, int N){
-
-        S->gbs_tolerance         = GBSTOL;
-
-        S->output_time_tolerance = 1e-6;
-	S->NumVertex	         = N;
-
-        S->NumEdge         = (N*(N-1))/2;
-        S->NumDynVariables = 6*(N-1)+2;
-
-        S->TimeIndex       = S->NumDynVariables-1;
-        S->BIndex          = S->NumDynVariables-2;
-
-        S->Pos          = calloc(3*N,     sizeof(double));
-        S->Vel          = calloc(3*N,     sizeof(double));
-        S->State        = calloc(S->NumDynVariables, sizeof(double));
-        S->Mass         = calloc(N,       sizeof(double));
-        S->Acc          = calloc(3*N,     sizeof(double));
-        S->MSTedgeAcc   = calloc(3*(N-1), sizeof(double));
-
-        S->AccPN          = calloc(3*N,     sizeof(double));
-        S->AuxVel         = calloc(3*N,     sizeof(double));
-        S->AuxEdgeVel     = calloc(3*(N-1), sizeof(double));
-        S->MSTedgeAcc_PN  = calloc(3*(N-1), sizeof(double));
-
-        S->Vertex          = calloc(N,          sizeof(struct GraphVertex));
-
-	double safetybuf = 1.05;
-	int NumLocalEdge = (int) floor( safetybuf*S->NumEdge/Ntask );
-	S->LocalEdge       = calloc(NumLocalEdge, sizeof(struct GraphEdge));
-	S->LocalEdgeSubset = calloc(NumLocalEdge, sizeof(struct GraphEdge));
-	S->EdgeInMST       = calloc(N-1, sizeof(struct GraphEdge));
-
+static void allocate_physical_state(struct ketju_system *R) {
+    R->physical_state = calloc(1, sizeof(struct ketju_system_physical_state));
+    R->physical_state->mass = calloc(1, sizeof(double[R->num_particles]));
+    R->physical_state->pos = calloc(1, sizeof(double[R->num_particles][3]));
+    R->physical_state->vel = calloc(1, sizeof(double[R->num_particles][3]));
+    R->physical_state->spin = calloc(1, sizeof(double[R->num_pn_particles][3]));
 }
 
-void allocate_armst_structs( struct RegularizedRegion **R, int MaxNumPart ){
+void ketju_create_system(struct ketju_system *R, int num_pn_particles,
+                         int num_other_particles, MPI_Comm comm) {
+    R->num_particles = num_other_particles + num_pn_particles;
+    R->num_pn_particles = num_pn_particles;
 
-        int MaxDynamicalVariables = 6*(MaxNumPart-1)+2;
-        *R = calloc(1,sizeof(struct RegularizedRegion));
+    int Ntask;
+    MPI_Comm_size(comm, &Ntask);
 
-        allocate_regularized_region( R[0], MaxNumPart );
+    allocate_internal_state(R, Ntask);
+    R->internal_state->task_info->main_group_size = Ntask;
+    MPI_Comm_rank(comm, &R->internal_state->task_info->main_group_rank);
+    R->internal_state->task_info->main_comm = comm;
+    MPI_Comm_rank(MPI_COMM_WORLD, &R->internal_state->task_info->global_rank);
+    // The rest of the communication setup is done in ketju_init_gbs_comms,
+    // since it depends on the configuration options (at least gbs_kmax);
 
-        gbsS = calloc(KMAX,sizeof(double *));
-        for(int i=0;i<KMAX;i++){
-		gbsS[i] = calloc(KMAX,sizeof(double));
-        }
+    allocate_physical_state(R);
 
-       int korder = 8;
-       int NumDynVariables = MaxDynamicalVariables;
-
-        errorbuf  = calloc(NumDynVariables,sizeof(double));
-        resultbuf = calloc(NumDynVariables,sizeof(double));
-        y = calloc(korder,sizeof(double));
-	yscal = calloc(korder,sizeof(double));
-        maxerror = calloc(korder-1,sizeof(double));
-        error = calloc(NumDynVariables,sizeof(double *));
-        result = calloc(NumDynVariables,sizeof(double *));
-
-        for(int i=0;i<NumDynVariables;i++){
-	        error[i] = calloc(korder-1,sizeof(double));
-                result[i] = calloc(korder-1,sizeof(double));
-        }
-        indexlist = calloc(8,sizeof(int *));
-
-        for(int i=0;i<8;i++){
-          indexlist[i] = calloc(MaxNumPart, sizeof(int));
-	}
-
-
-	ParticleInNode = calloc(MaxNumPart,sizeof(struct OctreeNode *));
-        int NumAlloc = KMAX;
-
-        ComputationToDoList.ComputationalTask = calloc(NumAlloc,sizeof(struct ComTask));
-        for(int i=0;i<NumAlloc;i++){
-                ComputationToDoList.ComputationalTask[i].ResultState = calloc(MaxDynamicalVariables, sizeof(double));
-        }
-        ComputationToDoList.CopyOfSingleRegion = calloc(NumAlloc,sizeof(struct RegularizedRegion));
-        for(int i=0;i<NumAlloc;i++){
-                allocate_regularized_region( &ComputationToDoList.CopyOfSingleRegion[i], MaxNumPart );
-        }
+    R->perf = calloc(1, sizeof(struct ketju_performance_counters));
+    R->options = calloc(1, sizeof(struct ketju_integration_options));
+    *R->options = ketju_default_integration_options;
+    R->constants = calloc(1, sizeof(struct ketju_natural_constants));
+    *R->constants = ketju_default_natural_constants;
 }
 
-// free
-void free_data( struct RegularizedRegion *R ){
+void ketju_init_gbs_comms(struct ketju_system *R) {
+    struct task_info *ti = R->internal_state->task_info;
+    struct group_info *gi = R->internal_state->group_info;
+    // For now just split into even chunks
+    // TODO make number of groups configurable and task distribution better
+    const int max_num_gbs_groups = 4;
+    const int num_gbs_groups = ti->main_group_size > max_num_gbs_groups
+                                   ? max_num_gbs_groups
+                                   : ti->main_group_size;
+    int tasks_per_group = ti->main_group_size / num_gbs_groups;
+    int remaining_tasks = ti->main_group_size % num_gbs_groups;
+    gi->num_gbs_groups = num_gbs_groups;
+    R->internal_state->group_info->gbs_group_sizes =
+        calloc(1, sizeof(int[num_gbs_groups]));
 
-        for(int i=0;i<KMAX;i++){
-		free(ComputationToDoList.ComputationalTask[i].ResultState);
-        }
-        free(ComputationToDoList.ComputationalTask);
+    for (int i = 0; i < num_gbs_groups; ++i) {
+        gi->gbs_group_sizes[i] =
+            tasks_per_group + (i >= num_gbs_groups - remaining_tasks ? 1 : 0);
+    }
+    int group_start_rank = 0, group_end_rank = gi->gbs_group_sizes[0] - 1;
+    for (int i = 1; ti->main_group_rank > group_end_rank; ++i) {
+        group_start_rank += gi->gbs_group_sizes[i - 1];
+        group_end_rank = group_start_rank + gi->gbs_group_sizes[i] -1 ;
+        ti->gbs_group_index = i;
+    }
+    printf("%d %d\n", group_start_rank, group_end_rank);
 
-        free(R->LocalEdge);
-        free(R->Vertex);
-        free(R->Pos);
-	free(R->Vel);
-        free(R->Acc);
-        free(R->Mass);
-        free(R->State);
-        free(R->MSTedgeAcc);
-        free(R->EdgeInMST);
-	free(R);
+    int range[1][3] = {{group_start_rank, group_end_rank, 1}};
+    MPI_Group main_group, gbs_group;
+    MPI_Comm_group(ti->main_comm, &main_group);
+    MPI_Group_range_incl(main_group, 1, range, &gbs_group);
+    MPI_Group_rank(gbs_group, &ti->gbs_group_rank);
+    MPI_Group_size(gbs_group, &ti->gbs_group_size);
+    MPI_Comm_create_group(ti->main_comm, gbs_group, ti->gbs_group_index,
+                          &ti->gbs_comm);
 
-	free(gbsS);
-
+    MPI_Group_free(&main_group);
+    MPI_Group_free(&gbs_group);
 }
-#endif
+
+void ketju_free_system(struct ketju_system *R) {
+    // XXX remember to free the comms as well
+    (void) R;
+}
