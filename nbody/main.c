@@ -67,6 +67,8 @@ int main(int argc, char *argv[]) {
     init_from_ic_file(&R, argv[1]);
     // TODO read param file
     R.options->gbs_relative_tolerance = 1e-9;
+    R.options->mst_algorithm = KETJU_MST_PRIM;
+    //R.options->mst_algorithm = KETJU_MST_DIVIDE_AND_CONQUER_PRIM;
 
     double time_interval = strtof(argv[2], NULL);
     ketju_run_integrator(&R, time_interval);

@@ -1,7 +1,8 @@
-#define SERIAL
-//#define PARALLEL
-//#define PRIM
-#define PRIM_DIVIDE_CONQUER
+//#define SERIAL
+#define PARALLEL
+#define PRIM
+//This appears broken in this version...
+//#define PRIM_DIVIDE_CONQUER
 
 #define GLOBAL_ND 2
 #define GCONST 43007.1

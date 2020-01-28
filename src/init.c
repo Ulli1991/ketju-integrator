@@ -37,6 +37,16 @@ static void allocate_internal_state(struct ketju_system *R, int Ntask) {
     mst->edge_rel_acc = calloc(1, sizeof(double[mst->num_vertices-1][3]));
     mst->edge_rel_acc_vd = calloc(1, sizeof(double[mst->num_vertices-1][3]));
 
+
+    R->internal_state->octree_data = calloc(1, sizeof(struct octree_data));
+    R->internal_state->octree_data->indexlist = calloc(8, sizeof(int *));
+    for (int i = 0; i < 8; i++) {
+        R->internal_state->octree_data->indexlist[i] =
+            calloc(R->num_particles, sizeof(int));
+    }
+    R->internal_state->octree_data->particle_in_node =
+        calloc(R->num_particles, sizeof(struct octree_node *));
+
     R->internal_state->aux_vel = calloc(1, sizeof(double[R->num_particles][3]));
     R->internal_state->acc = calloc(1, sizeof(double[R->num_particles][3]));
     R->internal_state->acc_vd = calloc(1, sizeof(double[R->num_particles][3]));
@@ -58,6 +68,13 @@ static void free_internal_state(struct ketju_system *R) {
     free(mst->edge_rel_acc_vd);
     free(mst->vertex);
     free(mst);
+
+    for (int i = 0; i < 8; i++) {
+        free(R->internal_state->octree_data->indexlist[i]);
+    }
+    free(R->internal_state->octree_data->indexlist);
+    free(R->internal_state->octree_data->particle_in_node);
+    free(R->internal_state->octree_data);
 
     // Note: newly created MPI objects need to be freed before this
     free(R->internal_state->task_info);

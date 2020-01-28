@@ -953,8 +953,8 @@ void ketju_run_integrator(struct ketju_system *R, double time_interval) {
                     Hstep = R->internal_state->U * remaining_time;
                 }
                 // new stepsize set by gbs_extrapolate otherwise
-                // TODO configurable step interval
-                if (steps_since_reconstruction > 100) {
+                if (steps_since_reconstruction >=
+                    R->options->steps_between_mst_reconstruction) {
                     ketju_build_mst(R);
                     steps_since_reconstruction = 0;
                 }

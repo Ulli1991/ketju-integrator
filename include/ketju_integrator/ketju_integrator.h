@@ -29,6 +29,11 @@ enum ketju_PN_flags {
     KETJU_PN_ALL = KETJU_PN_DYNAMIC_ALL | KETJU_PN_SPIN_ALL,
 };
 
+enum ketju_mst_algorithm {
+    KETJU_MST_PRIM,
+    KETJU_MST_DIVIDE_AND_CONQUER_PRIM,
+};
+
 struct ketju_integration_options {
     int gbs_kmax;
 
@@ -39,10 +44,13 @@ struct ketju_integration_options {
 
     unsigned int PN_flags; //< Bitflags for enabling different PN terms
 
+    int steps_between_mst_reconstruction;
     int max_tree_distance;
     //< Maximum separation in the tree structure before using CoM coordinate
     //distances
     //TODO doesn't the use of check_relative_proximity_ND_2 break this?
+
+    enum ketju_mst_algorithm mst_algorithm;
 };
 
 static const struct ketju_integration_options
@@ -52,7 +60,9 @@ static const struct ketju_integration_options
         .output_time_relative_tolerance = 1e-6,
         .output_time_absolute_tolerance = 1e-15,
         .PN_flags = KETJU_PN_NONE,
+        .steps_between_mst_reconstruction = 10,
         .max_tree_distance = 2,
+        .mst_algorithm = KETJU_MST_PRIM,
 };
 
 struct ketju_natural_constants {
@@ -81,7 +91,7 @@ struct ketju_performance_counters {
     double time_total;
 
     // check what these actually mean
-    double tprim3, tprim4;
+    double tprim1, tprim2, tprim3, tprim4, tprim5;
 
     int succesful_steps;
     int failed_steps;

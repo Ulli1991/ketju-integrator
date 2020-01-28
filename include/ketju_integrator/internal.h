@@ -29,6 +29,11 @@ struct octree_node {
     int ID;
 };
 
+struct octree_data {
+    struct octree_node *root_node, **particle_in_node;
+    int **indexlist;
+};
+
 struct weight_index {
     double weight;
     int index;
@@ -107,6 +112,7 @@ struct ketju_system_internal_state {
     struct group_info *group_info;
 
     struct spanning_tree_coordinate_system *mst;
+    struct octree_data *octree_data;
 
     double U; // potential energy
     double T;
@@ -139,7 +145,8 @@ static inline void tock(double *timer) {
 // TODO most uses now could be replaced with error codes allowing potentially
 // recovering from errors during integration / saving the state so far.
 static inline void terminate(const char *msg) {
-    printf("%s", msg);
+    printf("%s\n", msg);
+    fflush(stdout);
     MPI_Abort(MPI_COMM_WORLD, 1);
 }
 

@@ -1,6 +1,7 @@
 // Functions for constructing and working with the MST coordinate system
 
 #include <stdlib.h>
+#include <float.h>
 #include <stdio.h>
 #include <math.h>
 
@@ -10,9 +11,6 @@
 #include "ketju_integrator/ketju_integrator.h"
 #include "ketju_integrator/internal.h"
 
-//TODO refactor global variables
-struct octree_node *OctreeRootNode, **ParticleInNode;
-int **indexlist;
 
 int ketju_check_relative_proximity_ND_2(int v1, int v2,
                                         const struct ketju_system *R, int *d,
@@ -37,7 +35,8 @@ int ketju_check_relative_proximity_ND_2(int v1, int v2,
         return 0;
     } else if (diff == 2) {
         //FIXME valgrind finds a read error here, apparently parent == -1 in
-        // some case. Also present in the original implementation.
+        // some case at least with the basic prim tree.
+        // Also present in the original implementation.
         if (mst->vertex[mst->vertex[v2].parent].parent == v1) {
             *d = 2;
             sign[0] = -1;
@@ -75,7 +74,7 @@ int ketju_check_relative_proximity(int v1, int v2, const int Nd,
     const struct spanning_tree_coordinate_system *mst = R->internal_state->mst;
 
     for (int i = 0; i < Nd; i++) {
-        path[i] = -666;
+        path[i] = -1000;
         sign[i] = 0;
     }
 
@@ -542,6 +541,8 @@ int sign(double x) {
 
 void octree(struct ketju_system *R, struct octree_node *Node,
             int MaxLeafSize, int *label) {
+    
+    struct octree_data *octd = R->internal_state->octree_data;
 
     int NpartOctant[8] = {0};
     int triplet[3];
@@ -556,7 +557,7 @@ void octree(struct ketju_system *R, struct octree_node *Node,
             allocate_new_octree_node(Node, oct, label);
         }
 
-        indexlist[oct][NpartOctant[oct]] = j;
+        octd->indexlist[oct][NpartOctant[oct]] = j;
 
         NpartOctant[oct]++;
         Node->children[oct]->Npart++;
@@ -570,7 +571,7 @@ void octree(struct ketju_system *R, struct octree_node *Node,
             calloc(Node->children[oct]->Npart, sizeof(int));
 
         for (int i = 0; i < Node->children[oct]->Npart; i++) {
-            Node->children[oct]->object_list[i] = indexlist[oct][i];
+            Node->children[oct]->object_list[i] = octd->indexlist[oct][i];
         }
 
         get_triplet_from_octant(oct, triplet);
@@ -581,7 +582,7 @@ void octree(struct ketju_system *R, struct octree_node *Node,
         }
 
         for (int i = 0; i < Node->children[oct]->Npart; i++) {
-            ParticleInNode[Node->children[oct]->object_list[i]] =
+            octd->particle_in_node[Node->children[oct]->object_list[i]] =
                 Node->children[oct];
         }
 
@@ -603,29 +604,31 @@ void octree(struct ketju_system *R, struct octree_node *Node,
 
 void spatialpartition(struct ketju_system *R, int MaxLeafSize) {
 
+    struct octree_data *octd = R->internal_state->octree_data;
+
     double rmax = get_rmax(R);
 
-    OctreeRootNode = calloc(1, sizeof(struct octree_node));
+    octd->root_node = calloc(1, sizeof(struct octree_node));
 
-    OctreeRootNode->ID = 0;
-    OctreeRootNode->parent = NULL;
-    OctreeRootNode->half_size = 1.001 * rmax;
-    OctreeRootNode->Npart = R->num_particles;
-    OctreeRootNode->object_list = calloc(R->num_particles, sizeof(int));
-    OctreeRootNode->level = 0;
+    octd->root_node->ID = 0;
+    octd->root_node->parent = NULL;
+    octd->root_node->half_size = 1.001 * rmax;
+    octd->root_node->Npart = R->num_particles;
+    octd->root_node->object_list = calloc(R->num_particles, sizeof(int));
+    octd->root_node->level = 0;
     for (int i = 0; i < 3; i++) {
-        OctreeRootNode->center[i] = 0.0;
+        octd->root_node->center[i] = 0.0;
     }
     for (int i = 0; i < 8; i++) {
-        OctreeRootNode->child_exists[i] = 0;
+        octd->root_node->child_exists[i] = 0;
     }
 
     for (int i = 0; i < R->num_particles; i++) {
-        OctreeRootNode->object_list[i] = i;
+        octd->root_node->object_list[i] = i;
     }
 
     int label = 1;
-    octree(R, OctreeRootNode, MaxLeafSize, &label);
+    octree(R, octd->root_node, MaxLeafSize, &label);
 }
 
 int get_longest(double w[3], int id[3]) {
@@ -658,47 +661,48 @@ int get_edge(int Nleafs, int va, int vb) {
     return index;
 }
 
-// TODO
-// Can probably test integration without this, since PrimMST is done
-#if 0
 void SolveMetaMST(struct ketju_system *R, int Nleafs, int *Npart,
                   int **Particles, int *NumEdge) {
 
+    const struct task_info *ti = R->internal_state->task_info;
+    const struct ketju_system_physical_state *ps = R->physical_state;
+    struct spanning_tree_coordinate_system *mst = R->internal_state->mst;
+    struct octree_data *octd = R->internal_state->octree_data;
+
     int Nedge = Nleafs * (Nleafs - 1) / 2;
-    struct WeightIndex2 *W = calloc(Nedge, sizeof(struct WeightIndex2));
+    struct weight_index_2 *W = calloc(Nedge, sizeof(struct weight_index_2));
     int *InMst = calloc(Nleafs, sizeof(int));
 
     int CumNumEdge = 0, istart = 0;
     int ThisBlock, jstart;
-    loop_scheduling_N2(Nleafs, Ntask, &istart, &jstart, &ThisBlock, &CumNumEdge,
-                       ThisTask);
+    loop_scheduling_N2(Nleafs, ti->main_group_size, &istart, &jstart,
+                       &ThisBlock, &CumNumEdge, ti->main_group_rank);
 
     struct octree_node *Node_i, *Node_j;
-    int counter = 0, ind1 = -1, ind2 = -1;
+    int counter = 0, ind1 = -1, ind2 = -1, loop = 1;
 
     int *ind1s = calloc(Nedge, sizeof(int));
     int *ind2s = calloc(Nedge, sizeof(int));
     double *weights = calloc(Nedge, sizeof(double));
 
-    counter = 0;
     for (int i = istart; i < Nleafs; i++) {
 
-        Node_i = ParticleInNode[Particles[i][0]];
+        Node_i = octd->particle_in_node[Particles[i][0]];
 
         if (i > istart) { jstart = i + 1; }
         for (int j = jstart; j < Nleafs; j++) {
 
-            Node_j = ParticleInNode[Particles[j][0]];
+            Node_j = octd->particle_in_node[Particles[j][0]];
 
             double r2 = 0;
             for (int k = 0; k < 3; k++) {
-                double ds = Node_i->Center[k] - Node_j->Center[k];
+                double ds = Node_i->center[k] - Node_j->center[k];
                 r2 = ds * ds;
             }
             double NodeSeparation = sqrt(r2);
             double NodeSize =
                 1.01 * sqrt(2) *
-                (Node_i->HalfSize + Node_j->HalfSize); // with safety buffer
+                (Node_i->half_size + Node_j->half_size); // with safety buffer
 
             if (NodeSeparation <= NodeSize) {
 
@@ -709,7 +713,7 @@ void SolveMetaMST(struct ketju_system *R, int Nleafs, int *Npart,
                         int i1 = Particles[i][q];
                         int i2 = Particles[j][p];
                         for (int k = 0; k < 3; k++) {
-                            double ds = R->Pos[3 * i1 + k] - R->Pos[3 * i2 + k];
+                            double ds = ps->pos[i1][k] - ps->pos[i2][k];
                             r2 += ds * ds;
                         }
                         double r = sqrt(r2);
@@ -728,7 +732,7 @@ void SolveMetaMST(struct ketju_system *R, int Nleafs, int *Npart,
                     int i1 = Particles[i][q];
                     double r2 = 0;
                     for (int k = 0; k < 3; k++) {
-                        double ds = R->Pos[3 * i1 + k] - Node_j->Center[k];
+                        double ds = ps->pos[i1][k] - Node_j->center[k];
                         r2 += ds * ds;
                     }
                     double r = sqrt(r2);
@@ -742,7 +746,7 @@ void SolveMetaMST(struct ketju_system *R, int Nleafs, int *Npart,
                     int i2 = Particles[j][p];
                     double r2 = 0;
                     for (int k = 0; k < 3; k++) {
-                        double ds = R->Pos[3 * i2 + k] - Node_i->Center[k];
+                        double ds = ps->pos[i2][k] - Node_i->center[k];
                         r2 += ds * ds;
                     }
                     double r = sqrt(r2);
@@ -755,7 +759,7 @@ void SolveMetaMST(struct ketju_system *R, int Nleafs, int *Npart,
 
             r2 = 0;
             for (int k = 0; k < 3; k++) {
-                double ds = R->Pos[3 * ind1 + k] - R->Pos[3 * ind2 + k];
+                double ds = ps->pos[ind1][k] - ps->pos[ind2][k];
                 r2 += ds * ds;
             }
             double r = sqrt(r2);
@@ -773,10 +777,12 @@ void SolveMetaMST(struct ketju_system *R, int Nleafs, int *Npart,
         if (loop == 0) { break; }
     }
 
-    MPI_Allreduce(MPI_IN_PLACE, ind1s, Nedge, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
-    MPI_Allreduce(MPI_IN_PLACE, ind2s, Nedge, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
+    // TODO: this is probably just gathering non-zero data, can it be replaced
+    // with a gather call?
+    MPI_Allreduce(MPI_IN_PLACE, ind1s, Nedge, MPI_INT, MPI_SUM, ti->main_comm);
+    MPI_Allreduce(MPI_IN_PLACE, ind2s, Nedge, MPI_INT, MPI_SUM, ti->main_comm);
     MPI_Allreduce(MPI_IN_PLACE, weights, Nedge, MPI_DOUBLE, MPI_SUM,
-                  MPI_COMM_WORLD);
+                  ti->main_comm);
 
     counter = 0;
     for (int i = 0; i < Nleafs; i++) {
@@ -797,10 +803,10 @@ void SolveMetaMST(struct ketju_system *R, int Nleafs, int *Npart,
     istart = 0;
     int istop = Nedge;
 
-    int block = (int)floor(Nedge / Ntask);
-    istart = ThisTask * block;
-    istop = (ThisTask + 1) * block;
-    if (ThisTask == Ntask - 1) istop = Nedge;
+    int block = (int)floor(Nedge / ti->main_group_size);
+    istart = ti->main_group_rank * block;
+    istop = (ti->main_group_rank + 1) * block;
+    if (ti->main_group_rank == ti->main_group_size - 1) istop = Nedge;
 
     int *flag = calloc(Nedge, sizeof(int));
 
@@ -841,8 +847,8 @@ void SolveMetaMST(struct ketju_system *R, int Nleafs, int *Npart,
         if (flag[e1] == 0) Noff++;
     }
 
-    struct WeightIndex2 *Wfilter =
-        calloc(Nedge - Noff, sizeof(struct WeightIndex2));
+    struct weight_index_2 *Wfilter =
+        calloc(Nedge - Noff, sizeof(struct weight_index_2));
 
     counter = 0;
     for (int e1 = 0; e1 < Nedge; e1++) {
@@ -860,7 +866,7 @@ void SolveMetaMST(struct ketju_system *R, int Nleafs, int *Npart,
     free(W);
     free(flag);
 
-    qsort(Wfilter, Nedge, sizeof(struct WeightIndex2), cmp_weight_index2);
+    qsort(Wfilter, Nedge, sizeof(struct weight_index_2), cmp_weight_index2);
 
     InMst[0] = 1;
 
@@ -868,13 +874,13 @@ void SolveMetaMST(struct ketju_system *R, int Nleafs, int *Npart,
     istart = 0;
     istop = Nedge;
 
-    block = (int)floor(Nedge / Ntask);
-    istart = ThisTask * block;
-    istop = (ThisTask + 1) * block;
-    if (ThisTask == Ntask - 1) istop = Nedge;
+    block = (int)floor(Nedge / ti->main_group_size);
+    istart = ti->main_group_rank * block;
+    istop = (ti->main_group_rank + 1) * block;
+    if (ti->main_group_rank == ti->main_group_size - 1) istop = Nedge;
 
     do {
-        struct WeightIndex wi;
+        struct weight_index wi;
         wi.weight = 1e10;
         wi.index = -1;
 
@@ -894,9 +900,9 @@ void SolveMetaMST(struct ketju_system *R, int Nleafs, int *Npart,
         InMst[Wfilter[wi.index].index1] = 1;
         InMst[Wfilter[wi.index].index2] = 1;
 
-        R->EdgeInMST[*NumEdge].vertex1 = Wfilter[wi.index].id1;
-        R->EdgeInMST[*NumEdge].vertex2 = Wfilter[wi.index].id2;
-        R->EdgeInMST[*NumEdge].weight = Wfilter[wi.index].weight;
+        mst->edge_in_mst[*NumEdge].vertex1 = Wfilter[wi.index].id1;
+        mst->edge_in_mst[*NumEdge].vertex2 = Wfilter[wi.index].id2;
+        mst->edge_in_mst[*NumEdge].weight = Wfilter[wi.index].weight;
         (*NumEdge)++;
 
         remaining--;
@@ -906,14 +912,15 @@ void SolveMetaMST(struct ketju_system *R, int Nleafs, int *Npart,
     free(InMst);
 }
 
-
 void SolveSubMST(struct ketju_system *R, int Npart, int *Particles,
-                 int label, int *NumEdge) {
-
+                 int *NumEdge) {
     if (Npart == 1) return;
 
+    const struct ketju_system_physical_state *ps = R->physical_state;
+    struct spanning_tree_coordinate_system *mst = R->internal_state->mst;
+
     int Nedge = Npart * (Npart - 1) / 2;
-    struct WeightIndex2 *W = calloc(Nedge, sizeof(struct WeightIndex2));
+    struct weight_index_2 *W = calloc(Nedge, sizeof(struct weight_index_2));
     int *InMst = calloc(Npart, sizeof(int));
 
     int counter = 0;
@@ -923,7 +930,7 @@ void SolveSubMST(struct ketju_system *R, int Npart, int *Particles,
             int ind2 = Particles[j];
             double r2 = 0;
             for (int k = 0; k < 3; k++) {
-                double ds = R->Pos[3 * ind1 + k] - R->Pos[3 * ind2 + k];
+                double ds = ps->pos[ind1][k] - ps->pos[ind2][k];
                 r2 += ds * ds;
             }
             double r = sqrt(r2);
@@ -936,7 +943,7 @@ void SolveSubMST(struct ketju_system *R, int Npart, int *Particles,
         }
     }
 
-    qsort(W, Nedge, sizeof(struct WeightIndex2), cmp_weight_index2);
+    qsort(W, Nedge, sizeof(struct weight_index_2), cmp_weight_index2);
 
     InMst[0] = 1;
 
@@ -954,9 +961,9 @@ void SolveSubMST(struct ketju_system *R, int Npart, int *Particles,
                     InMst[i1] = 1;
                 }
 
-                R->EdgeInMST[*NumEdge].vertex1 = W[i].id1;
-                R->EdgeInMST[*NumEdge].vertex2 = W[i].id2;
-                R->EdgeInMST[*NumEdge].weight = W[i].weight;
+                mst->edge_in_mst[*NumEdge].vertex1 = W[i].id1;
+                mst->edge_in_mst[*NumEdge].vertex2 = W[i].id2;
+                mst->edge_in_mst[*NumEdge].weight = W[i].weight;
                 (*NumEdge)++;
                 break;
             }
@@ -970,75 +977,78 @@ void SolveSubMST(struct ketju_system *R, int Npart, int *Particles,
 }
 
 void SwapEdge(struct ketju_system *R, int i, int j) {
+    struct spanning_tree_coordinate_system *mst = R->internal_state->mst;
 
-    int v1 = R->EdgeInMST[i].vertex1;
-    int v2 = R->EdgeInMST[i].vertex2;
-    double w = R->EdgeInMST[i].weight;
+    int v1 = mst->edge_in_mst[i].vertex1;
+    int v2 = mst->edge_in_mst[i].vertex2;
+    double w = mst->edge_in_mst[i].weight;
 
-    R->EdgeInMST[i].vertex1 = R->EdgeInMST[j].vertex1;
-    R->EdgeInMST[i].vertex2 = R->EdgeInMST[j].vertex2;
-    R->EdgeInMST[i].weight = R->EdgeInMST[j].weight;
+    mst->edge_in_mst[i].vertex1 = mst->edge_in_mst[j].vertex1;
+    mst->edge_in_mst[i].vertex2 = mst->edge_in_mst[j].vertex2;
+    mst->edge_in_mst[i].weight = mst->edge_in_mst[j].weight;
 
-    R->EdgeInMST[j].vertex1 = v1;
-    R->EdgeInMST[j].vertex2 = v2;
-    R->EdgeInMST[j].weight = w;
+    mst->edge_in_mst[j].vertex1 = v1;
+    mst->edge_in_mst[j].vertex2 = v2;
+    mst->edge_in_mst[j].weight = w;
 }
 
 void CombineAllMST(struct ketju_system *R, int NumEdge) {
 
+    const struct ketju_system_physical_state *ps = R->physical_state;
+    struct spanning_tree_coordinate_system *mst = R->internal_state->mst;
+
     int next = -1;
     double rmin = DBL_MAX;
-    for (int i = 0; i < R->NumVertex; i++) {
+    for (int i = 0; i < mst->num_vertices; i++) {
         double r2 = 0;
         for (int k = 0; k < 3; k++) {
-            double ds = R->Pos[3 * i + k];
+            double ds = ps->pos[i][k];
             r2 += ds * ds;
         }
-        if (rmin > sqrt(r2)) {
-            rmin = sqrt(r2);
+        double r = sqrt(r2);
+        if (rmin > r) {
+            rmin = r;
             next = i;
         }
     }
 
     int counter = 0;
-    R->Vertex[next].inMST = 1;
+    mst->vertex[next].inMST = 1;
 
     int istop = NumEdge;
 
     do {
 
-        struct WeightIndex wi;
+        struct weight_index wi;
         wi.weight = 1e10;
         wi.index = -1;
 
         for (int i = counter; i < istop; i++) {
-            int v1 = R->EdgeInMST[i].vertex1;
-            int v2 = R->EdgeInMST[i].vertex2;
-            if (R->Vertex[v1].inMST != R->Vertex[v2].inMST) {
-                if (R->EdgeInMST[i].weight < wi.weight) {
-                    wi.weight = R->EdgeInMST[i].weight;
+            int v1 = mst->edge_in_mst[i].vertex1;
+            int v2 = mst->edge_in_mst[i].vertex2;
+            if (mst->vertex[v1].inMST != mst->vertex[v2].inMST) {
+                if (mst->edge_in_mst[i].weight < wi.weight) {
+                    wi.weight = mst->edge_in_mst[i].weight;
                     wi.index = i;
                 }
             }
         }
 
-        int new = R->EdgeInMST[wi.index].vertex1;
-        int old = R->EdgeInMST[wi.index].vertex2;
-        if (R->Vertex[new].inMST == 1) {
-            old = R->EdgeInMST[wi.index].vertex1;
-            new = R->EdgeInMST[wi.index].vertex2;
+        int new = mst->edge_in_mst[wi.index].vertex1;
+        int old = mst->edge_in_mst[wi.index].vertex2;
+        if (mst->vertex[new].inMST == 1) {
+            old = mst->edge_in_mst[wi.index].vertex1;
+            new = mst->edge_in_mst[wi.index].vertex2;
         }
 
-        R->Vertex[new].inMST = 1;
-        R->Vertex[new].parent = old;
-        R->Vertex[new].level = R->Vertex[old].level + 1;
-        R->Vertex[new].edgetoparent = counter;
+        mst->vertex[new].inMST = 1;
+        mst->vertex[new].parent = old;
+        mst->vertex[new].level = mst->vertex[old].level + 1;
+        mst->vertex[new].edgetoparent = counter;
 
         for (int k = 0; k < 3; k++) {
-            R->State[3 * counter + k] =
-                R->Pos[3 * new + k] - R->Pos[3 * old + k];
-            R->State[3 * (R->NumVertex - 1) + 3 * counter + k] =
-                R->Vel[3 * new + k] - R->Vel[3 * old + k];
+            mst->edge_rel_pos[counter][k] = ps->pos[new][k] - ps->pos[old][k];
+            mst->edge_rel_vel[counter][k] = ps->vel[new][k] - ps->vel[old][k];
         }
 
         SwapEdge(R, counter, wi.index);
@@ -1049,55 +1059,53 @@ void CombineAllMST(struct ketju_system *R, int NumEdge) {
 
 void DivideAndConquerPrim(struct ketju_system *R) {
 
-    my_barrier();
-    clock_t t0 = clock();
+    tick(&R->perf->time_mst);
+    struct spanning_tree_coordinate_system *mst = R->internal_state->mst;
+    struct octree_data *octd = R->internal_state->octree_data;
 
-    for (int i = 0; i < R->NumVertex; i++) {
-        R->Vertex[i].id = i;
-        R->Vertex[i].degree = 0;
-        R->Vertex[i].edgetoparent = -1;
-        R->Vertex[i].parent = -1;
-        R->Vertex[i].level = 0;
-        R->Vertex[i].inMST = 0;
+    for (int i = 0; i < mst->num_vertices; i++) {
+        mst->vertex[i].id = i;
+        mst->vertex[i].degree = 0;
+        mst->vertex[i].edgetoparent = -1;
+        mst->vertex[i].parent = -1;
+        mst->vertex[i].level = 0;
+        mst->vertex[i].inMST = 0;
     }
 
     int Nleafs = 0;
-    int MaxLeafSize = (int)floor(3 * sqrt(R->NumVertex));
+    int MaxLeafSize = (int)floor(3 * sqrt(mst->num_vertices));
 
-    clock_t t10 = clock();
+    tick(&R->perf->tprim1);
     spatialpartition(&R[0], MaxLeafSize);
 
-    GetNumberOfLeafs(OctreeRootNode, &Nleafs);
+    GetNumberOfLeafs(octd->root_node, &Nleafs);
     int *LeafSizes = calloc(Nleafs, sizeof(int));
     int **LeafParticles = calloc(Nleafs, sizeof(int *));
-    clock_t t11 = clock();
-    tprim1 += (double)(t11 - t10) / CLOCKS_PER_SEC;
 
-    clock_t t20 = clock();
+    tock(&R->perf->tprim1);
+
+    tick(&R->perf->tprim2);
     Nleafs = 0;
-    list_octree_level(OctreeRootNode, LeafSizes, LeafParticles, &Nleafs);
-    clock_t t21 = clock();
-    tprim2 += (double)(t21 - t20) / CLOCKS_PER_SEC;
+    list_octree_level(octd->root_node, LeafSizes, LeafParticles, &Nleafs);
 
-    clock_t t30 = clock();
+    tock(&R->perf->tprim2);
+
+    tick(&R->perf->tprim3);
     int NumEdge = 0;
     for (int i = 0; i < Nleafs; i++) {
-        SolveSubMST(R, LeafSizes[i], LeafParticles[i], i, &NumEdge);
+        SolveSubMST(R, LeafSizes[i], LeafParticles[i], &NumEdge);
     }
-    clock_t t31 = clock();
-    tprim3 += (double)(t31 - t30) / CLOCKS_PER_SEC;
+    tock(&R->perf->tprim3);
 
-    clock_t t40 = clock();
+    tick(&R->perf->tprim4);
     SolveMetaMST(R, Nleafs, LeafSizes, LeafParticles, &NumEdge);
-    clock_t t41 = clock();
-    tprim4 += (double)(t41 - t40) / CLOCKS_PER_SEC;
+    tock(&R->perf->tprim4);
 
-    clock_t t50 = clock();
+    tick(&R->perf->tprim5);
     CombineAllMST(R, NumEdge);
-    clock_t t51 = clock();
-    tprim5 += (double)(t51 - t50) / CLOCKS_PER_SEC;
+    tock(&R->perf->tprim5);
 
-    free_octree(OctreeRootNode);
+    free_octree(octd->root_node);
     for (int i = 0; i < Nleafs; i++) {
         free(LeafParticles[i]);
     }
@@ -1107,18 +1115,25 @@ void DivideAndConquerPrim(struct ketju_system *R) {
     // now all the mst edges are constructed
     mst->num_edges = mst->num_vertices -1; 
 
-    clock_t t1 = clock();
-    time_mst += (double)(t1 - t0) / CLOCKS_PER_SEC;
+    tock(&R->perf->time_mst);
 }
-#endif
 
 
 void ketju_build_mst(struct ketju_system *R) {
-    //TODO method should be selected by runtime options
-#define PRIM // other method TODO
-#ifdef PRIM
-    PrimMST(R);
-#else
-    DivideAndConquerPrim(R);
-#endif
+    // TODO should probably default to prim for small systems even if divide and
+    // conquer option is selected
+    switch (R->options->mst_algorithm) {
+        case KETJU_MST_PRIM:
+            PrimMST(R);
+            break;
+        case KETJU_MST_DIVIDE_AND_CONQUER_PRIM:
+            DivideAndConquerPrim(R);
+            break;
+        default: {
+            char msg[100];
+            sprintf(msg, "Invalid mst_algorithm value %d!",
+                    R->options->mst_algorithm);
+            terminate(msg);
+        }
+    }
 }
