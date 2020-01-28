@@ -95,6 +95,7 @@ struct task_info {
     int gbs_group_rank;
     int gbs_group_index; //< which of the gbs groups this task belongs in
     MPI_Comm gbs_comm;
+    bool gbs_comms_initialized;
     
     int global_rank; // <rank in MPI_COMM_WORLD
 };
@@ -110,7 +111,7 @@ struct ketju_system_internal_state {
     double U; // potential energy
     double T;
     double B;
-    double H;
+
     double (*aux_vel)[3]; 
     double (*acc)[3]; // velocity independent acceleration
     double (*acc_vd)[3]; // velocity dependent acceleration (for all particles at least for now)
@@ -159,10 +160,10 @@ int ketju_check_relative_proximity_ND_2(int v1, int v2, const struct ketju_syste
 
 void ketju_init_gbs_comms(struct ketju_system *R);
 
+void ketju_build_mst(struct ketju_system *R);
 
 // TODO rename these
 void loop_scheduling_N2(int Nrow, int Nt, int *istart, int *jstart,
                         int *ThisBlock, int *CumNum, int task);
-void PrimMST(struct ketju_system *R);
 
 #endif // KETJU_INTEGRATOR_INTERNAL_H

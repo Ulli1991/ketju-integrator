@@ -36,6 +36,8 @@ int ketju_check_relative_proximity_ND_2(int v1, int v2,
         }
         return 0;
     } else if (diff == 2) {
+        //FIXME valgrind finds a read error here, apparently parent == -1 in
+        // some case. Also present in the original implementation.
         if (mst->vertex[mst->vertex[v2].parent].parent == v1) {
             *d = 2;
             sign[0] = -1;
@@ -1109,3 +1111,14 @@ void DivideAndConquerPrim(struct ketju_system *R) {
     time_mst += (double)(t1 - t0) / CLOCKS_PER_SEC;
 }
 #endif
+
+
+void ketju_build_mst(struct ketju_system *R) {
+    //TODO method should be selected by runtime options
+#define PRIM // other method TODO
+#ifdef PRIM
+    PrimMST(R);
+#else
+    DivideAndConquerPrim(R);
+#endif
+}

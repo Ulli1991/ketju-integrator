@@ -50,6 +50,9 @@ void compute_U(struct ketju_system *R) {
     is->U = 0;
     int istart = 0;
     int CumNumEdge, ThisBlock, jstart;
+    // TODO: we might want the option to parallelize this over all of the tasks
+    // instead of just the gbs group, since this function is mainly for
+    // computing the energy between steps.
     loop_scheduling_N2(mst->num_vertices, is->task_info->gbs_group_size,
                        &istart, &jstart, &ThisBlock, &CumNumEdge,
                        is->task_info->gbs_group_rank);
@@ -72,7 +75,7 @@ void compute_U(struct ketju_system *R) {
             double r2 = 0;
             int proximity = 0;
 
-            if (fabs(Li - Lj) < Nd) {
+            if (abs(Li - Lj) < Nd) {
                 proximity =
                     ketju_check_relative_proximity(j, i, Nd, R, &d, path, sign);
             }
@@ -139,7 +142,7 @@ void compute_U_and_Newtonian_Acc(struct ketju_system *R) {
     int path[Nd];
     int sign[Nd];
 
-    memset(is->acc, 0, sizeof(double[mst->num_vertices][3]));
+    memset(is->acc, 0, sizeof(double[R->num_particles][3]));
 
     is->U = 0;
     double dr[3], r2;
@@ -292,33 +295,36 @@ void into_Cartesian_from_MST(struct ketju_system *R) {
     tock(&R->perf->time_coord);
 }
 
-// puts the initial data to the CoM frame and sets the CoM pos and vel
+// Puts the initial data to the CoM frame and shifts the CoM pos and vel.
+// CoM pos and vel are only shifted, so safe to call multiple times.
 void into_CoM_frame(struct ketju_system *R) {
 
     tick(&R->perf->time_coord);
     struct ketju_system_physical_state *ps = R->physical_state;
-
-    for (int k = 0; k < 3; k++) {
-        R->CoM_pos[k] = 0;
-        R->CoM_vel[k] = 0;
-    }
+    double CoM_pos[3] = {0};
+    double CoM_vel[3] = {0};
     double M = 0;
+
     for (int i = 0; i < R->num_particles; i++) {
         M += ps->mass[i];
         for (int k = 0; k < 3; k++) {
-            R->CoM_pos[k] += ps->mass[i] * ps->pos[i][k];
-            R->CoM_vel[k] += ps->mass[i] * ps->vel[i][k];
+            CoM_pos[k] += ps->mass[i] * ps->pos[i][k];
+            CoM_vel[k] += ps->mass[i] * ps->vel[i][k];
         }
     }
     for (int k = 0; k < 3; k++) {
-        R->CoM_pos[k] /= M;
-        R->CoM_vel[k] /= M;
+        CoM_pos[k] /= M;
+        CoM_vel[k] /= M;
     }
     for (int i = 0; i < R->num_particles; i++) {
         for (int k = 0; k < 3; k++) {
-            ps->pos[i][k] -= R->CoM_pos[k];
-            ps->vel[i][k] -= R->CoM_vel[k];
+            ps->pos[i][k] -= CoM_pos[k];
+            ps->vel[i][k] -= CoM_vel[k];
         }
+    }
+    for (int k = 0; k < 3; k++) {
+        R->CoM_pos[k] += CoM_pos[k];
+        R->CoM_vel[k] += CoM_vel[k];
     }
 
     tock(&R->perf->time_coord);
@@ -328,6 +334,7 @@ void compute_T(struct ketju_system *R) {
     struct ketju_system_internal_state *is = R->internal_state;
     struct ketju_system_physical_state *ps = R->physical_state;
     is->T = 0;
+    // TODO: this might benefit from parallelization for large particle numbers
     for (int i = 0; i < R->num_particles; i++) {
         double dv, v2 = 0;
         for (int k = 0; k < 3; k++) {
@@ -463,7 +470,8 @@ void drift(double ds, struct ketju_system *R) {
     struct ketju_system_physical_state *ps = R->physical_state;
 
     compute_T(R);
-    double dt = ds / (is->T + is->B); // TODO: isn't this just is->U?
+     // T + B = U, but depends only on velocities
+    double dt = ds / (is->T + is->B);
     ps->time += dt;
 
     for (int i = 0; i < mst->num_vertices - 1; i++) {
@@ -561,8 +569,7 @@ void compute_total_energy(struct ketju_system *R) {
 
     compute_T(R);
     compute_U(R);
-    is->H = is->T - is->U;
-    is->B = -is->H;
+    is->B = is->U - is->T;
     // TODO is there some reason that the B variable and the B value in the old
     // state are different like below?
     // R->State[R->BIndex] = R->B;
@@ -630,12 +637,12 @@ struct state_backup {
     double (*edge_rel_vel)[3];
 };
 
-void allocate_state_backup(struct state_backup *sb, int num_particles) {
+void allocate_state_backup(struct state_backup *sb, int num_particles, int num_pn_particles) {
     sb->pos = malloc(sizeof(double[num_particles][3]));
     sb->vel = malloc(sizeof(double[num_particles][3]));
-    sb->spin = malloc(sizeof(double[num_particles][3]));
-    sb->edge_rel_pos = malloc(sizeof(double[num_particles][3]));
-    sb->edge_rel_vel = malloc(sizeof(double[num_particles][3]));
+    sb->spin = malloc(sizeof(double[num_pn_particles][3]));
+    sb->edge_rel_pos = malloc(sizeof(double[num_particles-1][3]));
+    sb->edge_rel_vel = malloc(sizeof(double[num_particles-1][3]));
 }
 
 void store_state_backup(struct state_backup *sb, const struct ketju_system *R) {
@@ -647,11 +654,11 @@ void store_state_backup(struct state_backup *sb, const struct ketju_system *R) {
     const int num_particles = R->num_particles;
     memcpy(sb->pos, R->physical_state->pos, sizeof(double[num_particles][3]));
     memcpy(sb->vel, R->physical_state->vel, sizeof(double[num_particles][3]));
-    memcpy(sb->spin, R->physical_state->spin, sizeof(double[num_particles][3]));
+    memcpy(sb->spin, R->physical_state->spin, sizeof(double[R->num_pn_particles][3]));
     memcpy(sb->edge_rel_pos, R->internal_state->mst->edge_rel_pos,
-           sizeof(double[num_particles][3]));
+           sizeof(double[num_particles - 1][3]));
     memcpy(sb->edge_rel_vel, R->internal_state->mst->edge_rel_vel,
-           sizeof(double[num_particles][3]));
+           sizeof(double[num_particles - 1][3]));
 }
 
 void restore_state_backup(struct state_backup *sb,
@@ -664,16 +671,17 @@ void restore_state_backup(struct state_backup *sb,
     const int num_particles = R->num_particles;
     memcpy(R->physical_state->pos, sb->pos, sizeof(double[num_particles][3]));
     memcpy(R->physical_state->vel, sb->vel, sizeof(double[num_particles][3]));
-    memcpy(R->physical_state->spin, sb->spin, sizeof(double[num_particles][3]));
+    memcpy(R->physical_state->spin, sb->spin, sizeof(double[R->num_pn_particles][3]));
     memcpy(R->internal_state->mst->edge_rel_pos, sb->edge_rel_pos,
-           sizeof(double[num_particles][3]));
+           sizeof(double[num_particles-1][3]));
     memcpy(R->internal_state->mst->edge_rel_vel, sb->edge_rel_vel,
-           sizeof(double[num_particles][3]));
+           sizeof(double[num_particles-1][3]));
 }
 
 void free_state_backup(struct state_backup *sb) {
     free(sb->pos);
     free(sb->vel);
+    free(sb->spin);
     free(sb->edge_rel_pos);
     free(sb->edge_rel_vel);
 }
@@ -699,7 +707,7 @@ void free_gbs_storage(struct gbs_storage *gs) { free(gs->data); }
 void store_gbs_data(struct gbs_storage *gs, const struct ketju_system *R,
                     int k) {
     double(*data)[gs->num_vars] = (double(*)[gs->num_vars])gs->data;
-    const int k_ind = k - 1; // TODO check that k starts at 1
+    const int k_ind = k - 1;
     data[k_ind][0] = R->physical_state->time;
     data[k_ind][1] = R->internal_state->B;
     int offset = 2;
@@ -710,7 +718,7 @@ void store_gbs_data(struct gbs_storage *gs, const struct ketju_system *R,
     memcpy(&data[k_ind][offset], mst->edge_rel_vel, edge_vec_size);
     offset += 3*(mst->num_vertices-1);
     memcpy(&data[k_ind][offset], R->physical_state->spin,
-           sizeof(double[R->num_pn_particles]));
+           sizeof(double[R->num_pn_particles][3]));
 }
 
 void comm_gbs_data(struct gbs_storage *gs, int *gbs_ks_for_this_group,
@@ -807,6 +815,7 @@ bool gbs_extrapolate(struct gbs_storage *gs, double *Hstep,
     // TODO make configurable
     const double abs_tol = 1e-100;
 
+
     for (int i = start_ind; i < end_ind; ++i) {
         for (int j = 0; j < kmax; ++j) {
             y[j] = data[j][i];
@@ -818,7 +827,9 @@ bool gbs_extrapolate(struct gbs_storage *gs, double *Hstep,
         }
         extrapolate_single_variable(y, yscal, kmax, &result, &error);
         data[kmax][i] = result;
-        if (error > max_error) max_error = error;
+        if (error > max_error) {
+            max_error = error;
+        }
     }
     tock(&R->perf->time_gbsextr);
 
@@ -840,6 +851,7 @@ bool gbs_extrapolate(struct gbs_storage *gs, double *Hstep,
         if (Hnextfac > 5.0) { Hnextfac = 5.0; }
         *Hstep *= Hnextfac;
     } else {
+        // TODO: this looks weird, should it be Hnextfac < 0.7 instead?
         if (Hnextfac > 0.7) { Hnextfac = 0.7; }
         *Hstep *= Hnextfac;
     }
@@ -862,7 +874,7 @@ void update_system_from_gbs_result(struct ketju_system *R,
     memcpy(mst->edge_rel_vel, &data[offset], edge_vec_size);
     offset += 3*(mst->num_vertices-1);
     memcpy(R->physical_state->spin, &data[offset],
-           sizeof(double[R->num_pn_particles]));
+           sizeof(double[R->num_pn_particles][3]));
 
     into_Cartesian_from_MST(R);
 }
@@ -871,18 +883,16 @@ void ketju_run_integrator(struct ketju_system *R, double time_interval) {
 // TODO return status/error code
 
     tick(&R->perf->time_total);
-    //TODO now the integrator can only be run once, so should separate this init
-    //stuff to a separate function
-    ketju_init_gbs_comms(R);
-    // Initialize the system to integrate
+    // Initialize necessary comms if not done already by the caller
+    if (!R->internal_state->task_info->gbs_comms_initialized) {
+        ketju_init_gbs_comms(R);
+    }
+    // ensure correct CoM frame
     into_CoM_frame(R);
 
-#define PRIM // other method TODO
-#ifdef PRIM
-    PrimMST(R);
-#else
-    DivideAndConquerPrim(R);
-#endif
+    ketju_build_mst(R);
+    int steps_since_reconstruction = 0;
+
     compute_total_energy(R);
 
     double dt = 1e-7; // TODO better guess for initial step
@@ -895,7 +905,7 @@ void ketju_run_integrator(struct ketju_system *R, double time_interval) {
     get_gbs_ks_for_this_group(R, gbs_ks_for_this_group);
 
     struct state_backup old_state;
-    allocate_state_backup(&old_state, R->num_particles);
+    allocate_state_backup(&old_state, R->num_particles, R->num_pn_particles);
     store_state_backup(&old_state, R);
 
     struct gbs_storage gbs_storage;
@@ -907,7 +917,7 @@ void ketju_run_integrator(struct ketju_system *R, double time_interval) {
         // TODO check mergers (note that variable counts need to be changed in
         // some of the temp state)
 
-        for (int i = 0; gbs_ks_for_this_group[i] && i < kmax; ++i) {
+        for (int i = 0; i < kmax && gbs_ks_for_this_group[i]; ++i) {
             if (i) {
                 // not needed on the first round
                 restore_state_backup(&old_state, R);
@@ -921,6 +931,8 @@ void ketju_run_integrator(struct ketju_system *R, double time_interval) {
 
         if (converged) {
             update_system_from_gbs_result(R, &gbs_storage);
+            R->perf->succesful_steps += 1;
+            steps_since_reconstruction += 1;
 
             double remaining_time =
                 time_interval - (R->physical_state->time - t_start);
@@ -930,21 +942,24 @@ void ketju_run_integrator(struct ketju_system *R, double time_interval) {
                     R->options->output_time_absolute_tolerance) {
                 finished = true;
             } else {
-                store_state_backup(&old_state, R);
+                compute_total_energy(R);
                 // Check that we're not overstepping and alter timestep if
                 // required
                 // Should work also for negative time intervals
                 // TODO this should be improved to allow for better accuracy in
                 // time
-                compute_total_energy(R);
                 if (fabs(remaining_time) < fabs(Hstep/R->internal_state->U) ||
                     copysign(1, time_interval) * remaining_time < 0) {
                     Hstep = R->internal_state->U * remaining_time;
                 }
                 // new stepsize set by gbs_extrapolate otherwise
-                R->perf->succesful_steps += 1;
+                // TODO configurable step interval
+                if (steps_since_reconstruction > 100) {
+                    ketju_build_mst(R);
+                    steps_since_reconstruction = 0;
+                }
 
-                // TODO mst reconstruction at configurable step interval
+                store_state_backup(&old_state, R);
             }
         } else {
             restore_state_backup(&old_state, R);
@@ -977,8 +992,9 @@ inline static double relative_velocity(double *v1, double *v2, double *v12) {
     return vrel2;
 }
 
-// Based on Mora & Will, Phys. Rev. D 69, 104021
+// TODO not tested
 // TODO add spin terms
+// Based on Mora & Will, Phys. Rev. D 69, 104021
 void compute_PN_twobody_Acc(struct ketju_system *R, double (*Vel)[3],
                             double (*AccPN)[3], int i, int j) {
 

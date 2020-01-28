@@ -2,6 +2,7 @@
 
 #include <math.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include <mpi.h>
 
@@ -41,12 +42,45 @@ static void allocate_internal_state(struct ketju_system *R, int Ntask) {
     R->internal_state->acc_vd = calloc(1, sizeof(double[R->num_particles][3]));
 }
 
+static void free_internal_state(struct ketju_system *R) {
+    free(R->internal_state->aux_vel);
+    free(R->internal_state->acc);
+    free(R->internal_state->acc_vd);
+
+    struct spanning_tree_coordinate_system *mst = R->internal_state->mst;
+    free(mst->local_edge);
+    free(mst->local_edge_subset);
+    free(mst->edge_in_mst);
+    free(mst->edge_rel_pos);
+    free(mst->edge_rel_vel);
+    free(mst->edge_rel_aux_vel);
+    free(mst->edge_rel_acc);
+    free(mst->edge_rel_acc_vd);
+    free(mst->vertex);
+    free(mst);
+
+    // Note: newly created MPI objects need to be freed before this
+    free(R->internal_state->task_info);
+    free(R->internal_state->group_info);
+    free(R->internal_state);
+    R->internal_state = NULL;
+}
+
 static void allocate_physical_state(struct ketju_system *R) {
     R->physical_state = calloc(1, sizeof(struct ketju_system_physical_state));
     R->physical_state->mass = calloc(1, sizeof(double[R->num_particles]));
     R->physical_state->pos = calloc(1, sizeof(double[R->num_particles][3]));
     R->physical_state->vel = calloc(1, sizeof(double[R->num_particles][3]));
     R->physical_state->spin = calloc(1, sizeof(double[R->num_pn_particles][3]));
+}
+
+static void free_physical_state(struct ketju_system *R) {
+    free(R->physical_state->mass);
+    free(R->physical_state->pos);
+    free(R->physical_state->vel);
+    free(R->physical_state->spin);
+    free(R->physical_state);
+    R->physical_state = NULL;
 }
 
 void ketju_create_system(struct ketju_system *R, int num_pn_particles,
@@ -60,7 +94,7 @@ void ketju_create_system(struct ketju_system *R, int num_pn_particles,
     allocate_internal_state(R, Ntask);
     R->internal_state->task_info->main_group_size = Ntask;
     MPI_Comm_rank(comm, &R->internal_state->task_info->main_group_rank);
-    R->internal_state->task_info->main_comm = comm;
+    MPI_Comm_dup(comm, &R->internal_state->task_info->main_comm);
     MPI_Comm_rank(MPI_COMM_WORLD, &R->internal_state->task_info->global_rank);
     // The rest of the communication setup is done in ketju_init_gbs_comms,
     // since it depends on the configuration options (at least gbs_kmax);
@@ -72,11 +106,21 @@ void ketju_create_system(struct ketju_system *R, int num_pn_particles,
     *R->options = ketju_default_integration_options;
     R->constants = calloc(1, sizeof(struct ketju_natural_constants));
     *R->constants = ketju_default_natural_constants;
+
+    memset(R->CoM_pos, 0, sizeof(double[3]));
+    memset(R->CoM_vel, 0, sizeof(double[3]));
 }
 
 void ketju_init_gbs_comms(struct ketju_system *R) {
     struct task_info *ti = R->internal_state->task_info;
     struct group_info *gi = R->internal_state->group_info;
+
+    if (ti->gbs_comms_initialized) {
+        terminate(
+            "ketju_init_gbs_comms: Error! Trying to initialize gbs comms a "
+            "second time\n");
+    }
+
     // For now just split into even chunks
     // TODO make number of groups configurable and task distribution better
     const int max_num_gbs_groups = 4;
@@ -99,7 +143,6 @@ void ketju_init_gbs_comms(struct ketju_system *R) {
         group_end_rank = group_start_rank + gi->gbs_group_sizes[i] -1 ;
         ti->gbs_group_index = i;
     }
-    printf("%d %d\n", group_start_rank, group_end_rank);
 
     int range[1][3] = {{group_start_rank, group_end_rank, 1}};
     MPI_Group main_group, gbs_group;
@@ -112,9 +155,24 @@ void ketju_init_gbs_comms(struct ketju_system *R) {
 
     MPI_Group_free(&main_group);
     MPI_Group_free(&gbs_group);
+
+    ti->gbs_comms_initialized = true;
+}
+
+static void free_gbs_comms(struct ketju_system *R) {
+    MPI_Comm_free(&R->internal_state->task_info->gbs_comm);
+    free(R->internal_state->group_info->gbs_group_sizes);
+    R->internal_state->task_info->gbs_comms_initialized = false;
 }
 
 void ketju_free_system(struct ketju_system *R) {
-    // XXX remember to free the comms as well
-    (void) R;
+    free_gbs_comms(R);
+    MPI_Comm_free(&R->internal_state->task_info->main_comm);
+    free_internal_state(R);
+
+    free_physical_state(R);
+
+    free(R->perf);
+    free(R->options);
+    free(R->constants);
 }

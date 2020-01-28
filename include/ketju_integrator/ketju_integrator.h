@@ -42,6 +42,7 @@ struct ketju_integration_options {
     int max_tree_distance;
     //< Maximum separation in the tree structure before using CoM coordinate
     //distances
+    //TODO doesn't the use of check_relative_proximity_ND_2 break this?
 };
 
 static const struct ketju_integration_options

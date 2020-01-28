@@ -66,6 +66,7 @@ int main(int argc, char *argv[]) {
     struct ketju_system R;
     init_from_ic_file(&R, argv[1]);
     // TODO read param file
+    R.options->gbs_relative_tolerance = 1e-9;
 
     double time_interval = strtof(argv[2], NULL);
     ketju_run_integrator(&R, time_interval);
@@ -73,27 +74,44 @@ int main(int argc, char *argv[]) {
     if (ThisTask == 0) {
         printf("Timers:\n");
         printf(
-            "time_force:     %f\n"
-            "time_comm:      %f\n"
-            "time_coord:     %f\n"
-            "time_mst:       %f\n"
-            "time_gbscomm:   %f\n"
-            "time_gbsextr:   %f\n"
+            "time_force:     %f (%2.1f%%)\n"
+            "time_comm:      %f (%2.1f%%)\n"
+            "time_coord:     %f (%2.1f%%)\n"
+            "time_mst:       %f (%2.1f%%)\n"
+            "time_gbscomm:   %f (%2.1f%%)\n"
+            "time_gbsextr:   %f (%2.1f%%)\n"
             "time_total:     %f\n"
             "succesful_steps: %d\n"
             "failed_steps: %d\n"
             "relative_energy_error: %e\n"
             ,
-            R.perf->time_force, R.perf->time_comm, R.perf->time_coord,
-            R.perf->time_mst, R.perf->time_gbscomm, R.perf->time_gbsextr,
+            R.perf->time_force,
+            R.perf->time_force/R.perf->time_total*100,
+            R.perf->time_comm,
+            R.perf->time_comm/R.perf->time_total*100,
+            R.perf->time_coord,
+            R.perf->time_coord/R.perf->time_total*100,
+            R.perf->time_mst,
+            R.perf->time_mst/R.perf->time_total*100,
+            R.perf->time_gbscomm,
+            R.perf->time_gbscomm/R.perf->time_total*100,
+            R.perf->time_gbsextr,
+            R.perf->time_gbsextr/R.perf->time_total*100,
             R.perf->time_total, R.perf->succesful_steps, R.perf->failed_steps,
             R.perf->relative_energy_error);
 
-        printf("First particle pos = [%e, %e, %e]\n"
-               "               vel = [%e, %e, %e]\n",
-               R.physical_state->pos[0][0], R.physical_state->pos[0][1],
-               R.physical_state->pos[0][2], R.physical_state->vel[0][0],
-               R.physical_state->vel[0][1], R.physical_state->vel[0][2]);
+        printf("Physical time %e\n", R.physical_state->time);
+        int n = R.num_particles > 10 ? 10 : R.num_particles;
+        for (int i = 0; i < n; ++i) {
+            printf(
+                "Particle %d\n"
+                " pos = [%e, %e, %e]\n"
+                " vel = [%e, %e, %e]\n",
+                i,
+                R.physical_state->pos[i][0], R.physical_state->pos[i][1],
+                R.physical_state->pos[i][2], R.physical_state->vel[i][0],
+                R.physical_state->vel[i][1], R.physical_state->vel[i][2]);
+        }
     }
 
     ketju_free_system(&R);
