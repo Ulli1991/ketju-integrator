@@ -92,7 +92,8 @@ int ketju_check_relative_proximity(int v1, int v2, const int Nd,
         }
 
         int halfNd = (int)floor(0.5 * Nd);
-        int *pathend = calloc(Nd, sizeof(int));
+        int pathend[Nd];
+        memset(pathend, 0, sizeof pathend);
 
         for (int i = 0; i < halfNd; i++) {
             sign[i] = +1;
@@ -112,8 +113,6 @@ int ketju_check_relative_proximity(int v1, int v2, const int Nd,
                 break;
             }
         }
-
-        free(pathend);
 
     } else {
         *d = abs(mst->vertex[v1].level - mst->vertex[v2].level);
@@ -190,7 +189,7 @@ int EdgeSearchForPrim(struct ketju_system *R, int NumLocalEdges) {
     const struct spanning_tree_coordinate_system *mst = R->internal_state->mst;
     struct weight_index wi;
 
-    wi.weight = 1e10;
+    wi.weight = DBL_MAX;
     wi.index = -1;
     for (int i = 0; i < NumLocalEdges; i++) {
         if (mst->vertex[mst->local_edge[i].vertex1].inMST !=
@@ -250,11 +249,13 @@ void PrimMST(struct ketju_system *R) {
             counter++;
             double w = 0;
             for (int k = 0; k < 3; k++) {
-                double ds = ps->pos[3 * i + k] - ps->pos[3 * j + k];
+                double ds = ps->pos[i][k] - ps->pos[j][k];
                 w += ds * ds;
             }
             w = sqrt(w);
 
+            // FIXME: out of bounds writes happen here sometimes,
+            // probably if there are more tasks than particles
             mst->local_edge[NumLocalEdges].weight = w;
             mst->local_edge[NumLocalEdges].vertex1 = i;
             mst->local_edge[NumLocalEdges].vertex2 = j;

@@ -56,7 +56,7 @@ struct graph_edge {
 struct graph_vertex {
     int id;
     int degree;
-    int type;
+    int type; // TODO is this used?
     int parent;
     int edgetoparent;
     int level;

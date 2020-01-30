@@ -13,6 +13,7 @@
 // This is needed only in this file
 enum velocity_type { PHYSICAL, AUXILIARY };
 
+// TODO what does this actually do?
 void loop_scheduling_N2(int Nrow, int Nt, int *istart, int *jstart,
                         int *ThisBlock, int *CumNum, int task) {
     int Np = (Nrow * (Nrow - 1)) / 2;
@@ -297,7 +298,7 @@ void into_Cartesian_from_MST(struct ketju_system *R) {
 
 // Puts the initial data to the CoM frame and shifts the CoM pos and vel.
 // CoM pos and vel are only shifted, so safe to call multiple times.
-void into_CoM_frame(struct ketju_system *R) {
+void ketju_into_CoM_frame(struct ketju_system *R) {
 
     tick(&R->perf->time_coord);
     struct ketju_system_physical_state *ps = R->physical_state;
@@ -815,7 +816,6 @@ bool gbs_extrapolate(struct gbs_storage *gs, double *Hstep,
     // TODO make configurable
     const double abs_tol = 1e-100;
 
-
     for (int i = start_ind; i < end_ind; ++i) {
         for (int j = 0; j < kmax; ++j) {
             y[j] = data[j][i];
@@ -852,6 +852,8 @@ bool gbs_extrapolate(struct gbs_storage *gs, double *Hstep,
         *Hstep *= Hnextfac;
     } else {
         // TODO: this looks weird, should it be Hnextfac < 0.7 instead?
+        // Or is it so that we want to reduce the stepsize more aggressively in
+        // case of failed steps?
         if (Hnextfac > 0.7) { Hnextfac = 0.7; }
         *Hstep *= Hnextfac;
     }
@@ -888,14 +890,14 @@ void ketju_run_integrator(struct ketju_system *R, double time_interval) {
         ketju_init_gbs_comms(R);
     }
     // ensure correct CoM frame
-    into_CoM_frame(R);
+    ketju_into_CoM_frame(R);
 
     ketju_build_mst(R);
     int steps_since_reconstruction = 0;
 
     compute_total_energy(R);
 
-    double dt = 1e-7; // TODO better guess for initial step
+    double dt = time_interval/10; // TODO better guess for initial step
     double Hstep = dt * R->internal_state->U;
     const double t_start = R->physical_state->time;
     const double initial_B = R->internal_state->B;
@@ -915,7 +917,7 @@ void ketju_run_integrator(struct ketju_system *R, double time_interval) {
     bool finished = false;
     do {
         // TODO check mergers (note that variable counts need to be changed in
-        // some of the temp state)
+        // some of the temp state, new backup state created, IDs reoredered)
 
         for (int i = 0; i < kmax && gbs_ks_for_this_group[i]; ++i) {
             if (i) {

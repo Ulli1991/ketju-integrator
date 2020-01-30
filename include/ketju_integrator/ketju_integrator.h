@@ -40,7 +40,9 @@ struct ketju_integration_options {
     double gbs_relative_tolerance;
 
     double output_time_relative_tolerance;
+    //< Maximum size of relative error in time iteration
     double output_time_absolute_tolerance;
+    //< Minimum absolute size of error in time iteration
 
     unsigned int PN_flags; //< Bitflags for enabling different PN terms
 
@@ -58,7 +60,7 @@ static const struct ketju_integration_options
         .gbs_kmax = 8,
         .gbs_relative_tolerance = 1e-9,
         .output_time_relative_tolerance = 1e-6,
-        .output_time_absolute_tolerance = 1e-15,
+        .output_time_absolute_tolerance = 1e-300,
         .PN_flags = KETJU_PN_NONE,
         .steps_between_mst_reconstruction = 10,
         .max_tree_distance = 2,
@@ -120,24 +122,35 @@ struct ketju_system {
     struct ketju_natural_constants *constants;
     //< Values of natural constants which define the unit system
     
-
-    double CoM_pos[3];
-    //< Position of the center of mass in the input coordinates
-    // (origin of physical_state.pos).
-    // Not updated during integration.
+    //
     // XXX: the integration works only in the chained coordinates, forcing the
     // CoM to stay at the origin. Not compatible with perturbations that don't
     // conserve the CoM right now
+    // TODO: should the CoM pos be updated with the drift overt the integration?
+    // Probably yes.
+    double CoM_pos[3];
+    //< Position of the center of mass in the input coordinates
+    // (origin of physical_state.pos).
+    // The CoM of the input state is added to this at the start of the
+    // integration, but otherwise it is not updated.
     double CoM_vel[3];
     //< Velocity of the center of mass in the input coordinates
     // (origin of physical_state.vel)
 
+    void *particle_extra_data;
+    //< Optional extra data (e.g. IDs) associated with the particles, which is
+    // reordered in case of mergers etc.
+    // The caller is responsible for managing this memory.
+
+    size_t particle_extra_data_elem_size;
+    //< Size of the extra data for a single particle.
 };
 
 // Function prototypes
 void ketju_create_system(struct ketju_system *R, int num_pn_particles,
                          int num_other_particles, MPI_Comm comm);
 void ketju_free_system(struct ketju_system *R);
+void ketju_into_CoM_frame(struct ketju_system *R);
 void ketju_run_integrator(struct ketju_system *R, double time_interval);
 
 #endif // KETJU_INTEGRATOR_H
