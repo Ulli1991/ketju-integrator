@@ -22,6 +22,9 @@ Optimization
 - Investigate how the code vectorizes, particularly force calculation and gbs
   stuff. Best effect likely with -Ofast, since vectorized sqrt usually not enabled without it.
 
+- Currently the timers do not capture enough things, for large task numbers some
+  30% of the time is missed from the subcategories
+
 Features
 --------
 
@@ -34,7 +37,7 @@ Style
   more drastic reorganization as well
 
 - Make all internal functions static/inline to avoid polluting the namespace,
-  make sure all other symbols have the ketju_ prefix
+  make sure all other symbols have the ketju prefix
 
 Other
 -----

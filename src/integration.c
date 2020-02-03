@@ -881,8 +881,24 @@ void update_system_from_gbs_result(struct ketju_system *R,
     into_Cartesian_from_MST(R);
 }
 
+void propagate_CoM(struct ketju_system *R, double dt) {
+    for (int k = 0; k < 3; ++k) {
+        R->CoM_pos[k] += dt * R->CoM_vel[k];
+    }
+}
+
 void ketju_run_integrator(struct ketju_system *R, double time_interval) {
-// TODO return status/error code
+    // TODO return status/error code
+
+    // special case for when no actual integration is needed
+    if (R->num_particles < 2) {
+        tick(&R->perf->time_total);
+        ketju_into_CoM_frame(R);
+        propagate_CoM(R, time_interval);
+        R->physical_state->time += time_interval;
+        tock(&R->perf->time_total);
+        return;
+    }
 
     tick(&R->perf->time_total);
     // Initialize necessary comms if not done already by the caller
@@ -971,6 +987,8 @@ void ketju_run_integrator(struct ketju_system *R, double time_interval) {
         }
 
     } while (!finished);
+
+    propagate_CoM(R, R->physical_state->time - t_start);
 
     // free temp storage
     free_state_backup(&old_state);

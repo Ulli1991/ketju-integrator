@@ -177,6 +177,11 @@ void ketju_init_gbs_comms(struct ketju_system *R) {
 }
 
 static void free_gbs_comms(struct ketju_system *R) {
+    if (!R->internal_state->task_info->gbs_comms_initialized) {
+        // not allocated
+        return;
+    }
+
     MPI_Comm_free(&R->internal_state->task_info->gbs_comm);
     free(R->internal_state->group_info->gbs_group_sizes);
     R->internal_state->task_info->gbs_comms_initialized = false;

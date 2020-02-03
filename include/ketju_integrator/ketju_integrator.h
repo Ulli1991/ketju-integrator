@@ -126,13 +126,11 @@ struct ketju_system {
     // XXX: the integration works only in the chained coordinates, forcing the
     // CoM to stay at the origin. Not compatible with perturbations that don't
     // conserve the CoM right now
-    // TODO: should the CoM pos be updated with the drift overt the integration?
-    // Probably yes.
     double CoM_pos[3];
     //< Position of the center of mass in the input coordinates
     // (origin of physical_state.pos).
     // The CoM of the input state is added to this at the start of the
-    // integration, but otherwise it is not updated.
+    // integration, and the position is drifted based on CoM_vel.
     double CoM_vel[3];
     //< Velocity of the center of mass in the input coordinates
     // (origin of physical_state.vel)
