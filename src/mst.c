@@ -206,7 +206,7 @@ int EdgeSearchForPrim(struct ketju_system *R, int NumLocalEdges) {
     tick(&R->perf->tprim4);
 
     MPI_Allreduce(MPI_IN_PLACE, &wi, 1, MPI_DOUBLE_INT, MPI_MINLOC,
-                  MPI_COMM_WORLD);
+                  R->internal_state->task_info->main_comm);
 
     tock(&R->perf->tprim4);
 
@@ -844,7 +844,7 @@ void SolveMetaMST(struct ketju_system *R, int Nleafs, int *Npart,
         }
     }
 
-    MPI_Allreduce(MPI_IN_PLACE, flag, Nedge, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
+    MPI_Allreduce(MPI_IN_PLACE, flag, Nedge, MPI_INT, MPI_SUM, ti->main_comm);
 
     for (int e1 = 0; e1 < Nedge; e1++) {
         if (flag[e1] == 0) Noff++;
@@ -900,7 +900,7 @@ void SolveMetaMST(struct ketju_system *R, int Nleafs, int *Npart,
         }
 
         MPI_Allreduce(MPI_IN_PLACE, &wi, 1, MPI_DOUBLE_INT, MPI_MINLOC,
-                      MPI_COMM_WORLD);
+                      ti->main_comm);
 
         InMst[Wfilter[wi.index].index1] = 1;
         InMst[Wfilter[wi.index].index2] = 1;

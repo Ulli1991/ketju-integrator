@@ -966,7 +966,7 @@ void ketju_run_integrator(struct ketju_system *R, double time_interval) {
                 // Should work also for negative time intervals
                 // TODO this should be improved to allow for better accuracy in
                 // time
-                if (fabs(remaining_time) < fabs(Hstep/R->internal_state->U) ||
+                if (fabs(remaining_time) < fabs(Hstep / R->internal_state->U) ||
                     copysign(1, time_interval) * remaining_time < 0) {
                     Hstep = R->internal_state->U * remaining_time;
                 }
