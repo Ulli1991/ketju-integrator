@@ -35,17 +35,18 @@ int ketju_check_relative_proximity_ND_2(int v1, int v2,
         }
         return 0;
     } else if (diff == 2) {
-        //FIXME valgrind finds a read error here, apparently parent == -1 in
-        // some case at least with the basic prim tree.
-        // Also present in the original implementation.
-        if (mst->vertex[mst->vertex[v2].parent].parent == v1) {
+        // Need to check that there actually is a valid parent before checking
+        // the parents parent.
+        if (mst->vertex[v2].parent >= 0 &&
+            mst->vertex[mst->vertex[v2].parent].parent == v1) {
             *d = 2;
             sign[0] = -1;
             sign[1] = -1;
             path[0] = mst->vertex[v2].edgetoparent;
             path[1] = mst->vertex[mst->vertex[v2].parent].edgetoparent;
             return 1;
-        } else if (mst->vertex[mst->vertex[v1].parent].parent == v2) {
+        } else if (mst->vertex[v1].parent >= 0 &&
+                   mst->vertex[mst->vertex[v1].parent].parent == v2) {
             *d = 2;
             sign[0] = +1;
             sign[1] = +1;
@@ -851,7 +852,9 @@ void SolveMetaMST(struct ketju_system *R, int Nleafs, int *Npart,
 
     struct weight_index_2 *Wfilter =
         calloc(Nedge - Noff, sizeof(struct weight_index_2));
-
+    
+    //FIXME for small systems this gives out of bounds writes.
+    // Not critical since this is not used for small systems at the moment.
     counter = 0;
     for (int e1 = 0; e1 < Nedge; e1++) {
         if (flag[e1] == 0) {
@@ -1120,22 +1123,19 @@ void DivideAndConquerPrim(struct ketju_system *R) {
     tock(&R->perf->time_mst);
 }
 
-
 void ketju_build_mst(struct ketju_system *R) {
-    // TODO should probably default to prim for small systems even if divide and
-    // conquer option is selected
-    switch (R->options->mst_algorithm) {
-        case KETJU_MST_PRIM:
-            PrimMST(R);
-            break;
-        case KETJU_MST_DIVIDE_AND_CONQUER_PRIM:
-            DivideAndConquerPrim(R);
-            break;
-        default: {
-            char msg[100];
-            sprintf(msg, "Invalid mst_algorithm value %d!",
-                    R->options->mst_algorithm);
-            terminate(msg);
-        }
+    // Use the basic prim method for small systems always, since divide and
+    // conquer is broken for small enough systems.
+    if (R->options->mst_algorithm == KETJU_MST_PRIM || R->num_particles < 10) {
+        PrimMST(R);
+    } else if (R->options->mst_algorithm == KETJU_MST_DIVIDE_AND_CONQUER_PRIM) {
+        DivideAndConquerPrim(R);
+
+    } else {
+
+        char msg[100];
+        sprintf(msg, "Invalid mst_algorithm value %d!",
+                R->options->mst_algorithm);
+        terminate(msg);
     }
 }
