@@ -108,12 +108,12 @@ void compute_U(struct ketju_system *R) {
         if (loop == 0) break;
     }
 
-    tick(&R->perf->time_comm);
+    tick(&R->perf->time_force_comm);
     if (is->task_info->gbs_group_size > 1) {
         MPI_Allreduce(MPI_IN_PLACE, &is->U, 1, MPI_DOUBLE, MPI_SUM,
                       is->task_info->gbs_comm);
     }
-    tock(&R->perf->time_comm);
+    tock(&R->perf->time_force_comm);
 
     if (!isfinite(is->U)) { terminate("U is not finite!"); }
 
@@ -198,14 +198,14 @@ void compute_U_and_Newtonian_Acc(struct ketju_system *R) {
         if (loop == 0) break;
     }
 
-    tick(&R->perf->time_comm);
+    tick(&R->perf->time_force_comm);
     if (is->task_info->gbs_group_size > 1) {
         MPI_Allreduce(MPI_IN_PLACE, is->acc, 3 * R->num_particles, MPI_DOUBLE,
                       MPI_SUM, is->task_info->gbs_comm);
         MPI_Allreduce(MPI_IN_PLACE, &is->U, 1, MPI_DOUBLE, MPI_SUM,
                       is->task_info->gbs_comm);
     }
-    tock(&R->perf->time_comm);
+    tock(&R->perf->time_force_comm);
 
     int hi, lo;
     for (int i = 0; i < mst->num_vertices - 1; i++) {
@@ -491,7 +491,7 @@ void set_auxiliary_variables(struct ketju_system *R) {
 
     memcpy(is->aux_vel, ps->vel, sizeof(double[R->num_particles][3]));
     memcpy(mst->edge_rel_aux_vel, mst->edge_rel_vel,
-           sizeof(double[mst->num_vertices][3]));
+           sizeof(double[mst->num_vertices-1][3]));
 }
 
 // TODO: move declarations / reorganize
@@ -1003,7 +1003,8 @@ void ketju_run_integrator(struct ketju_system *R, double time_interval) {
 
 // relative velocity of particle 1 seen from particle 2 = v_1 - v_2. return
 // v_rel^2.
-inline static double relative_velocity(double *v1, double *v2, double *v12) {
+inline static double relative_velocity(const double *v1, const double *v2,
+                                       double *v12) {
     double vrel2 = 0;
     for (int k = 0; k < 3; k++) {
         v12[k] = v1[k] - v2[k];
@@ -1012,10 +1013,9 @@ inline static double relative_velocity(double *v1, double *v2, double *v12) {
     return vrel2;
 }
 
-// TODO not tested
 // TODO add spin terms
 // Based on Mora & Will, Phys. Rev. D 69, 104021
-void compute_PN_twobody_Acc(struct ketju_system *R, double (*Vel)[3],
+void compute_PN_twobody_Acc(struct ketju_system *R, double (*vel)[3],
                             double (*AccPN)[3], int i, int j) {
 
     struct ketju_system_internal_state *is = R->internal_state;
@@ -1044,11 +1044,6 @@ void compute_PN_twobody_Acc(struct ketju_system *R, double (*Vel)[3],
     const double gm = G * m;
 
     // relative separation & velocity & unit separation
-    double velvec_i[3], velvec_j[3];
-    for (int k = 0; k < 3; k++) {
-        velvec_i[k] = Vel[i][k];
-        velvec_j[k] = Vel[j][k];
-    }
     double rv[3] = {0};
     double vv[3] = {0};
     double nv[3] = {0};
@@ -1075,6 +1070,8 @@ void compute_PN_twobody_Acc(struct ketju_system *R, double (*Vel)[3],
     int sign[Nd];
     int d;
     int proximity = ketju_check_relative_proximity(i, j, Nd, R, &d, path, sign);
+    //TODO: this tree traversal for relative distances is used elsewhere also,
+    // so abstract it into a (inline) function
 
     for (k = 0; k < 3; k++) {
         if (proximity == 1) {
@@ -1088,7 +1085,7 @@ void compute_PN_twobody_Acc(struct ketju_system *R, double (*Vel)[3],
     }
 
     // relative velocity is also v_1 - v_2
-    v2 = relative_velocity(velvec_i, velvec_j, vv);
+    v2 = relative_velocity(vel[i], vel[j], vv);
 
     for (k = 0; k < 3; k++) {
         rdot += rv[k] * vv[k];
@@ -1112,52 +1109,67 @@ void compute_PN_twobody_Acc(struct ketju_system *R, double (*Vel)[3],
         nv[k] = rv[k] / r;
     }
 
-    A1 = 2 * (2 + eta) * gmpr - (1 + 3 * eta) * v2 + 1.5e0 * eta * rdot2;
-    B1 = 2 * (2 - eta) * rdot;
-    A2 = -(3. / 4) * (12 + 29 * eta) * gmpr2 - eta * (3 - 4 * eta) * v4 -
-         (15. / 8) * eta * (1 - 3 * eta) * rdot4 +
-         (1. / 2) * eta * (13 - 4 * eta) * gmpr * v2 +
-         (2 + 25 * eta + 2 * eta2) * gmpr * rdot2 +
-         (3. / 2) * eta * (3 - 4 * eta) * v2 * rdot2;
-    B2 = -(1. / 2) * rdot *
-         ((4 + 41 * eta + 8 * eta2) * gmpr - eta * (15 + 4 * eta) * v2 +
-          3 * eta * (3 + 2 * eta) * rdot2);
+    // Compute the enabled terms
+    unsigned int flags = R->options->PN_flags;
 
-    A2p5 = 8. / 5 * eta * gmpr * rdot * (17. / 3 * gmpr + 3 * v2);
-    B2p5 = -8. / 5. * eta * gmpr * (3 * gmpr + v2);
+    if (flags & KETJU_PN_1_0_ACC) {
+        A1 = 2 * (2 + eta) * gmpr - (1 + 3 * eta) * v2 + 1.5e0 * eta * rdot2;
+        B1 = 2 * (2 - eta) * rdot;
+    }
+    if (flags & KETJU_PN_2_0_ACC) {
+        A2 = -(3. / 4) * (12 + 29 * eta) * gmpr2 - eta * (3 - 4 * eta) * v4 -
+             (15. / 8) * eta * (1 - 3 * eta) * rdot4 +
+             (1. / 2) * eta * (13 - 4 * eta) * gmpr * v2 +
+             (2 + 25 * eta + 2 * eta2) * gmpr * rdot2 +
+             (3. / 2) * eta * (3 - 4 * eta) * v2 * rdot2;
+        B2 = -(1. / 2) * rdot *
+             ((4 + 41 * eta + 8 * eta2) * gmpr - eta * (15 + 4 * eta) * v2 +
+              3 * eta * (3 + 2 * eta) * rdot2);
+    }
 
-    A3 = (16 + (1399. / 12 - 41. / 16 * pi2) * eta + 71. / 2 * eta2) * gmpr3 +
-         eta * (20827. / 840 + 123. / 64 * pi2 - eta2) * gmpr2 * v2 -
-         (1 + (22717. / 168 + 615. / 64 * pi2) * eta + 11. / 8 * eta2 -
-          7 * eta3) *
-             gmpr2 * rdot2 -
-         .25 * eta * (11 - 49 * eta + 52 * eta2) * v6 +
-         35. / 16 * eta * (1 - 5 * eta + 5 * eta2) * rdot6 -
-         .25 * eta * (75 + 32 * eta - 40 * eta2) * gmpr * v2 * v2 -
-         .5 * eta * (158 - 69 * eta - 60 * eta2) * gmpr * rdot4 +
-         eta * (121 - 16 * eta - 20 * eta2) * gmpr * v2 * rdot2 +
-         3. / 8 * eta * (20 - 79 * eta + 60 * eta2) * v2 * v2 * rdot2 -
-         15. / 8 * eta * (4 - 18 * eta + 17 * eta2) * v2 * rdot4;
-    B3 = rdot *
-         ((4 + (5849. / 840. + 123. / 32. * pi2) * eta - 25 * eta2 - 8 * eta3) *
-              gmpr2 +
-          1. / 8. * eta * (65 - 152 * eta - 48 * eta2) * v2 * v2 +
-          15 / 8. * eta * (3 - 8 * eta - 2 * eta2) * rdot4 +
-          eta * (15 + 27 * eta + 10 * eta2) * gmpr * v2 -
-          1. / 6. * eta * (329 + 177 * eta + 108 * eta2) * gmpr * rdot2 -
-          .75 * eta * (16 - 37 * eta - 16 * eta2) * v2 * rdot2);
-    A3p5 = -8. / 5 * eta * gmpr * rdot *
-           (23. / 14 * (43 + 14 * eta) * gmpr2 +
-            3. / 28 * (61 + 70 * eta) * v2 * v2 + 70 * rdot4 +
-            1. / 42 * (519 - 1267 * eta) * gmpr * v2 +
-            .25 * (147 + 188 * eta) * gmpr * rdot2 -
-            15 / 4. * (19 + 2 * eta) * v2 * rdot2);
-    B3p5 = 8. / 5. * eta * gmpr *
-           (1. / 42. * (1325 + 546 * eta) * gmpr2 +
-            1. / 28. * (313 + 42 * eta) * v2 * v2 + 75 * rdot4 -
-            1. / 42. * (205 + 777 * eta) * gmpr * v2 +
-            1. / 12. * (205 + 424 * eta) * gmpr * rdot2 -
-            .75 * (113 + 2 * eta) * v2 * rdot2);
+    if (flags & KETJU_PN_2_5_ACC) {
+        A2p5 = 8. / 5 * eta * gmpr * rdot * (17. / 3 * gmpr + 3 * v2);
+        B2p5 = -8. / 5. * eta * gmpr * (3 * gmpr + v2);
+    }
+
+    if (flags & KETJU_PN_3_0_ACC) {
+        A3 = (16 + (1399. / 12 - 41. / 16 * pi2) * eta + 71. / 2 * eta2) *
+                 gmpr3 +
+             eta * (20827. / 840 + 123. / 64 * pi2 - eta2) * gmpr2 * v2 -
+             (1 + (22717. / 168 + 615. / 64 * pi2) * eta + 11. / 8 * eta2 -
+              7 * eta3) *
+                 gmpr2 * rdot2 -
+             .25 * eta * (11 - 49 * eta + 52 * eta2) * v6 +
+             35. / 16 * eta * (1 - 5 * eta + 5 * eta2) * rdot6 -
+             .25 * eta * (75 + 32 * eta - 40 * eta2) * gmpr * v2 * v2 -
+             .5 * eta * (158 - 69 * eta - 60 * eta2) * gmpr * rdot4 +
+             eta * (121 - 16 * eta - 20 * eta2) * gmpr * v2 * rdot2 +
+             3. / 8 * eta * (20 - 79 * eta + 60 * eta2) * v2 * v2 * rdot2 -
+             15. / 8 * eta * (4 - 18 * eta + 17 * eta2) * v2 * rdot4;
+        B3 = rdot *
+             ((4 + (5849. / 840. + 123. / 32. * pi2) * eta - 25 * eta2 -
+               8 * eta3) *
+                  gmpr2 +
+              1. / 8. * eta * (65 - 152 * eta - 48 * eta2) * v2 * v2 +
+              15 / 8. * eta * (3 - 8 * eta - 2 * eta2) * rdot4 +
+              eta * (15 + 27 * eta + 10 * eta2) * gmpr * v2 -
+              1. / 6. * eta * (329 + 177 * eta + 108 * eta2) * gmpr * rdot2 -
+              .75 * eta * (16 - 37 * eta - 16 * eta2) * v2 * rdot2);
+    }
+    if (flags & KETJU_PN_3_5_ACC) {
+        A3p5 = -8. / 5 * eta * gmpr * rdot *
+               (23. / 14 * (43 + 14 * eta) * gmpr2 +
+                3. / 28 * (61 + 70 * eta) * v2 * v2 + 70 * rdot4 +
+                1. / 42 * (519 - 1267 * eta) * gmpr * v2 +
+                .25 * (147 + 188 * eta) * gmpr * rdot2 -
+                15 / 4. * (19 + 2 * eta) * v2 * rdot2);
+        B3p5 = 8. / 5. * eta * gmpr *
+               (1. / 42. * (1325 + 546 * eta) * gmpr2 +
+                1. / 28. * (313 + 42 * eta) * v2 * v2 + 75 * rdot4 -
+                1. / 42. * (205 + 777 * eta) * gmpr * v2 +
+                1. / 12. * (205 + 424 * eta) * gmpr * rdot2 -
+                .75 * (113 + 2 * eta) * v2 * rdot2);
+    }
 
     // sum all terms with correct powers of c
     Atot = A1 / c2 + A2 / c4 + A2p5 / c5 + A3 / c6 + A3p5 / c7;
@@ -1167,6 +1179,11 @@ void compute_PN_twobody_Acc(struct ketju_system *R, double (*Vel)[3],
         acc[k] = gm / r2 * (nv[k] * Atot + vv[k] * Btot);
     }
 
+    // Divide up the acceleration assuming action = reaction.
+    // XXX: This is not true for PN terms,
+    // but is correct to 1PN (Mora & Will 2004), _for the CoM_.
+    // Relative accelerations are correct, and the CoM motion corrections are
+    // likely insignificant for our purposes.
     for (k = 0; k < 3; k++) {
         AccPN[i][k] += (m2 / m) * acc[k];
         AccPN[j][k] -= (m1 / m) * acc[k];

@@ -85,7 +85,7 @@ struct ketju_system_physical_state {
 
 struct ketju_performance_counters {
     double time_force;
-    double time_comm;
+    double time_force_comm;
     double time_coord;
     double time_mst;
     double time_gbscomm;

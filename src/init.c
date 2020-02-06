@@ -140,6 +140,14 @@ void ketju_init_gbs_comms(struct ketju_system *R) {
 
     // For now just split into even chunks
     // TODO make number of groups configurable and task distribution better
+    // TODO For the 2*k step sequence we're using, we can get perfectly even
+    // work distribution for kmax/2 groups (or kmax/2^n, n>=1, but the largest
+    // number of groups is likely most efficient), so should aim for that.
+    // For other configurations, it would be better to give the extra tasks to
+    // the first groups, since those will get the most work with the current
+    // implementation. The workload division could be improved to account for
+    // the number of tasks as well, though the main benefit would be at small
+    // task counts.
     const int max_num_gbs_groups = 4;
     const int num_gbs_groups = ti->main_group_size > max_num_gbs_groups
                                    ? max_num_gbs_groups

@@ -76,21 +76,21 @@ int main(int argc, char *argv[]) {
     if (ThisTask == 0) {
         printf("Timers:\n");
         printf(
-            "time_force:     %f (%2.1f%%)\n"
-            "time_comm:      %f (%2.1f%%)\n"
-            "time_coord:     %f (%2.1f%%)\n"
-            "time_mst:       %f (%2.1f%%)\n"
-            "time_gbscomm:   %f (%2.1f%%)\n"
-            "time_gbsextr:   %f (%2.1f%%)\n"
-            "time_total:     %f\n"
+            "time_force:       %f (%2.1f%%)\n"
+            "time_force_comm:  %f (%2.1f%%)\n"
+            "time_coord:       %f (%2.1f%%)\n"
+            "time_mst:         %f (%2.1f%%)\n"
+            "time_gbscomm:     %f (%2.1f%%)\n"
+            "time_gbsextr:     %f (%2.1f%%)\n"
+            "time_total:       %f\n"
             "succesful_steps: %d\n"
             "failed_steps: %d\n"
             "relative_energy_error: %e\n"
             ,
             R.perf->time_force,
             R.perf->time_force/R.perf->time_total*100,
-            R.perf->time_comm,
-            R.perf->time_comm/R.perf->time_total*100,
+            R.perf->time_force_comm,
+            R.perf->time_force_comm/R.perf->time_total*100,
             R.perf->time_coord,
             R.perf->time_coord/R.perf->time_total*100,
             R.perf->time_mst,

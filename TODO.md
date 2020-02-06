@@ -6,11 +6,9 @@ TODO
 Correctness
 -----------
 
-- Divide and conquer prim broken for small systems (2 particles)
-    - Maybe force using standard prim in this case?
-
-
-- Valgrind sees an error in ketju_check_relative_proximity_ND_2, should be fixed
+% Divide and conquer prim broken for small systems (2 particles)
+    + force using standard prim in this case
+    - should be fixed properly
 
 - `safetybuf` in allocate_internal_state seems worrying 
 
@@ -28,7 +26,7 @@ Optimization
 Features
 --------
 
-- Add spin terms, test that PN stuff works
+- Add spin terms
 - BH mergers
 
 Style
