@@ -1,2 +1,0 @@
-# mpiicc mst.c pn.c -std=c99 -Ofast -ipo  -o run	# intel 
-cc mst.c pn.c -lm -std=c99 -Ofast -Wall -o run
