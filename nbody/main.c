@@ -69,6 +69,7 @@ int main(int argc, char *argv[]) {
     R.options->gbs_relative_tolerance = 1e-9;
     //R.options->mst_algorithm = KETJU_MST_PRIM;
     R.options->mst_algorithm = KETJU_MST_DIVIDE_AND_CONQUER_PRIM;
+    R.options->max_tree_distance = 2;
 
     double time_interval = strtof(argv[2], NULL);
     ketju_run_integrator(&R, time_interval);

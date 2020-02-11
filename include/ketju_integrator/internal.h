@@ -159,12 +159,6 @@ static inline void get_v1_v2_fast(struct ketju_system *R, int i, int *v1,
 // declarations of internal functions used between compilation units
 
 
-int ketju_check_relative_proximity(int v1, int v2, const int Nd,
-                             const struct ketju_system *R, int *d, int *path,
-                             int *sign);
-int ketju_check_relative_proximity_ND_2(int v1, int v2, const struct ketju_system *R,
-                                  int *d, int *path, int *sign);
-
 void ketju_init_gbs_comms(struct ketju_system *R);
 
 void ketju_build_mst(struct ketju_system *R);
@@ -172,5 +166,41 @@ void ketju_build_mst(struct ketju_system *R);
 // TODO rename these
 void loop_scheduling_N2(int Nrow, int Nt, int *istart, int *jstart,
                         int *ThisBlock, int *CumNum, int task);
+
+
+// These functions are called through the helper below
+bool ketju_check_relative_proximity_general(int v1, int v2, const int Nd,
+                                    const struct ketju_system *R, int *d,
+                                    int path[Nd], int sign[Nd]);
+bool ketju_check_relative_proximity_ND_2(int v1, int v2,
+                                    const struct ketju_system *R, int *d,
+                                    int path[2], int sign[2]);
+
+static inline bool ketju_check_relative_proximity(int v1, int v2, const int Nd,
+                                    const struct ketju_system *R, int *d,
+                                    int path[Nd], int sign[Nd]) {
+
+#ifndef NDEBUG
+    const struct graph_vertex *vertex = R->internal_state->mst->vertex;
+    // Debugging stuff for some tree construction bug that may still be present
+    if (vertex[v1].level == 0 && vertex[v2].level == 0) {
+        char buf[100];
+        sprintf(buf,
+                "ketju_check_relative_proximity: This should not happen! "
+                "thistask: %d --- v1 v2 %d %d --- levels: %d %d\n",
+                R->internal_state->task_info->global_rank, vertex[v1].id,
+                vertex[v2].id, vertex[v1].level, vertex[v2].level);
+        terminate(buf);
+    }
+#endif
+
+    if (Nd == 2) {
+        // Use the specialized version for this common case
+        // TODO: measure if this actually helps.
+        return ketju_check_relative_proximity_ND_2(v1, v2, R, d, path, sign);
+    }
+
+    return ketju_check_relative_proximity_general(v1, v2, Nd, R, d, path, sign);
+}
 
 #endif // KETJU_INTEGRATOR_INTERNAL_H

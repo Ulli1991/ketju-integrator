@@ -39,6 +39,44 @@ void loop_scheduling_N2(int Nrow, int Nt, int *istart, int *jstart,
     *CumNum = ThisCumNum;
 }
 
+// Gadget softening kernels
+static inline double softened_inverse_r(double r, double h) {
+    if (h <= 0) return 1. / r;
+
+    const double hinv = 1. / h;
+    const double u = r * hinv;
+
+    if (u >= 1.) {
+        return 1. / r;
+    } else if (u < 0.5) {
+        return -hinv *
+               (-2.8 + u * u * (5.333333333333 + u * u * (6.4 * u - 9.6)));
+    } else {
+        return -hinv * (-3.2 + 0.066666666667 / u +
+                        u * u *
+                            (10.666666666667 +
+                             u * (-16.0 + u * (9.6 - 2.133333333333 * u))));
+    }
+}
+
+static inline double softened_inverse_r3(double r, double h) {
+    if (h <= 0) return 1. / (r * r * r);
+
+    const double hinv = 1. / h;
+    const double u = r * hinv;
+
+    if (u >= 1) {
+        return 1.0 / (r * r * r);
+    } else if (u < 0.5) {
+        return hinv * hinv * hinv *
+               (10.666666666667 + u * u * (32.0 * u - 38.4));
+    } else {
+        return hinv * hinv * hinv *
+               (21.333333333333 - 48.0 * u + 38.4 * u * u -
+                10.666666666667 * u * u * u - 0.066666666667 / (u * u * u));
+    }
+}
+
 // computes the force function for logh
 void compute_U(struct ketju_system *R) {
 
@@ -62,8 +100,10 @@ void compute_U(struct ketju_system *R) {
 
     const int Nd = R->options->max_tree_distance;
     int d;
-    int path[2];
-    int sign[2];
+    int path[Nd];
+    int sign[Nd];
+
+    const double ss_soft = R->options->star_star_softening;
 
     for (int i = istart; i < mst->num_vertices; i++) {
 
@@ -71,17 +111,25 @@ void compute_U(struct ketju_system *R) {
         int Li = mst->vertex[i].level;
         if (i > istart) { jstart = i + 1; }
         for (int j = jstart; j < mst->num_vertices; j++) {
+            if (R->options->no_star_star_gravity && i >= R->num_pn_particles &&
+                j >= R->num_pn_particles) {
+                continue;
+            }
+
             double mj = ps->mass[j];
             int Lj = mst->vertex[j].level;
             double r2 = 0;
-            int proximity = 0;
+            bool proximity = false;
 
             if (abs(Li - Lj) < Nd) {
                 proximity =
                     ketju_check_relative_proximity(j, i, Nd, R, &d, path, sign);
             }
 
-            if (proximity == 1) {
+            // Lifting this tree traversal code into its own (inline) function
+            // appeared to be slower, so keep it like this even though it is
+            // duplicated a couple of times.
+            if (proximity) {
                 for (int k = 0; k < 3; k++) {
                     double dr = 0;
                     for (int l = 0; l < d; l++) {
@@ -96,8 +144,12 @@ void compute_U(struct ketju_system *R) {
                     r2 += dr * dr;
                 }
             }
+            //const double invr = 1./sqrt(r2);
+            double soft = i < R->num_pn_particles || j < R->num_pn_particles
+                              ? 0.
+                              : ss_soft;
+            const double invr = softened_inverse_r(sqrt(r2), soft);
 
-            const double invr = 1.0 / sqrt(r2);
             is->U += mi * mj * invr;
             c++;
             if (c == ThisBlock) {
@@ -107,6 +159,7 @@ void compute_U(struct ketju_system *R) {
         }
         if (loop == 0) break;
     }
+    tock(&R->perf->time_force);
 
     tick(&R->perf->time_force_comm);
     if (is->task_info->gbs_group_size > 1) {
@@ -118,21 +171,20 @@ void compute_U(struct ketju_system *R) {
     if (!isfinite(is->U)) { terminate("U is not finite!"); }
 
     is->U *= R->constants->G;
-
-    tock(&R->perf->time_force);
 }
 
-// computes the force function and newtonian acceleration
-void compute_U_and_Newtonian_Acc(struct ketju_system *R) {
-
-    tick(&R->perf->time_force);
-
+// To support optional softening and ignoring of star-star interactions we need
+// to have slightly different force loops depending on the options.
+// The force loop is the most time consuming part of the integration, and any
+// extra logic in the loop leads to significant performance penalties (~10-20%).
+// So instead have a different function for each case.
+static inline void comp_U_acc_loop_standard(struct ketju_system *R) {
     struct ketju_system_internal_state *is = R->internal_state;
     struct spanning_tree_coordinate_system *mst = is->mst;
     struct ketju_system_physical_state *ps = R->physical_state;
 
-    int istart, istop = mst->num_vertices, jstop = mst->num_vertices;
-    int ThisBlock, CumNumEdge, jstart;
+    int istop = mst->num_vertices, jstop = mst->num_vertices;
+    int ThisBlock, CumNumEdge, jstart, istart;
     loop_scheduling_N2(mst->num_vertices, is->task_info->gbs_group_size,
                        &istart, &jstart, &ThisBlock, &CumNumEdge,
                        is->task_info->gbs_group_rank);
@@ -143,10 +195,7 @@ void compute_U_and_Newtonian_Acc(struct ketju_system *R) {
     int path[Nd];
     int sign[Nd];
 
-    memset(is->acc, 0, sizeof(double[R->num_particles][3]));
-
-    is->U = 0;
-    double dr[3], r2;
+    double dr[3];
 
     for (int i = istart; i < istop; i++) {
         const double mi = ps->mass[i];
@@ -154,14 +203,14 @@ void compute_U_and_Newtonian_Acc(struct ketju_system *R) {
         if (i > istart) jstart = i + 1;
 
         for (int j = jstart; j < jstop; j++) {
-            r2 = 0;
+            double r2 = 0;
             const double mj = ps->mass[j];
             const int Lj = mst->vertex[j].level;
 
-            int proximity = 0;
+            bool proximity = false;
             if (abs(Li - Lj) <= Nd) {
-                proximity = ketju_check_relative_proximity_ND_2(j, i, R, &d,
-                                                                path, sign);
+                proximity =
+                    ketju_check_relative_proximity(j, i, Nd, R, &d, path, sign);
             }
 
             if (proximity) {
@@ -179,7 +228,7 @@ void compute_U_and_Newtonian_Acc(struct ketju_system *R) {
                 }
             }
 
-            const double invr = 1.0 / sqrt(r2);
+            const double invr = 1. / sqrt(r2);
             is->U += mi * mj * invr;
 
             const double invr3 = invr * invr * invr;
@@ -197,6 +246,192 @@ void compute_U_and_Newtonian_Acc(struct ketju_system *R) {
         }
         if (loop == 0) break;
     }
+}
+
+// Force without star-star interactions
+static inline void comp_U_acc_loop_no_star_star(struct ketju_system *R) {
+    struct ketju_system_internal_state *is = R->internal_state;
+    struct spanning_tree_coordinate_system *mst = is->mst;
+    struct ketju_system_physical_state *ps = R->physical_state;
+
+    // Assume there are only a few pn particles/BHs and parallelize only
+    // over the inner loop.
+    const int istart = 0, istop = R->num_pn_particles;
+
+    const int rank = is->task_info->gbs_group_rank;
+    int group_size = is->task_info->gbs_group_size;
+
+    if (group_size > R->num_particles) {
+        // in case we for some reason have more tasks than particles
+        group_size = R->num_particles;
+        if (rank > group_size) return;
+    }
+
+    const int part_per_task = R->num_particles / group_size;
+    const int part_per_task_remainder =
+        R->num_particles % is->task_info->gbs_group_size;
+    int jstart = rank * part_per_task;
+    if (rank < part_per_task_remainder) {
+        jstart += rank; // the non-evenly split particles go to the first tasks
+    } else {
+        jstart += part_per_task_remainder;
+    }
+
+    int jstop =
+        jstart + part_per_task + (rank < part_per_task_remainder ? 1 : 0);
+
+    const int Nd = R->options->max_tree_distance;
+    int d;
+    int path[Nd];
+    int sign[Nd];
+
+    double dr[3];
+
+    for (int i = istart; i < istop; i++) {
+        const double mi = ps->mass[i];
+        const int Li = mst->vertex[i].level;
+
+        if (jstart <= i) jstart = i + 1; // avoid double counting interactions
+        for (int j = jstart; j < jstop; j++) {
+            double r2 = 0;
+            const double mj = ps->mass[j];
+            const int Lj = mst->vertex[j].level;
+
+            bool proximity = false;
+            if (abs(Li - Lj) <= Nd) {
+                proximity =
+                    ketju_check_relative_proximity(j, i, Nd, R, &d, path, sign);
+            }
+
+            if (proximity) {
+                for (int k = 0; k < 3; k++) {
+                    dr[k] = 0;
+                    for (int l = 0; l < d; l++) {
+                        dr[k] += sign[l] * mst->edge_rel_pos[path[l]][k];
+                    }
+                    r2 += dr[k] * dr[k];
+                }
+            } else {
+                for (int k = 0; k < 3; k++) {
+                    dr[k] = ps->pos[j][k] - ps->pos[i][k];
+                    r2 += dr[k] * dr[k];
+                }
+            }
+
+            const double invr = 1. / sqrt(r2);
+            is->U += mi * mj * invr;
+
+            const double invr3 = invr * invr * invr;
+
+            for (int k = 0; k < 3; k++) {
+                double drinvr3 = dr[k] * invr3;
+                is->acc[i][k] += mj * drinvr3;
+                is->acc[j][k] += -mi * drinvr3;
+            }
+        }
+    }
+}
+
+// Force with softened star-star interactions, doesn't include the pn-particles
+static inline void comp_U_acc_loop_softened_star_star(struct ketju_system *R) {
+    struct ketju_system_internal_state *is = R->internal_state;
+    struct spanning_tree_coordinate_system *mst = is->mst;
+    struct ketju_system_physical_state *ps = R->physical_state;
+
+    int istop = mst->num_vertices, jstop = mst->num_vertices;
+    int ThisBlock, CumNumEdge, jstart, istart;
+    loop_scheduling_N2(mst->num_vertices - R->num_pn_particles,
+                       is->task_info->gbs_group_size, &istart, &jstart,
+                       &ThisBlock, &CumNumEdge, is->task_info->gbs_group_rank);
+    istart += R->num_pn_particles;
+    jstart += R->num_pn_particles;
+    int loop = 1;
+    int c = 0;
+    const int Nd = R->options->max_tree_distance;
+    int d;
+    int path[Nd];
+    int sign[Nd];
+
+    double dr[3];
+    const double ss_soft = R->options->star_star_softening;
+
+    for (int i = istart; i < istop; i++) {
+        const double mi = ps->mass[i];
+        const int Li = mst->vertex[i].level;
+        if (i > istart) jstart = i + 1;
+
+        for (int j = jstart; j < jstop; j++) {
+            double r2 = 0;
+            const double mj = ps->mass[j];
+            const int Lj = mst->vertex[j].level;
+
+            bool proximity = false;
+            if (abs(Li - Lj) <= Nd) {
+                proximity =
+                    ketju_check_relative_proximity(j, i, Nd, R, &d, path, sign);
+            }
+
+            if (proximity) {
+                for (int k = 0; k < 3; k++) {
+                    dr[k] = 0;
+                    for (int l = 0; l < d; l++) {
+                        dr[k] += sign[l] * mst->edge_rel_pos[path[l]][k];
+                    }
+                    r2 += dr[k] * dr[k];
+                }
+            } else {
+                for (int k = 0; k < 3; k++) {
+                    dr[k] = ps->pos[j][k] - ps->pos[i][k];
+                    r2 += dr[k] * dr[k];
+                }
+            }
+
+            const double r = sqrt(r2);
+
+            const double invr = softened_inverse_r(r, ss_soft);
+
+            is->U += mi * mj * invr;
+
+            const double invr3 = softened_inverse_r3(r, ss_soft);
+
+            for (int k = 0; k < 3; k++) {
+                double drinvr3 = dr[k] * invr3;
+                is->acc[i][k] += mj * drinvr3;
+                is->acc[j][k] += -mi * drinvr3;
+            }
+            c++;
+            if (c == ThisBlock) {
+                loop = 0;
+                break;
+            }
+        }
+        if (loop == 0) break;
+    }
+}
+
+// computes the force function and newtonian acceleration
+void compute_U_and_Newtonian_Acc(struct ketju_system *R) {
+
+    tick(&R->perf->time_force);
+
+    struct ketju_system_internal_state *is = R->internal_state;
+    struct spanning_tree_coordinate_system *mst = is->mst;
+
+
+    memset(is->acc, 0, sizeof(double[R->num_particles][3]));
+    is->U = 0;
+
+    // select the force loop based on options
+    if (R->options->no_star_star_gravity) {
+        comp_U_acc_loop_no_star_star(R);
+    } else if (R->options->star_star_softening > 0) {
+        comp_U_acc_loop_no_star_star(R); // non-softened part
+        comp_U_acc_loop_softened_star_star(R); // softened part
+    } else {
+        comp_U_acc_loop_standard(R);    
+    }
+
+    tock(&R->perf->time_force);
 
     tick(&R->perf->time_force_comm);
     if (is->task_info->gbs_group_size > 1) {
@@ -207,6 +442,7 @@ void compute_U_and_Newtonian_Acc(struct ketju_system *R) {
     }
     tock(&R->perf->time_force_comm);
 
+    tick(&R->perf->time_force);
     int hi, lo;
     for (int i = 0; i < mst->num_vertices - 1; i++) {
 
@@ -1047,19 +1283,6 @@ void compute_PN_twobody_Acc(struct ketju_system *R, double (*vel)[3],
     double rv[3] = {0};
     double vv[3] = {0};
     double nv[3] = {0};
-    // rdot = (rv dot vv) / r
-    double rdot = 0;
-    // powers of r, v, rdot and G(m1+m2)/r
-    double r2 = 0, r;
-    double rdot2, rdot4, rdot6;
-    double v2 = 0, v4 = 0, v6 = 0;
-    double gmpr = 0, gmpr2 = 0, gmpr3 = 0;
-
-    // the PN acceleration coefficients
-    double A1 = 0, A2 = 0, A2p5 = 0, A3 = 0, A3p5 = 0, Atot = 0;
-    double B1 = 0, B2 = 0, B2p5 = 0, B3 = 0, B3p5 = 0, Btot = 0;
-
-    int k;
 
     // calculate relative quantities and derived quantities.
     // every relative quantity x = x_1 - x_2, where x_1 corresponds to
@@ -1069,45 +1292,54 @@ void compute_PN_twobody_Acc(struct ketju_system *R, double (*vel)[3],
     int path[Nd];
     int sign[Nd];
     int d;
-    int proximity = ketju_check_relative_proximity(i, j, Nd, R, &d, path, sign);
-    //TODO: this tree traversal for relative distances is used elsewhere also,
-    // so abstract it into a (inline) function
+    bool proximity = ketju_check_relative_proximity(i, j, Nd, R, &d, path, sign);
 
-    for (k = 0; k < 3; k++) {
-        if (proximity == 1) {
+    if (proximity) {
+        for (int k = 0; k < 3; k++) {
             for (int l = 0; l < d; l++) {
                 int index = path[l];
                 rv[k] += sign[l] * mst->edge_rel_pos[index][k];
             }
-        } else {
+        }
+    } else {
+        for (int k = 0; k < 3; k++) {
             rv[k] = ps->pos[i][k] - ps->pos[j][k];
         }
     }
 
     // relative velocity is also v_1 - v_2
-    v2 = relative_velocity(vel[i], vel[j], vv);
+    const double v2 = relative_velocity(vel[i], vel[j], vv);
 
-    for (k = 0; k < 3; k++) {
+    double r2 = 0;
+    // rdot = (rv dot vv) / r
+    double rdot = 0;
+
+    for (int k = 0; k < 3; k++) {
         rdot += rv[k] * vv[k];
         r2 += rv[k] * rv[k];
     }
-    r = sqrt(r2);
-
+    const double r = sqrt(r2);
     rdot /= r;
-    rdot2 = rdot * rdot;
-    rdot4 = rdot2 * rdot2;
-    rdot6 = rdot2 * rdot4;
 
-    v4 = v2 * v2;
-    v6 = v4 * v2;
-
-    gmpr = gm / r;
-    gmpr2 = gmpr * gmpr;
-    gmpr3 = gmpr * gmpr2;
-
-    for (k = 0; k < 3; k++) {
+    for (int k = 0; k < 3; k++) {
         nv[k] = rv[k] / r;
     }
+
+    // powers of v, rdot and G(m1+m2)/r
+    const double v4 = v2 * v2;
+    const double v6 = v4 * v2;
+
+    const double rdot2 = rdot * rdot;
+    const double rdot4 = rdot2 * rdot2;
+    const double rdot6 = rdot2 * rdot4;
+
+    const double gmpr = gm / r;
+    const double gmpr2 = gmpr * gmpr;
+    const double gmpr3 = gmpr * gmpr2;
+
+    // the PN acceleration coefficients
+    double A1 = 0, A2 = 0, A2p5 = 0, A3 = 0, A3p5 = 0, Atot = 0;
+    double B1 = 0, B2 = 0, B2p5 = 0, B3 = 0, B3p5 = 0, Btot = 0;
 
     // Compute the enabled terms
     unsigned int flags = R->options->PN_flags;
@@ -1175,7 +1407,7 @@ void compute_PN_twobody_Acc(struct ketju_system *R, double (*vel)[3],
     Atot = A1 / c2 + A2 / c4 + A2p5 / c5 + A3 / c6 + A3p5 / c7;
     Btot = B1 / c2 + B2 / c4 + B2p5 / c5 + B3 / c6 + B3p5 / c7;
 
-    for (k = 0; k < 3; k++) {
+    for (int k = 0; k < 3; k++) {
         acc[k] = gm / r2 * (nv[k] * Atot + vv[k] * Btot);
     }
 
@@ -1184,7 +1416,7 @@ void compute_PN_twobody_Acc(struct ketju_system *R, double (*vel)[3],
     // but is correct to 1PN (Mora & Will 2004), _for the CoM_.
     // Relative accelerations are correct, and the CoM motion corrections are
     // likely insignificant for our purposes.
-    for (k = 0; k < 3; k++) {
+    for (int k = 0; k < 3; k++) {
         AccPN[i][k] += (m2 / m) * acc[k];
         AccPN[j][k] -= (m1 / m) * acc[k];
     }

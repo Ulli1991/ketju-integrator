@@ -4,6 +4,8 @@
 #ifndef KETJU_INTEGRATOR_H
 #define KETJU_INTEGRATOR_H
 
+#include <stdbool.h>
+
 // Types and enums
 // Using bitflags for the PN terms allows more fine-grained control of the used
 // terms (e.g. only PN2.5 radiation reaction or only conservative terms).
@@ -50,9 +52,14 @@ struct ketju_integration_options {
     int max_tree_distance;
     //< Maximum separation in the tree structure before using CoM coordinate
     //distances
-    //TODO doesn't the use of check_relative_proximity_ND_2 break this?
 
     enum ketju_mst_algorithm mst_algorithm;
+
+    double star_star_softening;
+    //< force softening length between non-pn particles, disabled if <= 0
+    bool no_star_star_gravity;
+    //< Disable gravity between stars (non-pn particles), only interactions
+    // including pn-particles are computed.
 };
 
 static const struct ketju_integration_options
@@ -65,6 +72,8 @@ static const struct ketju_integration_options
         .steps_between_mst_reconstruction = 10,
         .max_tree_distance = 2,
         .mst_algorithm = KETJU_MST_PRIM,
+        .star_star_softening = 0.,
+        .no_star_star_gravity = false,
 };
 
 struct ketju_natural_constants {

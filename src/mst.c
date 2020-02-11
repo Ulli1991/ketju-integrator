@@ -12,86 +12,74 @@
 #include "ketju_integrator/ketju_integrator.h"
 #include "ketju_integrator/internal.h"
 
+bool ketju_check_relative_proximity_ND_2(int v1, int v2,
+                                          const struct ketju_system *R, int *d,
+                                          int path[2], int sign[2]) {
 
-int ketju_check_relative_proximity_ND_2(int v1, int v2,
-                                        const struct ketju_system *R, int *d,
-                                        int *path, int *sign) {
+    const struct graph_vertex *vertex = R->internal_state->mst->vertex;
 
-    const struct spanning_tree_coordinate_system *mst = R->internal_state->mst;
-
-    int diff = abs(mst->vertex[v1].level - mst->vertex[v2].level);
+    int diff = abs(vertex[v1].level - vertex[v2].level);
 
     if (diff == 1) {
-        if (mst->vertex[v2].parent == v1) {
+        if (vertex[v2].parent == v1) {
             *d = 1;
             sign[0] = -1;
-            path[0] = mst->vertex[v2].edgetoparent;
-            return 1;
-        } else if (mst->vertex[v1].parent == v2) {
+            path[0] = vertex[v2].edgetoparent;
+            return true;
+        } else if (vertex[v1].parent == v2) {
             *d = 1;
             sign[0] = +1;
-            path[0] = mst->vertex[v1].edgetoparent;
-            return 1;
+            path[0] = vertex[v1].edgetoparent;
+            return true;
         }
-        return 0;
+        return false;
     } else if (diff == 2) {
         // Need to check that there actually is a valid parent before checking
         // the parents parent.
-        if (mst->vertex[v2].parent >= 0 &&
-            mst->vertex[mst->vertex[v2].parent].parent == v1) {
+        if (vertex[v2].parent >= 0 &&
+            vertex[vertex[v2].parent].parent == v1) {
             *d = 2;
             sign[0] = -1;
             sign[1] = -1;
-            path[0] = mst->vertex[v2].edgetoparent;
-            path[1] = mst->vertex[mst->vertex[v2].parent].edgetoparent;
-            return 1;
-        } else if (mst->vertex[v1].parent >= 0 &&
-                   mst->vertex[mst->vertex[v1].parent].parent == v2) {
+            path[0] = vertex[v2].edgetoparent;
+            path[1] = vertex[vertex[v2].parent].edgetoparent;
+            return true;
+        } else if (vertex[v1].parent >= 0 &&
+                   vertex[vertex[v1].parent].parent == v2) {
             *d = 2;
             sign[0] = +1;
             sign[1] = +1;
-            path[0] = mst->vertex[v1].edgetoparent;
-            path[1] = mst->vertex[mst->vertex[v1].parent].edgetoparent;
+            path[0] = vertex[v1].edgetoparent;
+            path[1] = vertex[vertex[v1].parent].edgetoparent;
             return 1;
         }
-        return 0;
-    } else if (diff == 0) {
-        if (mst->vertex[v1].parent == mst->vertex[v2].parent) {
+        return false;
+    } else { // diff == 0
+        if (vertex[v1].parent == vertex[v2].parent) {
             *d = 2;
             sign[0] = -1;
             sign[1] = +1;
-            path[0] = mst->vertex[v2].edgetoparent;
-            path[1] = mst->vertex[v1].edgetoparent;
-            return 1;
+            path[0] = vertex[v2].edgetoparent;
+            path[1] = vertex[v1].edgetoparent;
+            return true;
         }
-        return 0;
+        return false;
     }
-    return 0;
+    return false;
 }
 
-int ketju_check_relative_proximity(int v1, int v2, const int Nd,
-                             const struct ketju_system *R, int *d, int *path,
-                             int *sign) {
+bool ketju_check_relative_proximity_general(int v1, int v2, const int Nd,
+                                    const struct ketju_system *R, int *d,
+                                    int path[Nd], int sign[Nd]) {
 
-    const struct spanning_tree_coordinate_system *mst = R->internal_state->mst;
+    const struct graph_vertex *vertex = R->internal_state->mst->vertex;
 
     for (int i = 0; i < Nd; i++) {
         path[i] = -1000;
         sign[i] = 0;
     }
 
-    int proximity = 0;
-    if (mst->vertex[v1].level == mst->vertex[v2].level) {
-
-        if (mst->vertex[v1].level == 0) {
-            char buf[100];
-            sprintf(buf,
-                    "ketju_check_relative_proximity: This should not happen! "
-                    "thistask: %d --- v1 v2 %d %d --- levels: %d %d\n",
-                    R->internal_state->task_info->global_rank, mst->vertex[v1].id, mst->vertex[v2].id,
-                    mst->vertex[v1].level, mst->vertex[v2].level);
-            terminate(buf);
-        }
+    if (vertex[v1].level == vertex[v2].level) {
 
         int halfNd = (int)floor(0.5 * Nd);
         int pathend[Nd];
@@ -99,10 +87,10 @@ int ketju_check_relative_proximity(int v1, int v2, const int Nd,
 
         for (int i = 0; i < halfNd; i++) {
             sign[i] = +1;
-            path[i] = mst->vertex[v1].edgetoparent;
-            pathend[i] = mst->vertex[v2].edgetoparent;
-            v1 = mst->vertex[v1].parent;
-            v2 = mst->vertex[v2].parent;
+            path[i] = vertex[v1].edgetoparent;
+            pathend[i] = vertex[v2].edgetoparent;
+            v1 = vertex[v1].parent;
+            v2 = vertex[v2].parent;
             if (v1 == v2) {
                 *d = 2 * (i + 1);
                 int c = 0;
@@ -111,16 +99,15 @@ int ketju_check_relative_proximity(int v1, int v2, const int Nd,
                     path[m] = pathend[i - c];
                     c++;
                 }
-                proximity = 1;
-                break;
+                return true;
             }
         }
 
     } else {
-        *d = abs(mst->vertex[v1].level - mst->vertex[v2].level);
+        *d = abs(vertex[v1].level - vertex[v2].level);
         if (*d <= Nd) {
             int lo, hi, thissign;
-            if (mst->vertex[v1].level > mst->vertex[v2].level) {
+            if (vertex[v1].level > vertex[v2].level) {
                 lo = v2;
                 hi = v1;
                 thissign = +1;
@@ -130,17 +117,16 @@ int ketju_check_relative_proximity(int v1, int v2, const int Nd,
                 thissign = -1;
             }
             for (int i = 0; i < *d; i++) {
-                path[i] = mst->vertex[hi].edgetoparent;
+                path[i] = vertex[hi].edgetoparent;
                 sign[i] = thissign;
-                hi = mst->vertex[hi].parent;
+                hi = vertex[hi].parent;
             }
-            if (lo == hi) { proximity = 1; }
+            if (lo == hi) { return true; }
         }
     }
 
-    return proximity;
+    return false;
 }
-
 
 void get_v1_v2(int N, int target, int *v1, int *v2) {
 
