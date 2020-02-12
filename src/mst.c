@@ -128,7 +128,7 @@ bool ketju_check_relative_proximity_general(int v1, int v2, const int Nd,
     return false;
 }
 
-void get_v1_v2(int N, int target, int *v1, int *v2) {
+static void get_v1_v2(int N, int target, int *v1, int *v2) {
 
     int final_element_on_row = 0;
     int elements_on_this_row;
@@ -149,7 +149,7 @@ void get_v1_v2(int N, int target, int *v1, int *v2) {
     }
 }
 
-int cmp_weight_index2(const void *a, const void *b) {
+static int cmp_weight_index2(const void *a, const void *b) {
     struct weight_index_2 *a1 = (struct weight_index_2 *)a;
     struct weight_index_2 *a2 = (struct weight_index_2 *)b;
     if ((*a1).weight > (*a2).weight)
@@ -160,7 +160,7 @@ int cmp_weight_index2(const void *a, const void *b) {
         return 0;
 }
 
-int cmp(const void *a, const void *b) {
+static int cmp(const void *a, const void *b) {
     struct graph_edge *a1 = (struct graph_edge *)a;
     struct graph_edge *a2 = (struct graph_edge *)b;
     if ((*a1).weight > (*a2).weight)
@@ -171,7 +171,7 @@ int cmp(const void *a, const void *b) {
         return 0;
 }
 
-int EdgeSearchForPrim(struct ketju_system *R, int NumLocalEdges) {
+static int EdgeSearchForPrim(struct ketju_system *R, int NumLocalEdges) {
 
     tick(&R->perf->tprim3);
     const struct spanning_tree_coordinate_system *mst = R->internal_state->mst;
@@ -199,7 +199,7 @@ int EdgeSearchForPrim(struct ketju_system *R, int NumLocalEdges) {
     return wi.index;
 }
 
-void PrimMST(struct ketju_system *R) {
+static void PrimMST(struct ketju_system *R) {
 
     const struct ketju_system_physical_state *ps = R->physical_state;
     const struct task_info *ti = R->internal_state->task_info;
@@ -317,7 +317,7 @@ void PrimMST(struct ketju_system *R) {
     tock(&R->perf->time_mst);
 }
 
-double get_rmax(struct ketju_system *R) {
+static double get_rmax(struct ketju_system *R) {
     double rmax2 = 0;
     for (int i = 0; i < R->num_particles; i++) {
         double ds;
@@ -331,53 +331,7 @@ double get_rmax(struct ketju_system *R) {
     return sqrt(rmax2);
 }
 
-void get_triplet(int index, int *triplet) {
-    if (index >= 100) {
-        triplet[2] = 1;
-        index -= 100;
-        if (index >= 10) {
-            triplet[1] = 1;
-            index -= 10;
-            if (index == 1) {
-                triplet[0] = 1;
-            } else {
-                triplet[0] = -1;
-            }
-        } else {
-            triplet[1] = 0;
-            if (index == 1) {
-                triplet[0] = 1;
-            } else {
-                triplet[0] = -1;
-            }
-        }
-    } else {
-        triplet[2] = 0;
-        if (index >= 10) {
-            triplet[1] = 1;
-            index -= 10;
-            if (index == 1) {
-                triplet[0] = 1;
-            } else {
-                triplet[0] = -1;
-            }
-        } else {
-            triplet[1] = 0;
-            if (index == 1) {
-                triplet[0] = 1;
-            } else {
-                triplet[0] = -1;
-            }
-        }
-    }
-}
-
-int get_triplet_index(int num) {
-    if (num == 1) return 1;
-    return 0;
-}
-
-int get_octant(int triplet[3]) {
+static int get_octant(int triplet[3]) {
     if (triplet[0] == 1) {
         if (triplet[1] == 1) {
             if (triplet[2] == -1) {
@@ -410,7 +364,7 @@ int get_octant(int triplet[3]) {
     return -1;
 }
 
-void get_triplet_from_octant(int octant, int *triplet) {
+static void get_triplet_from_octant(int octant, int *triplet) {
 
     if (octant == 0) {
         triplet[0] = -1;
@@ -463,7 +417,7 @@ void get_triplet_from_octant(int octant, int *triplet) {
     return;
 }
 
-void list_octree_level(struct octree_node *Node, int *LeafSizes,
+static void list_octree_level(struct octree_node *Node, int *LeafSizes,
                        int **LeafParticles, int *Nleafs) {
 
     if (Node->is_leaf) {
@@ -483,7 +437,7 @@ void list_octree_level(struct octree_node *Node, int *LeafSizes,
     }
 }
 
-void GetNumberOfLeafs(struct octree_node *Node, int *Nleaf) {
+static void GetNumberOfLeafs(struct octree_node *Node, int *Nleaf) {
     if (Node->is_leaf) {
         (*Nleaf)++;
     } else {
@@ -495,7 +449,7 @@ void GetNumberOfLeafs(struct octree_node *Node, int *Nleaf) {
     }
 }
 
-void free_octree(struct octree_node *Node) {
+static void free_octree(struct octree_node *Node) {
     for (int oct = 0; oct < 8; oct++) {
         if (Node->children[oct]->child_exists) {
             free_octree(Node->children[oct]);
@@ -505,7 +459,8 @@ void free_octree(struct octree_node *Node) {
     free(Node);
 }
 
-void allocate_new_octree_node(struct octree_node *Node, int oct, int *label) {
+static void allocate_new_octree_node(struct octree_node *Node, int oct,
+                                     int *label) {
 
     Node->child_exists[oct] = 1;
     Node->children[oct] = calloc(1, sizeof(struct octree_node));
@@ -523,14 +478,14 @@ void allocate_new_octree_node(struct octree_node *Node, int oct, int *label) {
     (*label)++;
 }
 
-int sign(double x) {
+static int sign(double x) {
     if (x >= 0) return 1;
     return -1;
 }
 
-void octree(struct ketju_system *R, struct octree_node *Node,
-            int MaxLeafSize, int *label) {
-    
+static void octree(struct ketju_system *R, struct octree_node *Node,
+                   int MaxLeafSize, int *label) {
+
     struct octree_data *octd = R->internal_state->octree_data;
 
     int NpartOctant[8] = {0};
@@ -591,7 +546,7 @@ void octree(struct ketju_system *R, struct octree_node *Node,
     }
 }
 
-void spatialpartition(struct ketju_system *R, int MaxLeafSize) {
+static void spatialpartition(struct ketju_system *R, int MaxLeafSize) {
 
     struct octree_data *octd = R->internal_state->octree_data;
 
@@ -620,7 +575,7 @@ void spatialpartition(struct ketju_system *R, int MaxLeafSize) {
     octree(R, octd->root_node, MaxLeafSize, &label);
 }
 
-int get_longest(double w[3], int id[3]) {
+static int get_longest(double w[3], int id[3]) {
 
     double L = -1;
     int ind = -1;
@@ -633,7 +588,7 @@ int get_longest(double w[3], int id[3]) {
     return id[ind];
 }
 
-int get_edge(int Nleafs, int va, int vb) {
+static int get_edge(int Nleafs, int va, int vb) {
 
     int N = Nleafs - 2;
     int lo, hi;
@@ -650,8 +605,8 @@ int get_edge(int Nleafs, int va, int vb) {
     return index;
 }
 
-void SolveMetaMST(struct ketju_system *R, int Nleafs, int *Npart,
-                  int **Particles, int *NumEdge) {
+static void SolveMetaMST(struct ketju_system *R, int Nleafs, int *Npart,
+                         int **Particles, int *NumEdge) {
 
     const struct task_info *ti = R->internal_state->task_info;
     const struct ketju_system_physical_state *ps = R->physical_state;
@@ -903,7 +858,7 @@ void SolveMetaMST(struct ketju_system *R, int Nleafs, int *Npart,
     free(InMst);
 }
 
-void SolveSubMST(struct ketju_system *R, int Npart, int *Particles,
+static void SolveSubMST(struct ketju_system *R, int Npart, int *Particles,
                  int *NumEdge) {
     if (Npart == 1) return;
 
@@ -967,7 +922,7 @@ void SolveSubMST(struct ketju_system *R, int Npart, int *Particles,
     free(InMst);
 }
 
-void SwapEdge(struct ketju_system *R, int i, int j) {
+static void SwapEdge(struct ketju_system *R, int i, int j) {
     struct spanning_tree_coordinate_system *mst = R->internal_state->mst;
 
     int v1 = mst->edge_in_mst[i].vertex1;
@@ -983,7 +938,7 @@ void SwapEdge(struct ketju_system *R, int i, int j) {
     mst->edge_in_mst[j].weight = w;
 }
 
-void CombineAllMST(struct ketju_system *R, int NumEdge) {
+static void CombineAllMST(struct ketju_system *R, int NumEdge) {
 
     const struct ketju_system_physical_state *ps = R->physical_state;
     struct spanning_tree_coordinate_system *mst = R->internal_state->mst;
@@ -1048,7 +1003,7 @@ void CombineAllMST(struct ketju_system *R, int NumEdge) {
     } while (counter < NumEdge);
 }
 
-void DivideAndConquerPrim(struct ketju_system *R) {
+static void DivideAndConquerPrim(struct ketju_system *R) {
 
     tick(&R->perf->time_mst);
     struct spanning_tree_coordinate_system *mst = R->internal_state->mst;

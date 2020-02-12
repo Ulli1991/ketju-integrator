@@ -21,6 +21,7 @@ static void allocate_internal_state(struct ketju_system *R, int Ntask) {
     struct spanning_tree_coordinate_system *mst = R->internal_state->mst;
     mst->vertex = calloc(R->num_particles, sizeof(struct graph_vertex));
     mst->num_vertices = R->num_particles;
+    //TODO is num_edges actually used anywhere?
     mst->num_edges = 0; // is set when the tree is built
 
     // XXX from old code, TODO is this always safe?

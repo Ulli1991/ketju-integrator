@@ -60,6 +60,9 @@ struct ketju_integration_options {
     bool no_star_star_gravity;
     //< Disable gravity between stars (non-pn particles), only interactions
     // including pn-particles are computed.
+    bool enable_bh_mergers;
+    //< Check for mergers between BHs (pn particles).
+    // BHs are merged if they come within 6 Schwarzschild radii of each other.
 };
 
 static const struct ketju_integration_options
@@ -74,6 +77,7 @@ static const struct ketju_integration_options
         .mst_algorithm = KETJU_MST_PRIM,
         .star_star_softening = 0.,
         .no_star_star_gravity = false,
+        .enable_bh_mergers = true,
 };
 
 struct ketju_natural_constants {
@@ -146,7 +150,8 @@ struct ketju_system {
 
     void *particle_extra_data;
     //< Optional extra data (e.g. IDs) associated with the particles, which is
-    // reordered in case of mergers etc.
+    // reordered in case of mergers so that the removed particle data are found
+    // at the end of the array.
     // The caller is responsible for managing this memory.
 
     size_t particle_extra_data_elem_size;

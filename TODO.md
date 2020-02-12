@@ -8,7 +8,9 @@ Correctness
 
 % Divide and conquer prim broken for small systems (2 particles)
     + force using standard prim in this case
-    - should be fixed properly
+    - Standard prim might be good enough for ~500-1000 particles
+    - should be fixed properly, apparently can break down even with larger
+      systems.
 
 - `safetybuf` in allocate_internal_state seems worrying 
 
@@ -27,7 +29,9 @@ Features
 --------
 
 - Add spin terms
-- BH mergers
+% BH mergers
+    + Basic merging conserving momentum, mass
+    - GR effects on mass loss, resulting spin, kicks
 
 Style
 -----

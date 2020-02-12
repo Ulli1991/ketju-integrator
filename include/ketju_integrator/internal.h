@@ -156,17 +156,45 @@ static inline void get_v1_v2_fast(struct ketju_system *R, int i, int *v1,
     *v2 = R->internal_state->mst->edge_in_mst[i].vertex2;
 }
 
-// declarations of internal functions used between compilation units
+static inline void vector_cross(const double a[3], const double b[3],
+                                double res[3]) {
+    res[0] = a[1] * b[2] - b[2] * a[1];
+    res[1] = a[2] * b[0] - b[2] * a[0];
+    res[2] = a[0] * b[1] - b[0] * a[1];
+}
 
+// TODO what does this actually do/assume?
+static inline void loop_scheduling_N2(int Nrow, int Nt, int *istart,
+                                      int *jstart, int *ThisBlock, int *CumNum,
+                                      int task) {
+    int Np = (Nrow * (Nrow - 1)) / 2;
+    int block = (int)floor(Np / Nt);
+    int limit = (block + 1) * Nt - Np;
+    int ThisCumNum;
+    if (task < limit) {
+        ThisCumNum = task * block;
+        *ThisBlock = block;
+    } else {
+        ThisCumNum = limit * block + (task - limit) * (block + 1);
+        *ThisBlock = block + 1;
+    }
+
+    double drow =
+        1.0 * Nrow - 0.5 -
+        0.5 * sqrt((1.0 - 2.0 * Nrow) * (1.0 - 2.0 * Nrow) - 8.0 * ThisCumNum);
+    int row = (int)floor(drow);
+    int rowstart =
+        (int)round(-0.5 * (1.0 * row + 1.0) * (row - 2.0 * Nrow) - 1.0 * Nrow);
+    *istart = row;
+    *jstart = ThisCumNum - rowstart + row + 1;
+    *CumNum = ThisCumNum;
+}
+
+// declarations of internal functions used between compilation units
 
 void ketju_init_gbs_comms(struct ketju_system *R);
 
 void ketju_build_mst(struct ketju_system *R);
-
-// TODO rename these
-void loop_scheduling_N2(int Nrow, int Nt, int *istart, int *jstart,
-                        int *ThisBlock, int *CumNum, int task);
-
 
 // These functions are called through the helper below
 bool ketju_check_relative_proximity_general(int v1, int v2, const int Nd,
