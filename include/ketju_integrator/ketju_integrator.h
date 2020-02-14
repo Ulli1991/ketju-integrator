@@ -165,4 +165,10 @@ void ketju_free_system(struct ketju_system *R);
 void ketju_into_CoM_frame(struct ketju_system *R);
 void ketju_run_integrator(struct ketju_system *R, double time_interval);
 
+// debug helpers
+void ketju_debug_dump_integrator_state(const struct ketju_system *R,
+                                       const char *fname);
+bool ketju_debug_read_integrator_state(struct ketju_system *R,
+                                       const char *fname, MPI_Comm comm);
+
 #endif // KETJU_INTEGRATOR_H

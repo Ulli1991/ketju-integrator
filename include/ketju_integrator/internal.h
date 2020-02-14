@@ -6,6 +6,7 @@
 #include <stddef.h>
 #include <stdio.h>
 #include <stdbool.h>
+#include <math.h>
 
 #include <mpi.h>
 
