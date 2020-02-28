@@ -120,12 +120,12 @@ target_link_libraries(nbody ketju-integrator)
 #)
 #
 ## unit tests if enabled
-#option(BUILD_TESTS "Build tests and benchmarks" ON)
-#if(BUILD_TESTS)
-#    add_subdirectory("test")
-#endif()
-#
-#
+option(UNIT_TESTS "Build and run unit-tests" ON)
+if(UNIT_TESTS)
+    add_subdirectory("unit-tests")
+endif()
+
+
 ##
 ## Documentation Target
 #

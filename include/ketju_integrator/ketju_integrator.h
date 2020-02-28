@@ -5,6 +5,12 @@
 #define KETJU_INTEGRATOR_H
 
 #include <stdbool.h>
+#include <mpi.h>
+
+// For compatibility with C++ programs
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 // Types and enums
 // Using bitflags for the PN terms allows more fine-grained control of the used
@@ -170,5 +176,11 @@ void ketju_debug_dump_integrator_state(const struct ketju_system *R,
                                        const char *fname);
 bool ketju_debug_read_integrator_state(struct ketju_system *R,
                                        const char *fname, MPI_Comm comm);
+
+
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif // KETJU_INTEGRATOR_H

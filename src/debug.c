@@ -97,7 +97,8 @@ bool ketju_debug_read_integrator_state(struct ketju_system *R,
         comm = MPI_COMM_SELF;    
     }
 
-    ketju_create_system(R, R->num_pn_particles, R->num_particles, comm);
+    ketju_create_system(R, R->num_pn_particles,
+                        R->num_particles - R->num_pn_particles, comm);
 
     // physical state
     count = fread(&R->physical_state->time, sizeof(R->physical_state->time), 1, f);

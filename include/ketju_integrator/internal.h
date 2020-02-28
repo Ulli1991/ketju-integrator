@@ -16,7 +16,11 @@
     #define M_PI 3.14159265358979323846
 #endif
 
-// TODO rename
+// For compatibility with C++ programs
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 struct octree_node {
     bool child_exists[8]; // TODO replace with checks for NULL?
     struct octree_node *children[8];
@@ -200,14 +204,14 @@ void ketju_build_mst(struct ketju_system *R);
 // These functions are called through the helper below
 bool ketju_check_relative_proximity_general(int v1, int v2, const int Nd,
                                     const struct ketju_system *R, int *d,
-                                    int path[Nd], int sign[Nd]);
+                                    int path[/*Nd*/], int sign[/*Nd*/]);
 bool ketju_check_relative_proximity_ND_2(int v1, int v2,
                                     const struct ketju_system *R, int *d,
                                     int path[2], int sign[2]);
 
 static inline bool ketju_check_relative_proximity(int v1, int v2, const int Nd,
                                     const struct ketju_system *R, int *d,
-                                    int path[Nd], int sign[Nd]) {
+                                    int path[/*Nd*/], int sign[/*Nd*/]) {
 
 #ifndef NDEBUG
     const struct graph_vertex *vertex = R->internal_state->mst->vertex;
@@ -231,5 +235,9 @@ static inline bool ketju_check_relative_proximity(int v1, int v2, const int Nd,
 
     return ketju_check_relative_proximity_general(v1, v2, Nd, R, d, path, sign);
 }
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif // KETJU_INTEGRATOR_INTERNAL_H
