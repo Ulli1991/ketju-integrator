@@ -24,10 +24,12 @@ static void allocate_internal_state(struct ketju_system *R, int Ntask) {
     //TODO is num_edges actually used anywhere?
     mst->num_edges = 0; // is set when the tree is built
 
-    // XXX from old code, TODO is this always safe?
-    double safetybuf = 1.05;
-    int NumLocalEdge = (int)floor(
-        safetybuf * (mst->num_vertices * (mst->num_vertices - 1)) / Ntask);
+    // The division of edges between each task can be slightly uneven, but Ntask
+    // edges worth of extra space should guarantee enough space always.
+    // TODO: would like to have exact counts to really ensure correctness.
+    int NumLocalEdge =
+        (mst->num_vertices * (mst->num_vertices - 1)) / Ntask + Ntask;
+
     mst->local_edge = calloc(NumLocalEdge, sizeof(struct graph_edge));
     mst->local_edge_subset = calloc(NumLocalEdge, sizeof(struct graph_edge));
     mst->edge_in_mst = calloc(mst->num_vertices - 1, sizeof(struct graph_edge));

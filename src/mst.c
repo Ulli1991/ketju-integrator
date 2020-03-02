@@ -242,8 +242,6 @@ static void PrimMST(struct ketju_system *R) {
             }
             w = sqrt(w);
 
-            // FIXME: out of bounds writes happen here sometimes,
-            // probably if there are more tasks than particles
             mst->local_edge[NumLocalEdges].weight = w;
             mst->local_edge[NumLocalEdges].vertex1 = i;
             mst->local_edge[NumLocalEdges].vertex2 = j;
