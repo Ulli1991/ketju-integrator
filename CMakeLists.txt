@@ -7,7 +7,7 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS OFF)
 
 # Set C++ standard (used for tests)
-set(CMAKE_CXX_STANDARD 14)
+set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
@@ -77,10 +77,10 @@ target_include_directories(ketju-integrator
 target_compile_options(ketju-integrator
     PRIVATE
         $<$<C_COMPILER_ID:GNU>:
-            -Wall -Wextra -Wpedantic -Wno-unknown-pragmas
+            -Wall -Wextra -Wpedantic -Wno-unknown-pragmas -fPIC
         >
         $<$<OR:$<C_COMPILER_ID:Clang>,$<C_COMPILER_ID:AppleClang>>:
-            -Wall -Wextra -Wpedantic -Wno-missing-braces
+            -Wall -Wextra -Wpedantic -Wno-missing-braces -fPIC
         >
 )
 

@@ -69,9 +69,8 @@ static void compute_U(struct ketju_system *R) {
     // instead of just the gbs group, since this function is mainly for
     // computing the energy between steps.
     loop_scheduling_N2(mst->num_vertices, is->task_info->gbs_group_size,
-                       &istart, &jstart, &ThisBlock, &CumNumEdge,
-                       is->task_info->gbs_group_rank);
-    int loop = 1;
+                       is->task_info->gbs_group_rank, &istart, &jstart,
+                       &ThisBlock, &CumNumEdge);
     int c = 0;
 
     const int Nd = R->options->max_tree_distance;
@@ -87,6 +86,9 @@ static void compute_U(struct ketju_system *R) {
         int Li = mst->vertex[i].level;
         if (i > istart) { jstart = i + 1; }
         for (int j = jstart; j < mst->num_vertices; j++) {
+            if (c >= ThisBlock) {
+                goto after_loops;
+            }
             if (R->options->no_star_star_gravity && i >= R->num_pn_particles &&
                 j >= R->num_pn_particles) {
                 continue;
@@ -128,13 +130,9 @@ static void compute_U(struct ketju_system *R) {
 
             is->U += mi * mj * invr;
             c++;
-            if (c == ThisBlock) {
-                loop = 0;
-                break;
-            }
         }
-        if (loop == 0) break;
     }
+    after_loops:
     tock(&R->perf->time_force);
 
     tick(&R->perf->time_force_comm);
@@ -162,9 +160,8 @@ static inline void comp_U_acc_loop_standard(struct ketju_system *R) {
     int istop = mst->num_vertices, jstop = mst->num_vertices;
     int ThisBlock, CumNumEdge, jstart, istart;
     loop_scheduling_N2(mst->num_vertices, is->task_info->gbs_group_size,
-                       &istart, &jstart, &ThisBlock, &CumNumEdge,
-                       is->task_info->gbs_group_rank);
-    int loop = 1;
+                       is->task_info->gbs_group_rank, &istart, &jstart,
+                       &ThisBlock, &CumNumEdge);
     int c = 0;
     const int Nd = R->options->max_tree_distance;
     int d;
@@ -179,6 +176,9 @@ static inline void comp_U_acc_loop_standard(struct ketju_system *R) {
         if (i > istart) jstart = i + 1;
 
         for (int j = jstart; j < jstop; j++) {
+            if (c >= ThisBlock) {
+                return;
+            }
             double r2 = 0;
             const double mj = ps->mass[j];
             const int Lj = mst->vertex[j].level;
@@ -215,12 +215,7 @@ static inline void comp_U_acc_loop_standard(struct ketju_system *R) {
                 is->acc[j][k] += -mi * drinvr3;
             }
             c++;
-            if (c == ThisBlock) {
-                loop = 0;
-                break;
-            }
         }
-        if (loop == 0) break;
     }
 }
 
@@ -317,11 +312,11 @@ static inline void comp_U_acc_loop_softened_star_star(struct ketju_system *R) {
     int istop = mst->num_vertices, jstop = mst->num_vertices;
     int ThisBlock, CumNumEdge, jstart, istart;
     loop_scheduling_N2(mst->num_vertices - R->num_pn_particles,
-                       is->task_info->gbs_group_size, &istart, &jstart,
-                       &ThisBlock, &CumNumEdge, is->task_info->gbs_group_rank);
+                       is->task_info->gbs_group_size,
+                       is->task_info->gbs_group_rank, &istart, &jstart,
+                       &ThisBlock, &CumNumEdge);
     istart += R->num_pn_particles;
     jstart += R->num_pn_particles;
-    int loop = 1;
     int c = 0;
     const int Nd = R->options->max_tree_distance;
     int d;
@@ -337,6 +332,9 @@ static inline void comp_U_acc_loop_softened_star_star(struct ketju_system *R) {
         if (i > istart) jstart = i + 1;
 
         for (int j = jstart; j < jstop; j++) {
+            if (c >= ThisBlock) {
+                return;
+            }
             double r2 = 0;
             const double mj = ps->mass[j];
             const int Lj = mst->vertex[j].level;
@@ -376,12 +374,7 @@ static inline void comp_U_acc_loop_softened_star_star(struct ketju_system *R) {
                 is->acc[j][k] += -mi * drinvr3;
             }
             c++;
-            if (c == ThisBlock) {
-                loop = 0;
-                break;
-            }
         }
-        if (loop == 0) break;
     }
 }
 

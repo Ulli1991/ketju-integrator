@@ -22,7 +22,6 @@ extern "C" {
 #endif
 
 struct octree_node {
-    bool child_exists[8]; // TODO replace with checks for NULL?
     struct octree_node *children[8];
     struct octree_node *parent;
     double center[3];
@@ -61,7 +60,6 @@ struct graph_edge {
 struct graph_vertex {
     int id;
     int degree;
-    int type; // TODO is this used?
     int parent;
     int edgetoparent;
     int level;
@@ -168,11 +166,18 @@ static inline void vector_cross(const double a[3], const double b[3],
     res[2] = a[0] * b[1] - b[0] * a[1];
 }
 
-// TODO what does this actually do/assume?
-static inline void loop_scheduling_N2(int Nrow, int Nt, int *istart,
-                                      int *jstart, int *ThisBlock, int *CumNum,
-                                      int task) {
-    int Np = (Nrow * (Nrow - 1)) / 2;
+
+// Divide work for a i = (0..N-1), j = (i+1..N-1) loop between Nt tasks.
+// For the given task, computes the starting value for i (istart), the starting
+// value for j (jstart) for the loop with i==istart, the number of elements
+// handled by the given task (ThisBlock) and the number of elements before the
+// block handled by this task (CumNum).
+// The loops for i,j go up to N (exclusive) until ThisBlock elements have been
+// processed.
+static inline void loop_scheduling_N2(int N, int Nt, int task, int *istart,
+                                      int *jstart, int *ThisBlock, int *CumNum
+                                      ) {
+    int Np = (N * (N - 1)) / 2;
     int block = (int)floor(Np / Nt);
     int limit = (block + 1) * Nt - Np;
     int ThisCumNum;
@@ -185,11 +190,11 @@ static inline void loop_scheduling_N2(int Nrow, int Nt, int *istart,
     }
 
     double drow =
-        1.0 * Nrow - 0.5 -
-        0.5 * sqrt((1.0 - 2.0 * Nrow) * (1.0 - 2.0 * Nrow) - 8.0 * ThisCumNum);
+        1.0 * N - 0.5 -
+        0.5 * sqrt((1.0 - 2.0 * N) * (1.0 - 2.0 * N) - 8.0 * ThisCumNum);
     int row = (int)floor(drow);
     int rowstart =
-        (int)round(-0.5 * (1.0 * row + 1.0) * (row - 2.0 * Nrow) - 1.0 * Nrow);
+        (int)round(-0.5 * (1.0 * row + 1.0) * (row - 2.0 * N) - 1.0 * N);
     *istart = row;
     *jstart = ThisCumNum - rowstart + row + 1;
     *CumNum = ThisCumNum;

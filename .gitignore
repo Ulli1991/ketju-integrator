@@ -33,7 +33,7 @@ lib/
 __pycache__
 
 # Build and output directories
-build
+build*/
 
 # vim
 [._]*.s[a-w][a-z]

@@ -24,14 +24,16 @@ target_link_libraries(ketju-integrator-unit-tests
 target_link_libraries(ketju-integrator-unit-tests
                       PUBLIC ${MPI_CXX_LINK_FLAGS})
 
-set(tests_num_mpi_tasks "2" CACHE STRING
-    "Number of tasks to use when running unit tests")
+set(tests_max_num_mpi_tasks "20" CACHE STRING
+    "Maximum number of tasks to use when running unit tests")
 
 # unit tests are run with a full build
-add_custom_target(run-unit-tests ALL
-                  COMMAND ${MPIEXEC} -np ${tests_num_mpi_tasks} 
-                  $<TARGET_FILE:ketju-integrator-unit-tests>
-                  DEPENDS ketju-integrator-unit-tests
-                  WORKING_DIRECTORY ${EXECUTABLE_OUTPUT_PATH}
-                  COMMENT "Running unit tests..."
-                  )
+foreach(ntasks 1 2 ${tests_max_num_mpi_tasks})
+    add_custom_target(run-unit-tests-${ntasks} ALL
+                      COMMAND ${MPIEXEC} -np ${ntasks} 
+                      $<TARGET_FILE:ketju-integrator-unit-tests>
+                      DEPENDS ketju-integrator-unit-tests
+                      WORKING_DIRECTORY ${EXECUTABLE_OUTPUT_PATH}
+                      COMMENT "Running unit tests with ${ntasks} task(s)..."
+                      )
+endforeach()
