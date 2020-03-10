@@ -698,11 +698,13 @@ static void set_auxiliary_variables(struct ketju_system *R) {
     memcpy(is->aux_vel, ps->vel, sizeof(double[R->num_particles][3]));
     memcpy(mst->edge_rel_aux_vel, mst->edge_rel_vel,
            sizeof(double[mst->num_vertices-1][3]));
+    memcpy(is->aux_spin, ps->spin, sizeof(double[R->num_pn_particles][3]));
 }
 
 // TODO: move declarations / reorganize
 static void compute_Post_Newtonian_Acc(struct ketju_system *,
-                                       double (*vel_to_use)[3]);
+                                       double (*vel_to_use)[3],
+                                       double (*spin_to_use)[3]);
 
 static void physical_kick(double dt, struct ketju_system *R) {
 
@@ -711,7 +713,7 @@ static void physical_kick(double dt, struct ketju_system *R) {
     struct ketju_system_physical_state *ps = R->physical_state;
 
     update_vel(R, is->aux_vel, AUXILIARY);
-    compute_Post_Newtonian_Acc(R, is->aux_vel);
+    compute_Post_Newtonian_Acc(R, is->aux_vel, is->aux_spin);
 
     double dB = 0;
     for (int i = 0; i < R->num_particles; i++) {
@@ -727,6 +729,11 @@ static void physical_kick(double dt, struct ketju_system *R) {
                 dt * (mst->edge_rel_acc[i][k] + mst->edge_rel_acc_vd[i][k]);
         }
     }
+    for (int i = 0; i < R->num_pn_particles; ++i) {
+        for (int k = 0; k < 3; k++) {
+            ps->spin[i][k] += dt * is->spin_derivative[i][k];
+        }
+    }
 }
 
 static void auxiliary_kick(double dt, struct ketju_system *R) {
@@ -736,12 +743,18 @@ static void auxiliary_kick(double dt, struct ketju_system *R) {
     struct ketju_system_physical_state *ps = R->physical_state;
 
     update_vel(R, ps->vel, PHYSICAL);
-    compute_Post_Newtonian_Acc(R, ps->vel);
+    compute_Post_Newtonian_Acc(R, ps->vel, ps->spin);
 
     for (int i = 0; i < mst->num_vertices - 1; i++) {
         for (int k = 0; k < 3; k++) {
             mst->edge_rel_aux_vel[i][k] +=
                 dt * (mst->edge_rel_acc[i][k] + mst->edge_rel_acc_vd[i][k]);
+        }
+    }
+
+    for (int i = 0; i < R->num_pn_particles; ++i) {
+        for (int k = 0; k < 3; k++) {
+            is->aux_spin[i][k] += dt * is->spin_derivative[i][k];
         }
     }
 }
@@ -1139,12 +1152,14 @@ static void merge_bhs(struct ketju_system *R, int i, int j) {
     // The extra data of the merged particle is moved to the end of the array
     size_t elem_size = R->particle_extra_data_elem_size;
     char *extra_data = R->particle_extra_data;
-    char rem_extra_data[elem_size];
-    memmove(rem_extra_data, extra_data + j * elem_size, elem_size);
-    memmove(extra_data + j * elem_size, extra_data + (j + 1) * elem_size,
-            elem_size * (R->num_particles - (j + 1)));
-    memmove(extra_data + (R->num_particles - 1) * elem_size, rem_extra_data,
-            elem_size);
+    if (extra_data) {
+        char rem_extra_data[elem_size];
+        memmove(rem_extra_data, extra_data + j * elem_size, elem_size);
+        memmove(extra_data + j * elem_size, extra_data + (j + 1) * elem_size,
+                elem_size * (R->num_particles - (j + 1)));
+        memmove(extra_data + (R->num_particles - 1) * elem_size, rem_extra_data,
+                elem_size);
+    }
 
     R->num_particles -= 1;
     R->num_pn_particles -= 1;
@@ -1322,10 +1337,15 @@ inline static double relative_velocity(const double *v1, const double *v2,
     return vrel2;
 }
 
-// TODO add spin terms
-// Based on Mora & Will, Phys. Rev. D 69, 104021
-static void compute_PN_twobody_Acc(struct ketju_system *R, double (*vel)[3],
-                                   double (*AccPN)[3], int i, int j) {
+// Spin independent terms from Mora & Will (2004), Phys. Rev. D 69, 104021.
+// Spin terms from Barker & O'Connel (1975), Phys. Rev D 12, 329 and
+// Kidder (1995), Phys. rev. D 52, 821 (better notation).
+// The quadrupole terms from Barker & O'connel have been specialized for black
+// holes.
+static void compute_PN_twobody_Acc(struct ketju_system *R,
+                                   double (*vel)[3],
+                                   double (*spin)[3], double (*AccPN)[3],
+                                   double (*spin_derivative)[3], int i, int j) {
 
     struct ketju_system_internal_state *is = R->internal_state;
     struct spanning_tree_coordinate_system *mst = is->mst;
@@ -1393,6 +1413,8 @@ static void compute_PN_twobody_Acc(struct ketju_system *R, double (*vel)[3],
     }
     const double r = sqrt(r2);
     rdot /= r;
+    const double r3 = r*r2;
+    const double r4 = r2*r2;
 
     for (int k = 0; k < 3; k++) {
         nv[k] = rv[k] / r;
@@ -1413,6 +1435,9 @@ static void compute_PN_twobody_Acc(struct ketju_system *R, double (*vel)[3],
     // the PN acceleration coefficients
     double A1 = 0, A2 = 0, A2p5 = 0, A3 = 0, A3p5 = 0, Atot = 0;
     double B1 = 0, B2 = 0, B2p5 = 0, B3 = 0, B3p5 = 0, Btot = 0;
+
+    // Spin contribution to acceleration
+    double acc_spin[3] = {0, 0, 0};
 
     // Compute the enabled terms
     unsigned int flags = R->options->PN_flags;
@@ -1476,12 +1501,125 @@ static void compute_PN_twobody_Acc(struct ketju_system *R, double (*vel)[3],
                 .75 * (113 + 2 * eta) * v2 * rdot2);
     }
 
+    if (flags & KETJU_PN_SPIN_ALL) {
+        // Compute all the supplementary quantities if any of spin terms are
+        // enabled
+        double mu           = (m1*m2)/(m1+m2);
+        double sigma[3]     = {0,0,0};      // m2/m1 * S1 + m1/m2 * S2
+        double S[3]         = {0,0,0};      // S1 + S2
+        double n_cross_v[3] = {0,0,0};
+        double S1_2         = 0;
+        double S2_2         = 0;
+        double S1_dot_S2    = 0;
+        double n_dot_S1     = 0;
+        double n_dot_S2     = 0;
+
+        const double *S_1 = spin[i];
+        const double *S_2 = spin[j];
+
+
+        // n x v
+        vector_cross(nv, vv, n_cross_v);
+
+        // supplementary quantities & dot products
+        for (int k = 0; k < 3; k++) {
+            S[k]        = S_1[k] + S_2[k];
+            // sigma = S + dm/m*Delta in Kidder's notation
+            sigma[k]    = m2/m1 * S_1[k] + m1/m2 * S_2[k];
+            S1_dot_S2  += S_1[k] * S_2[k];
+            n_dot_S1   += nv[k] * S_1[k];
+            n_dot_S2   += nv[k] * S_2[k];
+            S1_2       += S_1[k] * S_1[k];
+            S2_2 += S_2[k] * S_2[k];
+        }
+
+        // spin contributions to acceleration
+        if (flags & KETJU_PN_1_5_SPIN_ACC) {
+            double A_SO_term1    = 0;
+            double A_SO_term2[3] = {0,0,0};
+            double A_SO_term3[3] = {0,0,0};
+            double buffer1[3]    = {0,0,0};
+            double buffer2[3]    = {0,0,0};
+            for (int k = 0; k < 3; k++) {
+                A_SO_term1 += 6 * n_cross_v[k] * (S[k] + sigma[k]);
+                buffer1[k] = 4 * S[k] + 3 * sigma[k];
+                buffer2[k] = 3 * rdot * (2 * S[k] + sigma[k]);
+            }
+
+            vector_cross(vv, buffer1, A_SO_term2);
+            vector_cross(nv, buffer2, A_SO_term3);
+
+            for (int k = 0; k < 3; k++) {
+                // Spin-orbit term
+                acc_spin[k] +=
+                    G / (c2 * r3) *
+                    (nv[k] * A_SO_term1 - A_SO_term2[k] + A_SO_term3[k]);
+            }
+        }
+
+        if (flags & KETJU_PN_2_0_SPIN_ACC) {
+
+            for (int k = 0; k < 3; ++k) {
+                // Spin-spin term
+                acc_spin[k] +=
+                    -3 * G / (mu * c2 * r4) *
+                    (S1_dot_S2 * nv[k] - 5 * n_dot_S1 * n_dot_S2 * nv[k] +
+                     n_dot_S1 * S_2[k] + n_dot_S2 * S_1[k]);
+                // Quadrupole term
+                acc_spin[k] += -3. / 2 * G * m / (r4 * c2) *
+                               ((1 / (m1 * m1) *
+                                 ((S1_2 - 5 * n_dot_S1 * n_dot_S1) * nv[k] +
+                                  2 * n_dot_S1 * S_1[k])) +
+                                (1 / (m2 * m2) *
+                                 ((S2_2 - 5 * n_dot_S2 * n_dot_S2) * nv[k] +
+                                  2 * n_dot_S2 * S_2[k])));
+            }
+        }
+
+        // Spin derivatives
+        // The derivatives of the bodies are just index reversed versions of
+        // each other.
+        double buffer1[3]    = {0,0,0};
+        double buffer2[3]    = {0,0,0};
+
+        if (flags & KETJU_PN_1_0_SPIN_EVOL) {
+            for (int k = 0; k < 3; ++k) {
+                // Omega_SO
+                buffer1[k] = 2 * G * mu / (c2 * r2) * (1 + 3 * m2 / (4 * m1)) *
+                             n_cross_v[k];
+                buffer2[k] = 2 * G * mu / (c2 * r2) * (1 + 3 * m1 / (4 * m2)) *
+                             n_cross_v[k];
+            }
+        }
+
+        if (flags & KETJU_PN_1_5_SPIN_EVOL) {
+            for (int k = 0; k < 3; ++k) {
+                // Omega_SS
+                buffer1[k] += G / (c2 * r3) * (3 * n_dot_S2 * nv[k] - S_2[k]);
+                buffer2[k] += G / (c2 * r3) * (3 * n_dot_S1 * nv[k] - S_1[k]);
+                // Omega_Q
+                buffer1[k] +=
+                    G * m2 / (c2 * r3 * m1) * (3 * n_dot_S1 * nv[k] - S_1[k]);
+                buffer2[k] +=
+                    G * m1 / (c2 * r3 * m2) * (3 * n_dot_S2 * nv[k] - S_2[k]);
+            }
+        }
+        double dSpin1[3];
+        double dSpin2[3];
+        vector_cross(buffer1, S_1, dSpin1);
+        vector_cross(buffer2, S_2, dSpin2);
+        for (int k=0; k<3; ++k) {
+            spin_derivative[i][k] += dSpin1[k];   
+            spin_derivative[j][k] += dSpin2[k];   
+        }
+    }
+    
     // sum all terms with correct powers of c
     Atot = A1 / c2 + A2 / c4 + A2p5 / c5 + A3 / c6 + A3p5 / c7;
     Btot = B1 / c2 + B2 / c4 + B2p5 / c5 + B3 / c6 + B3p5 / c7;
 
     for (int k = 0; k < 3; k++) {
-        acc[k] = gm / r2 * (nv[k] * Atot + vv[k] * Btot);
+        acc[k] = gm / r2 * (nv[k] * Atot + vv[k] * Btot) + acc_spin[k];
     }
 
     // Divide up the acceleration assuming action = reaction.
@@ -1496,16 +1634,20 @@ static void compute_PN_twobody_Acc(struct ketju_system *R, double (*vel)[3],
 }
 
 static void compute_Post_Newtonian_Acc(struct ketju_system *R,
-                                       double (*vel_to_use)[3]) {
+                                       double (*vel_to_use)[3],
+                                       double (*spin_to_use)[3]) {
     if (!R->options->PN_flags) return;
 
     double(*acc_pn)[3] = R->internal_state->acc_vd;
     memset(acc_pn, 0, sizeof(double[R->num_particles][3]));
+    double(*spin_derivative)[3] = R->internal_state->spin_derivative;
+    memset(spin_derivative, 0, sizeof(double[R->num_pn_particles][3]));
 
     // Compute the PN accelerations for SMBHs
     for (int i = 0; i < R->num_pn_particles; i++) {
         for (int j = i + 1; j < R->num_pn_particles; j++) {
-            compute_PN_twobody_Acc(R, vel_to_use, acc_pn, i, j);
+            compute_PN_twobody_Acc(R, vel_to_use, spin_to_use, acc_pn,
+                                   spin_derivative, i, j);
         }
     }
 

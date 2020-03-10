@@ -53,6 +53,10 @@ static void allocate_internal_state(struct ketju_system *R, int Ntask) {
     R->internal_state->aux_vel = calloc(1, sizeof(double[R->num_particles][3]));
     R->internal_state->acc = calloc(1, sizeof(double[R->num_particles][3]));
     R->internal_state->acc_vd = calloc(1, sizeof(double[R->num_particles][3]));
+    R->internal_state->aux_spin =
+        calloc(1, sizeof(double[R->num_pn_particles][3]));
+    R->internal_state->spin_derivative =
+        calloc(1, sizeof(double[R->num_pn_particles][3]));
 }
 
 static void free_internal_state(struct ketju_system *R) {
@@ -129,6 +133,9 @@ void ketju_create_system(struct ketju_system *R, int num_pn_particles,
 
     memset(R->CoM_pos, 0, sizeof(double[3]));
     memset(R->CoM_vel, 0, sizeof(double[3]));
+
+    R->particle_extra_data = NULL;
+    R->particle_extra_data_elem_size = 0;
 }
 
 void ketju_init_gbs_comms(struct ketju_system *R) {

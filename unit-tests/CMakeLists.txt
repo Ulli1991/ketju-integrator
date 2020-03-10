@@ -9,6 +9,7 @@ add_subdirectory(${MAINFOLDER}/thirdparty/googletest
 set(UNIT_TEST_SRCS
     main.cpp
     mst_construction.cpp
+    integration.cpp
     )
 
 add_executable(ketju-integrator-unit-tests ${UNIT_TEST_SRCS})
@@ -27,13 +28,15 @@ target_link_libraries(ketju-integrator-unit-tests
 set(tests_max_num_mpi_tasks "20" CACHE STRING
     "Maximum number of tasks to use when running unit tests")
 
-# unit tests are run with a full build
+# unit tests are not run automatically, only through the run-unit-tests target
+add_custom_target(run-unit-tests)
 foreach(ntasks 1 2 ${tests_max_num_mpi_tasks})
-    add_custom_target(run-unit-tests-${ntasks} ALL
+    add_custom_target(run-unit-tests-${ntasks}
                       COMMAND ${MPIEXEC} -np ${ntasks} 
                       $<TARGET_FILE:ketju-integrator-unit-tests>
                       DEPENDS ketju-integrator-unit-tests
                       WORKING_DIRECTORY ${EXECUTABLE_OUTPUT_PATH}
                       COMMENT "Running unit tests with ${ntasks} task(s)..."
                       )
+    add_dependencies(run-unit-tests run-unit-tests-${ntasks})
 endforeach()

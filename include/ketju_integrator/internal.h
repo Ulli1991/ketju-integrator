@@ -124,6 +124,8 @@ struct ketju_system_internal_state {
     double (*aux_vel)[3]; 
     double (*acc)[3]; // velocity independent acceleration
     double (*acc_vd)[3]; // velocity dependent acceleration (for all particles at least for now)
+    double (*aux_spin)[3]; 
+    double (*spin_derivative)[3]; 
 };
 
 
@@ -161,7 +163,7 @@ static inline void get_v1_v2_fast(struct ketju_system *R, int i, int *v1,
 
 static inline void vector_cross(const double a[3], const double b[3],
                                 double res[3]) {
-    res[0] = a[1] * b[2] - b[2] * a[1];
+    res[0] = a[1] * b[2] - b[1] * a[2];
     res[1] = a[2] * b[0] - b[2] * a[0];
     res[2] = a[0] * b[1] - b[0] * a[1];
 }

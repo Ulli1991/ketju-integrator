@@ -466,11 +466,6 @@ static void allocate_new_octree_node(struct octree_node *Node, int oct,
     (*label)++;
 }
 
-static int sign(double x) {
-    if (x >= 0) return 1;
-    return -1;
-}
-
 static void octree(struct ketju_system *R, struct octree_node *Node,
                    int MaxLeafSize, int *label) {
 
@@ -481,7 +476,8 @@ static void octree(struct ketju_system *R, struct octree_node *Node,
     for (int i = 0; i < Node->Npart; i++) {
         int j = Node->object_list[i];
         for (int k = 0; k < 3; k++) {
-            triplet[k] = sign(R->physical_state->pos[j][k] - Node->center[k]);
+            triplet[k] =
+                R->physical_state->pos[j][k] - Node->center[k] >= 0 ? 1 : -1;
         }
         int oct = get_octant(triplet);
 

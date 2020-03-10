@@ -27,7 +27,6 @@ Optimization
 Features
 --------
 
-- Add spin terms
 % BH mergers
     + Basic merging conserving momentum, mass
     - GR effects on mass loss, resulting spin, kicks
