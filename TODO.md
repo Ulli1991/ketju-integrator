@@ -24,6 +24,8 @@ Optimization
 - Currently the timers do not capture enough things, for large task numbers some
   30% of the time is missed from the subcategories
 
+- Can communication be made better in gbs and force calculations?
+
 Features
 --------
 

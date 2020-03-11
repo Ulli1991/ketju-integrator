@@ -169,6 +169,8 @@ void ketju_create_system(struct ketju_system *R, int num_pn_particles,
                          int num_other_particles, MPI_Comm comm);
 void ketju_free_system(struct ketju_system *R);
 void ketju_into_CoM_frame(struct ketju_system *R);
+// Runs the integrator for a given time interval.
+// The time interval can be negative for backwards-in-time integration.
 void ketju_run_integrator(struct ketju_system *R, double time_interval);
 
 // debug helpers

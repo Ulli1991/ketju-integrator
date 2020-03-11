@@ -1,6 +1,7 @@
 // Main integration and force calculation functions
 
 #include <assert.h>
+#include <float.h>
 #include <limits.h>
 #include <math.h>
 #include <stdlib.h>
@@ -122,7 +123,6 @@ static void compute_U(struct ketju_system *R) {
                     r2 += dr * dr;
                 }
             }
-            //const double invr = 1./sqrt(r2);
             double soft = i < R->num_pn_particles || j < R->num_pn_particles
                               ? 0.
                               : ss_soft;
@@ -1194,6 +1194,95 @@ static int do_bh_mergers(struct ketju_system *R) {
     return num_merged;
 }
 
+
+// Estimates a safe initial timestep that is sufficiently small compared to the
+// smallest two-body timescale in the system.
+static double estimate_initial_timestep(struct ketju_system *R) {
+    struct ketju_system_internal_state *is = R->internal_state;
+    struct spanning_tree_coordinate_system *mst = is->mst;
+    struct ketju_system_physical_state *ps = R->physical_state;
+
+    int istart, jstart;
+    int CumNumEdge, ThisBlock;
+    loop_scheduling_N2(mst->num_vertices, is->task_info->main_group_size,
+                       is->task_info->main_group_rank, &istart, &jstart,
+                       &ThisBlock, &CumNumEdge);
+
+    const int Nd = R->options->max_tree_distance;
+    int d;
+    int path[Nd];
+    int sign[Nd];
+
+    const double ss_soft = R->options->star_star_softening;
+    double t2min = DBL_MAX;
+
+    int c = 0;
+    for (int i = istart; i < mst->num_vertices; i++) {
+
+        double mi = ps->mass[i];
+        int Li = mst->vertex[i].level;
+        if (i > istart) { jstart = i + 1; }
+        for (int j = jstart; j < mst->num_vertices; j++) {
+            if (c >= ThisBlock) { goto after_loops; }
+            if (R->options->no_star_star_gravity && i >= R->num_pn_particles &&
+                j >= R->num_pn_particles) {
+                continue;
+            }
+
+            double mj = ps->mass[j];
+            int Lj = mst->vertex[j].level;
+            double r2 = 0;
+            double v2 = 0;
+            bool proximity = false;
+
+            if (abs(Li - Lj) < Nd) {
+                proximity =
+                    ketju_check_relative_proximity(j, i, Nd, R, &d, path, sign);
+            }
+
+            if (proximity) {
+                for (int k = 0; k < 3; k++) {
+                    double dr = 0;
+                    double dv = 0;
+                    for (int l = 0; l < d; l++) {
+                        int index = path[l];
+                        dr += sign[l] * mst->edge_rel_pos[index][k];
+                        dv += sign[l] * mst->edge_rel_vel[index][k];
+                    }
+                    r2 += dr * dr;
+                    v2 += dv * dv;
+                }
+            } else {
+                for (int k = 0; k < 3; k++) {
+                    double dr = ps->pos[j][k] - ps->pos[i][k];
+                    r2 += dr * dr;
+                    double dv = ps->vel[j][k] - ps->vel[i][k];
+                    v2 += dv * dv;
+                }
+            }
+            double soft = i < R->num_pn_particles || j < R->num_pn_particles
+                              ? 0.
+                              : ss_soft;
+            const double invr = softened_inverse_r(sqrt(r2), soft);
+
+            // Estimate the square of the approximate two-body time scale from a
+            // combination of free propagation and keplerian timescales.
+            double t2 =
+                1. / (invr * (invr * v2 + R->constants->G * (mi + mj)));
+            t2min = fmin(t2min, t2);
+
+            c++;
+        }
+    }
+after_loops:
+
+    MPI_Allreduce(MPI_IN_PLACE, &t2min, 1, MPI_DOUBLE, MPI_MIN,
+                  is->task_info->main_comm);
+
+    const double safetyfac = 0.05;
+    return safetyfac * sqrt(t2min);
+}
+
 void ketju_run_integrator(struct ketju_system *R, double time_interval) {
     // TODO return status/error code
 
@@ -1220,7 +1309,8 @@ void ketju_run_integrator(struct ketju_system *R, double time_interval) {
 
     compute_total_energy(R);
 
-    double dt = time_interval/10; // TODO better guess for initial step
+    double dt = copysign(1, time_interval) *
+                fmin(estimate_initial_timestep(R), fabs(time_interval) / 10);
     double Hstep = dt * R->internal_state->U;
     const double t_start = R->physical_state->time;
     const double initial_B = R->internal_state->B;
