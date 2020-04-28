@@ -63,6 +63,8 @@ static void free_internal_state(struct ketju_system *R) {
     free(R->internal_state->aux_vel);
     free(R->internal_state->acc);
     free(R->internal_state->acc_vd);
+    free(R->internal_state->aux_spin);
+    free(R->internal_state->spin_derivative);
 
     struct spanning_tree_coordinate_system *mst = R->internal_state->mst;
     free(mst->local_edge);
