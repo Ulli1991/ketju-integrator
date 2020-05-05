@@ -40,7 +40,7 @@ TEST(Integration_versus_old_integrator, binary_system_full_pn_spin) {
     // The passing tolerance is still good enough to show that the integrator
     // works as expected.
     const double reltol =
-        40 * R.options->gbs_relative_tolerance * R.perf->succesful_steps;
+        40 * R.options->gbs_relative_tolerance * R.perf->successful_steps;
 
     ASSERT_EQ(R.num_pn_particles, 2);
     ASSERT_NEAR(R.physical_state->time, tend,
@@ -108,7 +108,7 @@ TEST(Integration_versus_old_integrator, binary_system_full_pn_spin_backwards_in_
     // The passing tolerance is still good enough to show that the integrator
     // works as expected.
     const double reltol =
-        40 * R.options->gbs_relative_tolerance * R.perf->succesful_steps;
+        40 * R.options->gbs_relative_tolerance * R.perf->successful_steps;
 
     ASSERT_EQ(R.num_pn_particles, 2);
     ASSERT_NEAR(R.physical_state->time, tend,
@@ -170,7 +170,7 @@ TEST(Integration_versus_old_integrator, binary_system_full_pn_no_spin) {
     ketju_run_integrator(&R, tend);
     
     const double reltol =
-        5 * R.options->gbs_relative_tolerance * R.perf->succesful_steps;
+        5 * R.options->gbs_relative_tolerance * R.perf->successful_steps;
 
     ASSERT_EQ(R.num_pn_particles, 2);
     ASSERT_NEAR(R.physical_state->time, tend,
@@ -231,7 +231,7 @@ TEST(Integration_versus_old_integrator, binary_system_no_pn) {
     ketju_run_integrator(&R, tend);
     
     const double reltol =
-        5 * R.options->gbs_relative_tolerance * R.perf->succesful_steps;
+        5 * R.options->gbs_relative_tolerance * R.perf->successful_steps;
 
     ASSERT_EQ(R.num_pn_particles, 2);
     ASSERT_NEAR(R.physical_state->time, tend,
@@ -304,7 +304,7 @@ TEST(Integration_versus_old_integrator,
     // errors here than in the natural unit test. Could this be just rounding
     // differences due to the unit system, or is something actually wrong?
     const double reltol =
-        50 * R.options->gbs_relative_tolerance * R.perf->succesful_steps;
+        50 * R.options->gbs_relative_tolerance * R.perf->successful_steps;
 
     ASSERT_EQ(R.num_pn_particles, 2);
     ASSERT_NEAR(R.physical_state->time, tend,
@@ -377,7 +377,7 @@ TEST(Integration_versus_old_integrator,
 
     ketju_run_integrator(&R, tend);
     const double reltol =
-        15 * R.options->gbs_relative_tolerance * R.perf->succesful_steps;
+        15 * R.options->gbs_relative_tolerance * R.perf->successful_steps;
 
     ASSERT_EQ(R.num_pn_particles, 2);
     ASSERT_NEAR(R.physical_state->time, tend,
@@ -461,7 +461,7 @@ TEST(Integration_versus_old_integrator, small_system_full_pn_spin) {
 
     ketju_run_integrator(&R, tend);
     const double reltol =
-        5 * R.options->gbs_relative_tolerance * R.perf->succesful_steps;
+        5 * R.options->gbs_relative_tolerance * R.perf->successful_steps;
 
     ASSERT_EQ(R.num_pn_particles, 2);
     ASSERT_EQ(R.num_particles, 7);

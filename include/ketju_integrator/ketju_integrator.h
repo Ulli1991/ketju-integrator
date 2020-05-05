@@ -114,7 +114,7 @@ struct ketju_performance_counters {
     // check what these actually mean
     double tprim1, tprim2, tprim3, tprim4, tprim5;
 
-    int succesful_steps;
+    int successful_steps;
     int failed_steps;
     double relative_energy_error;
 };

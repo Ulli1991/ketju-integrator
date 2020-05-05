@@ -791,9 +791,6 @@ static void compute_total_energy(struct ketju_system *R) {
     compute_T(R);
     compute_U(R);
     is->B = is->U - is->T;
-    // TODO is there some reason that the B variable and the B value in the old
-    // state are different like below?
-    // R->State[R->BIndex] = R->B;
 }
 
 static void mst_leapfrog(struct ketju_system *R, double Hstep,
@@ -943,7 +940,8 @@ static void store_gbs_data(struct gbs_storage *gs, const struct ketju_system *R,
            sizeof(double[R->num_pn_particles][3]));
 }
 
-static void comm_gbs_data(struct gbs_storage *gs, int *gbs_ks_for_this_group,
+static void comm_gbs_data(struct gbs_storage *gs,
+                          const int *gbs_ks_for_this_group,
                           const struct ketju_system *R) {
     // TODO: can this be made more efficient? Do we need to?
     tick(&R->perf->time_gbscomm);
@@ -997,8 +995,7 @@ static void extrapolate_single_variable(double *y, double yscal, const int N,
     *result = gbsS[0][N - 1];
     *error = fabs(gbsS[0][N - 1] - gbsS[0][N - 2]) / yscal;
 }
-// extrapolate a subset of variables on each
-// task, comm the results
+// Extrapolate a subset of variables on each task, comm the results.
 // Updates the fictitious timestep Hstep with the new estimate.
 static bool gbs_extrapolate(struct gbs_storage *gs, double *Hstep,
                             const struct ketju_system *R) {
@@ -1069,12 +1066,11 @@ static bool gbs_extrapolate(struct gbs_storage *gs, double *Hstep,
                        var_counts, start_inds, MPI_DOUBLE,
                        R->internal_state->task_info->main_comm);
 
+        // Avoid increasing the stepsize too aggressively
         if (Hnextfac > 5.0) { Hnextfac = 5.0; }
         *Hstep *= Hnextfac;
     } else {
-        // TODO: this looks weird, should it be Hnextfac < 0.7 instead?
-        // Or is it so that we want to reduce the stepsize more aggressively in
-        // case of failed steps?
+        // Ensure that the stepsize is decreased enough if the step failed.
         if (Hnextfac > 0.7) { Hnextfac = 0.7; }
         *Hstep *= Hnextfac;
     }
@@ -1085,7 +1081,7 @@ static bool gbs_extrapolate(struct gbs_storage *gs, double *Hstep,
 }
 
 static void update_system_from_gbs_result(struct ketju_system *R,
-                                                 struct gbs_storage *gs) {
+                                          struct gbs_storage *gs) {
     double *data = ((double(*)[gs->num_vars])gs->data)[gs->num_rows - 1];
     R->physical_state->time = data[0];
     R->internal_state->B = data[1];
@@ -1363,7 +1359,7 @@ void ketju_run_integrator(struct ketju_system *R, double time_interval) {
 
         if (converged) {
             update_system_from_gbs_result(R, &gbs_storage);
-            R->perf->succesful_steps += 1;
+            R->perf->successful_steps += 1;
             steps_since_reconstruction += 1;
 
             double remaining_time =
