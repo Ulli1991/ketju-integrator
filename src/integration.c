@@ -956,7 +956,7 @@ static void comm_gbs_data(struct gbs_storage *gs,
     for (int i = 0; i < R->internal_state->group_info->num_gbs_groups; ++i) {
         if (ti->gbs_data_comms[i] == MPI_COMM_NULL) continue;
 
-        for (int j = 0; gbs_ks[i][j] > 0; ++j) {
+        for (int j = 0; j < kmax && gbs_ks[i][j] > 0; ++j) {
             int data_row = gbs_ks[i][j] - 1;
             MPI_Ibcast(data[data_row], gs->num_vars, MPI_DOUBLE, 0,
                        ti->gbs_data_comms[i], &requests[request_index++]);
