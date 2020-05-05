@@ -150,7 +150,8 @@ void ketju_init_gbs_comms(struct ketju_system *R) {
             "second time\n");
     }
 
-    // For now just split into even chunks
+    // For now just split into even chunks, giving the extra tasks to the
+    // first groups since they get slightly more work in some cases.
     // For the 2*k step sequence we're using, we can get perfectly even
     // work distribution for kmax/2 groups (or kmax/2^n, n>=1, but the largest
     // number of groups is likely most efficient), so should aim for that.
@@ -166,7 +167,7 @@ void ketju_init_gbs_comms(struct ketju_system *R) {
 
     for (int i = 0; i < num_gbs_groups; ++i) {
         gi->gbs_group_sizes[i] =
-            tasks_per_group + (i >= num_gbs_groups - remaining_tasks ? 1 : 0);
+            tasks_per_group + (i < remaining_tasks ? 1 : 0);
     }
     int group_start_rank = 0, group_end_rank = gi->gbs_group_sizes[0] - 1;
     for (int i = 1; ti->main_group_rank > group_end_rank; ++i) {
@@ -183,9 +184,40 @@ void ketju_init_gbs_comms(struct ketju_system *R) {
     MPI_Group_size(gbs_group, &ti->gbs_group_size);
     MPI_Comm_create_group(ti->main_comm, gbs_group, ti->gbs_group_index,
                           &ti->gbs_comm);
+    MPI_Group_free(&gbs_group);
+
+    // Task ranges for each group for the next step
+    int group_ranges[num_gbs_groups][2];
+    for (int i = 0; i < num_gbs_groups; ++i) {
+        group_ranges[i][0] = i == 0 ? 0 : group_ranges[i - 1][1] + 1;
+        group_ranges[i][1] = group_ranges[i][0] + gi->gbs_group_sizes[i] - 1;
+    }
+    // Create the communicators for sharing the computed step results
+    ti->gbs_data_comms = malloc(sizeof(MPI_Comm[num_gbs_groups]));
+    for (int i = 0; i < num_gbs_groups; ++i) {
+        // Each group contains the first task of the gbs group as the root
+        // (sender of data) and the tasks in the other groups as receivers
+        int ranges[num_gbs_groups][3];
+        ranges[0][0] = group_ranges[i][0];
+        ranges[0][1] = group_ranges[i][0];
+        ranges[0][2] = 1;
+        int k = 1;
+        for (int j = 0; j < num_gbs_groups; ++j) {
+            if (i == j) continue;
+            ranges[k][0] = group_ranges[j][0];
+            ranges[k][1] = group_ranges[j][1];
+            ranges[k][2] = 1;
+            ++k;
+        }
+        MPI_Group data_group;
+        MPI_Group_range_incl(main_group, num_gbs_groups, ranges, &data_group);
+        MPI_Comm_create_group(ti->main_comm, data_group, i,
+                              &ti->gbs_data_comms[i]);
+
+        MPI_Group_free(&data_group);
+    }
 
     MPI_Group_free(&main_group);
-    MPI_Group_free(&gbs_group);
 
     ti->gbs_comms_initialized = true;
 }
@@ -198,6 +230,12 @@ static void free_gbs_comms(struct ketju_system *R) {
 
     MPI_Comm_free(&R->internal_state->task_info->gbs_comm);
     free(R->internal_state->group_info->gbs_group_sizes);
+    for (int i = 0; i < R->internal_state->group_info->num_gbs_groups; ++i) {
+        if (R->internal_state->task_info->gbs_data_comms[i] != MPI_COMM_NULL)
+            MPI_Comm_free(&R->internal_state->task_info->gbs_data_comms[i]);
+    }
+    free(R->internal_state->task_info->gbs_data_comms);
+
     R->internal_state->task_info->gbs_comms_initialized = false;
 }
 

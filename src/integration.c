@@ -823,25 +823,26 @@ static int argmin_int(int *arr, int size) {
     return ind;
 }
 
-// Get the values of k that are done by this gbs group.
+// Get the values of k that are done by the gbs groups.
 // The values are in descending order
-static void get_gbs_ks_for_this_group(struct ketju_system *R,
-                                      int *gbs_ks_for_this_group) {
+static void get_gbs_ks_for_groups(struct ketju_system *R,
+                                  int (*gbs_ks_for_groups)[]) {
     const int kmax = R->options->gbs_kmax;
-    memset(gbs_ks_for_this_group, 0, sizeof(int[kmax]));
-
     const int num_groups = R->internal_state->group_info->num_gbs_groups;
-    const int this_group_ind = R->internal_state->task_info->gbs_group_index;
+    memset(gbs_ks_for_groups, 0, sizeof(int[num_groups][kmax]));
+    int(*gbs_ks)[kmax] = (int(*)[kmax])gbs_ks_for_groups;
+
     int group_workloads[num_groups];
     memset(group_workloads, 0, sizeof group_workloads);
-    int k_ind = 0;
+    int k_ind[num_groups];
+    memset(k_ind, 0, sizeof k_ind);
     // TODO could take into account group sizes also, or even divide the groups
     // based on the most even division of gbs steps/task
     for (int k = kmax; k > 0; --k) {
         int cost = num_gbs_substeps(k);
         int group_ind = argmin_int(group_workloads, num_groups);
         group_workloads[group_ind] += cost;
-        if (group_ind == this_group_ind) { gbs_ks_for_this_group[k_ind++] = k; }
+        gbs_ks[group_ind][k_ind[group_ind]++] = k;
     }
 }
 
@@ -917,7 +918,7 @@ static void allocate_gbs_storage(struct gbs_storage *gs, int num_particles,
                     (num_particles - 1) * (3 /*edge_pos*/ + 3 /*edge_vel*/) +
                     num_pn_particles * (3 /*spin*/));
     gs->num_rows = kmax + 1; // row for extrapolation result also
-    gs->data = calloc(1, sizeof(double[gs->num_vars * gs->num_rows]));
+    gs->data = calloc(1, sizeof(double[gs->num_rows][gs->num_vars]));
 }
 
 static void free_gbs_storage(struct gbs_storage *gs) { free(gs->data); }
@@ -941,39 +942,29 @@ static void store_gbs_data(struct gbs_storage *gs, const struct ketju_system *R,
 }
 
 static void comm_gbs_data(struct gbs_storage *gs,
-                          const int *gbs_ks_for_this_group,
+                          int (*gbs_ks_for_groups)[],
                           const struct ketju_system *R) {
-    // TODO: can this be made more efficient? Do we need to?
     tick(&R->perf->time_gbscomm);
-    // first gather all the data on the root (rank 0) task of the main comm from
-    // the root tasks of the gbs groups
+
+    const struct task_info *ti = R->internal_state->task_info;
+    const int kmax = R->options->gbs_kmax;
     double(*data)[gs->num_vars] = (double(*)[gs->num_vars])gs->data;
-    int k_ind = 0;
-    struct task_info *ti = R->internal_state->task_info;
-    for (int i = gs->num_rows - 2; i >= 0; --i) {
-        if (ti->main_group_rank == 0) {
-            // Receive if we don't already have the data
-            // TODO this will give some extra comms which could be avoided by
-            // figuring out in which gbs group the main group root is
-            if (ti->gbs_group_rank == 0 &&
-                gbs_ks_for_this_group[k_ind] == i + 1) {
-                k_ind += 1;
-            } else {
-                MPI_Status status;
-                // figuring out where the data will come seems complicated, so
-                // take it from any source with the right tag
-                MPI_Recv(data[i], gs->num_vars, MPI_DOUBLE, MPI_ANY_SOURCE, i,
-                         ti->main_comm, &status);
-            }
-        } else if (ti->gbs_group_rank == 0 &&
-                   gbs_ks_for_this_group[k_ind] == i + 1) {
-            k_ind += 1;
-            MPI_Send(data[i], gs->num_vars, MPI_DOUBLE, 0, i, ti->main_comm);
+    int(*gbs_ks)[kmax] = (int(*)[kmax])gbs_ks_for_groups;
+
+    int request_index = 0;
+    MPI_Request requests[kmax];
+    for (int i = 0; i < R->internal_state->group_info->num_gbs_groups; ++i) {
+        if (ti->gbs_data_comms[i] == MPI_COMM_NULL) continue;
+
+        for (int j = 0; gbs_ks[i][j] > 0; ++j) {
+            int data_row = gbs_ks[i][j] - 1;
+            MPI_Ibcast(data[data_row], gs->num_vars, MPI_DOUBLE, 0,
+                       ti->gbs_data_comms[i], &requests[request_index++]);
         }
     }
-    // Broadcast the collected data to all tasks
-    MPI_Bcast(data, gs->num_vars * (gs->num_rows - 1), MPI_DOUBLE, 0,
-              ti->main_comm);
+    if (request_index > 0) {
+        MPI_Waitall(request_index, requests, MPI_STATUSES_IGNORE);
+    }
 
     tock(&R->perf->time_gbscomm);
 }
@@ -1312,8 +1303,10 @@ void ketju_run_integrator(struct ketju_system *R, double time_interval) {
     const double initial_B = R->internal_state->B;
 
     const int kmax = R->options->gbs_kmax;
-    int gbs_ks_for_this_group[kmax];
-    get_gbs_ks_for_this_group(R, gbs_ks_for_this_group);
+    int gbs_ks_for_groups[R->internal_state->group_info->num_gbs_groups][kmax];
+    get_gbs_ks_for_groups(R, gbs_ks_for_groups);
+    int *gbs_ks_for_this_group =
+        gbs_ks_for_groups[R->internal_state->task_info->gbs_group_index];
 
     struct state_backup old_state;
     allocate_state_backup(&old_state, R->num_particles, R->num_pn_particles);
@@ -1354,7 +1347,7 @@ void ketju_run_integrator(struct ketju_system *R, double time_interval) {
             mst_leapfrog(R, Hstep, num_gbs_substeps(k));
             store_gbs_data(&gbs_storage, R, k);
         }
-        comm_gbs_data(&gbs_storage, gbs_ks_for_this_group, R);
+        comm_gbs_data(&gbs_storage, gbs_ks_for_groups, R);
         bool converged = gbs_extrapolate(&gbs_storage, &Hstep, R);
 
         if (converged) {

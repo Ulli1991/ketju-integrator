@@ -103,6 +103,8 @@ struct task_info {
     int gbs_group_rank;
     int gbs_group_index; //< which of the gbs groups this task belongs in
     MPI_Comm gbs_comm;
+    MPI_Comm *gbs_data_comms;
+
     bool gbs_comms_initialized;
     
     int global_rank; // <rank in MPI_COMM_WORLD

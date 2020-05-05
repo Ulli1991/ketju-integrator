@@ -1051,9 +1051,7 @@ void ketju_build_mst(struct ketju_system *R) {
         PrimMST(R);
     } else if (R->options->mst_algorithm == KETJU_MST_DIVIDE_AND_CONQUER_PRIM) {
         DivideAndConquerPrim(R);
-
     } else {
-
         char msg[100];
         sprintf(msg, "Invalid mst_algorithm value %d!",
                 R->options->mst_algorithm);
