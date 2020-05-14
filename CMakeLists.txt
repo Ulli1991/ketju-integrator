@@ -103,7 +103,8 @@ target_link_libraries(ketju-integrator PUBLIC ${MPI_C_LINK_FLAGS})
 add_executable(nbody "nbody/main.c")
 target_link_libraries(nbody ketju-integrator)
 
-
+# Python shim
+add_subdirectory("python_bindings")
 
 ## Generate install cmake files
 ##

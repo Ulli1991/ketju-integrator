@@ -10,21 +10,16 @@ Correctness
   for small particle/task counts
     + force using standard prim in the small particle count case
     - Standard prim might be good enough for ~500-1000 particles
-    - should be fixed properly, apparently can break down even with larger
-      systems.
+    - should be fixed properly (if still broken),
+      apparently can break down even with larger systems.
 
 Optimization
 ------------
 - The divide and conquer code has a lot of dynamic allocation, which might be
   avoidable. May not be significant for performance, though.
 
-- Investigate how the code vectorizes, particularly force calculation and gbs
-  stuff. Best effect likely with -Ofast, since vectorized sqrt usually not enabled without it.
-
 - Currently the timers do not capture enough things, for large task numbers some
   30% of the time is missed from the subcategories
-
-- Can communication be made better in gbs and force calculations?
 
 Features
 --------
@@ -35,10 +30,11 @@ Features
 
 Style
 -----
-- Clean up the internal implementation naming etc. Some parts of the code need
+% Clean up the internal implementation naming etc. Some parts of the code need
   more drastic reorganization as well
+  - Mainly divide and conquer code left to do.
 
-- Make all internal functions static/inline to avoid polluting the namespace,
++ Make all internal functions static/inline to avoid polluting the namespace,
   make sure all other symbols have the ketju prefix
 
 Other
@@ -46,8 +42,14 @@ Other
 
 - Improve the standalone integrator
 
-- Python bindings
++ Python bindings
+    + Mostly work
+    - Could be easier to use, but maybe simple is good enough
+    - Some things are probably not portable enough
+    - expose the performance counters
 
-- Automated tests
++ Automated tests
+    + Basics setup and some tests done
+    - More comprehensive testing
 
 - Automated benchmarks
