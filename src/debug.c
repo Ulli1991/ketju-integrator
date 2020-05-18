@@ -66,6 +66,7 @@ void ketju_debug_dump_integrator_state(const struct ketju_system *R,
     // other stuff
     fwrite(R->perf, sizeof(*R->perf), 1, f);
     fwrite(R->options, sizeof(*R->options), 1, f);
+    fwrite(R->constants, sizeof(*R->constants), 1, f);
     fwrite(R->CoM_pos, sizeof(R->CoM_pos), 1, f);
     fwrite(R->CoM_vel, sizeof(R->CoM_vel), 1, f);
 
@@ -158,6 +159,8 @@ bool ketju_debug_read_integrator_state(struct ketju_system *R,
     count = fread(R->perf, sizeof(*R->perf), 1, f);
     success = success && count == 1;
     count = fread(R->options, sizeof(*R->options), 1, f);
+    success = success && count == 1;
+    count = fread(R->constants, sizeof(*R->constants), 1, f);
     success = success && count == 1;
     count = fread(R->CoM_pos, sizeof(R->CoM_pos), 1, f);
     success = success && count == 1;

@@ -3,6 +3,7 @@ Simple bindings that allow running the integrator in parallel from a standard
 python instance through the use of subprocesses.
 """
 import subprocess
+import io
 import os
 import sys
 import enum
@@ -11,6 +12,8 @@ from ctypes.util import find_library
 import pickle
 
 import numpy as np
+
+__all__ = ['State', 'PNFlags', 'run_integrator', 'load_state_dump']
 
 # Struct definitions
 class CSystemPhysicalState(ctypes.Structure):
@@ -31,6 +34,7 @@ class CIntegratorOptions(ctypes.Structure):
         ('PN_flags', ctypes.c_uint),
         ('steps_between_mst_reconstruction', ctypes.c_int),
         ('max_tree_distance', ctypes.c_int),
+        ('max_step_count', ctypes.c_int),
         ('mst_algorithm', ctypes.c_int),
         ('star_star_softening', ctypes.c_double),
         ('no_star_star_gravity', ctypes.c_bool),
@@ -42,13 +46,34 @@ class CNaturalConstants(ctypes.Structure):
         ('c', ctypes.c_double),
     ]
 
+class CPerformanceCounters(ctypes.Structure):
+    _fields_ = [
+        ("time_force", ctypes.c_double),
+        ("time_force_comm", ctypes.c_double),
+        ("time_coord", ctypes.c_double),
+        ("time_mst", ctypes.c_double),
+        ("time_gbscomm", ctypes.c_double),
+        ("time_gbsextr", ctypes.c_double),
+        ("time_total", ctypes.c_double),
+        
+        ("time_tprim1", ctypes.c_double),
+        ("time_tprim2", ctypes.c_double),
+        ("time_tprim3", ctypes.c_double),
+        ("time_tprim4", ctypes.c_double),
+        ("time_tprim5", ctypes.c_double),
+
+        ("successful_steps", ctypes.c_int),
+        ("failed_steps", ctypes.c_int),
+        ("relative_energy_error", ctypes.c_double),
+    ]
+
 class CSystem(ctypes.Structure):
     _fields_ = [
         ('num_particles', ctypes.c_int),
         ('num_pn_particles', ctypes.c_int),
         ('physical_state', ctypes.POINTER(CSystemPhysicalState)),
         ('internal_state', ctypes.c_void_p),
-        ('perf', ctypes.c_void_p), # TODO
+        ('perf', ctypes.POINTER(CPerformanceCounters)),
         ('options', ctypes.POINTER(CIntegratorOptions)),
         ('constants', ctypes.POINTER(CNaturalConstants)),
 
@@ -57,6 +82,9 @@ class CSystem(ctypes.Structure):
         ('particle_extra_data', ctypes.c_void_p),
         ('particle_extra_data_elem_size', ctypes.c_size_t),
     ]
+
+def struct_to_dict(struct):
+    return {field : getattr(struct, field) for field, _ in struct._fields_}
 
 class PNFlags(enum.IntFlag):
     PN_NONE = 0
@@ -132,9 +160,12 @@ class State:
         else:
             spin = None
         ids_ctype = np.ctypeslib.as_ctypes_type(np.dtype(int))
-        ids = np.copy(np.ctypeslib.as_array(
-                        ctypes.cast(system.particle_extra_data,ctypes.POINTER(ids_ctype)),
-                        shape=(N,),))
+        if system.particle_extra_data is not None:
+            ids = np.copy(np.ctypeslib.as_array(
+                            ctypes.cast(system.particle_extra_data,ctypes.POINTER(ids_ctype)),
+                            shape=(N,),))
+        else:
+            ids = None
         return cls(time, mass, pos, vel, spin, ids)
 
     def to_c_system(self, system):
@@ -157,57 +188,74 @@ class State:
 
 _this_file = os.path.realpath(__file__)
 
+# Running this file as main results in the State objects being pickled as
+# __main__.State, and unpickling fails unless the State class is imported to
+# global scope. Using this instead allows correct behaviour without polluting
+# global namespace.
+class _SubprocessUnpickler(pickle.Unpickler):
+    def find_class(self, module, name):
+        if name == 'State':
+            return State
+        return super().find_class(module, name)
+
+def _unpickle_subprocess_output(output):
+    return _SubprocessUnpickler(io.BytesIO(output)).load()
+        
+
 def run_integrator(instate, ts, nproc=1, c=1., G=1., **integrator_options):
     """
     Run the integrator starting from the State in instate storing states at the
     times given in ts using nproc tasks.
     Options for the integration can be given as keyword arguments matching the
     names of the options struct members.
-    Returns a list of State objects at the requested times.
+    Returns a dict containing a list of State objects at the requested times and
+    the performance counters from the integrator.
     """
-# Run this file using multiple tasks with mpirun. The below run_main() function gets called
-#TODO mpirun might not be the correct one to call on all systems, needs to be specifiable
-    subp = subprocess.Popen(['mpirun', '-np', str(nproc), 'python3', _this_file],
-                            stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                            )
     data = dict(ts=ts, instate=instate, integrator_options=integrator_options, c=c, G=G)
-    
+# Run this file using multiple tasks with mpirun. The below run_main() function gets called
+#TODO mpirun might not be the correct one to call on all systems, needs to be specifiable.
 # Pass the input data through stdin, get the output data through stdout as pickled objects
-    ret = subp.communicate(pickle.dumps(data, protocol=pickle.HIGHEST_PROTOCOL))
-    return pickle.loads(ret[0])
+    ret = subprocess.check_output(['mpirun', '-np', str(nproc), 'python3',
+                                   _this_file, "integrate"],
+                    input=pickle.dumps(data, protocol=pickle.HIGHEST_PROTOCOL))
+    return _unpickle_subprocess_output(ret)
 
+def load_state_dump(fname):
+    return _unpickle_subprocess_output(
+            subprocess.check_output(['python3', _this_file,
+                                     'load_dump', fname]))
 
-def run_main():
 # Executed in the subtasks
+
+def _load_shim():
 # Load the shim library
 #TODO: this hardcoded path isn't very robust
     shim_file = os.path.join(os.path.dirname(_this_file), 
                              "../../lib/libketju_integrator_python_shim.so")
     shim = ctypes.cdll.LoadLibrary(shim_file)
-# Need to load the mpi library using global mode to avoid missing symbol errors
-# TODO: is this robust, should we use something like mpi4py that probably handles this better?
-    mpilib = ctypes.CDLL(find_library('mpi'), mode=ctypes.RTLD_GLOBAL)
-
     shim.init_system.argtypes = [ctypes.POINTER(CSystem), ctypes.c_int, ctypes.c_int]
     shim.comm_initial_data.argtypes = [ctypes.POINTER(CSystem)]
     shim.comm_initial_data.restype = ctypes.c_int
     shim.init_mpi.restype = ctypes.c_int
-    shim.finalize_mpi_and_system.argtypes = [ctypes.POINTER(CSystem)]
+    shim.free_system.argtypes = [ctypes.POINTER(CSystem)]
     shim.run_integrator.argtypes = [ctypes.POINTER(CSystem), ctypes.c_double]
+    shim.load_state_dump.argtypes = [ctypes.POINTER(CSystem), ctypes.c_char_p]
+    return shim
+
+def _integrate():
 # Since I didn't want to require an additional dependency like mpi4py for the
 # minor amount of comms needed for setup, they are instead handled by the shim
 # library and some values here are actually meaningful only on the root task
     num_ts = 0
     system = CSystem()
     n_pn_part = n_other_part = -1
-    this_task = shim.init_mpi()
     if this_task == 0:
 # Read the input data
         indata = pickle.loads(sys.stdin.buffer.read())
         instate = indata['instate']
         ts = indata['ts']
         num_ts = len(ts)
-        n_pn_part = len(instate.spin)
+        n_pn_part = len(instate.spin) if instate.spin is not None else 0
         n_other_part = len(instate.pos) - n_pn_part
 # init the system (needs to be done at the same time on all tasks),
 # the particle counts are communicated in the shim
@@ -240,12 +288,39 @@ def run_main():
 
 # Dump the results to stdout
     if this_task == 0:
-        sys.stdout.buffer.write(pickle.dumps(outstates, protocol=pickle.HIGHEST_PROTOCOL))
+        perf = struct_to_dict(system.perf[0])
+        retval = dict(states=outstates, perf=perf)
+        sys.stdout.buffer.write(pickle.dumps(retval, protocol=pickle.HIGHEST_PROTOCOL))
         sys.stdout.flush()
 
-    shim.finalize_mpi_and_system(system)
+    shim.free_system(system)
+
+def _load_dump(fname):
+    system = CSystem()
+    fnb = fname.encode('utf-8')
+    shim.load_state_dump(system, fnb)
+    state = State.from_c_system(system)
+    options = struct_to_dict(system.options[0])
+    constants = struct_to_dict(system.constants[0])
+    retval = dict(state=state, options=options, constants=constants)
+    shim.free_system(system)
+    if this_task == 0:
+        sys.stdout.buffer.write(pickle.dumps(retval, protocol=pickle.HIGHEST_PROTOCOL))
+
+
+def _run_main():
+    if sys.argv[1] == 'integrate':
+        _integrate()
+    elif sys.argv[1] == 'load_dump':
+        _load_dump(sys.argv[2])
 
 if __name__ == '__main__':
-    run_main()
+    shim = _load_shim()
+# Need to load the mpi library using global mode to avoid missing symbol errors
+# TODO: is this robust, should we use something like mpi4py that probably handles this better?
+    _mpilib = ctypes.CDLL(find_library('mpi'), mode=ctypes.RTLD_GLOBAL)
+    this_task = shim.init_mpi()
+    _run_main()
+    shim.finalize_mpi()
 
 

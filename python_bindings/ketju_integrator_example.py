@@ -18,7 +18,14 @@ init_state = State(0., np.array([1., 1.]),
 ts = np.linspace(0,1e5, 1000)
 
 # run the integrator
-ret_states = run_integrator(init_state, ts, nproc=4, PN_flags=PNFlags.PN_ALL)
+ret = run_integrator(init_state, ts, nproc=2, PN_flags=PNFlags.PN_ALL)
+
+print("Perf counters:")
+for k, v in ret['perf'].items():
+    print(k, v)
+
+ret_states = ret['states']
+
 
 # Plot orbits
 pos1 = np.array([st.pos[0] for st in ret_states])

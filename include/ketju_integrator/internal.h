@@ -152,8 +152,8 @@ static inline void tock(double *timer) {
 // TODO most uses now could be replaced with error codes allowing potentially
 // recovering from errors during integration / saving the state so far.
 static inline void terminate(const char *msg) {
-    printf("%s\n", msg);
-    fflush(stdout);
+    fprintf(stderr, "%s\n", msg);
+    fflush(stderr);
     MPI_Abort(MPI_COMM_WORLD, 1);
 }
 

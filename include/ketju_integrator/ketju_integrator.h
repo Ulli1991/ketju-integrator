@@ -58,6 +58,10 @@ struct ketju_integration_options {
     int max_tree_distance;
     //< Maximum separation in the tree structure before using CoM coordinate
     //distances
+    int max_step_count;
+    //< Maximum number of attempted (successful or not) steps before abandoning
+    //  the integration and dumping state.
+    //  Set to 0 or a negative value to disable.
 
     enum ketju_mst_algorithm mst_algorithm;
 
@@ -80,6 +84,7 @@ static const struct ketju_integration_options
         .PN_flags = KETJU_PN_NONE,
         .steps_between_mst_reconstruction = 10,
         .max_tree_distance = 2,
+        .max_step_count = -1,
         .mst_algorithm = KETJU_MST_PRIM,
         .star_star_softening = 0.,
         .no_star_star_gravity = false,
@@ -117,6 +122,8 @@ struct ketju_performance_counters {
     int successful_steps;
     int failed_steps;
     double relative_energy_error;
+    //< Relative change in the energy of the system.
+    //  Gives information on accuracy only when PN terms are disabled
 };
 
 struct ketju_system {

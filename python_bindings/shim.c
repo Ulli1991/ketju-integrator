@@ -49,7 +49,17 @@ void run_integrator(struct ketju_system *R, double tmax) {
     ketju_run_integrator(R, tmax);
 }
 
-void finalize_mpi_and_system(struct ketju_system *R) {
+void load_state_dump(struct ketju_system *R, const char *fname) {
+    ketju_debug_read_integrator_state(R, fname, MPI_COMM_WORLD);
+}
+
+void free_system(struct ketju_system *R) {
     ketju_free_system(R);
+}
+
+void finalize_mpi() {
     MPI_Finalize();
 }
+
+
+

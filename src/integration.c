@@ -142,7 +142,13 @@ static void compute_U(struct ketju_system *R) {
     }
     tock(&R->perf->time_force_comm);
 
-    if (!isfinite(is->U)) { terminate("U is not finite!"); }
+    if (!isfinite(is->U)) {
+        if (R->internal_state->task_info->main_group_rank == 0) {
+            ketju_debug_dump_integrator_state(
+                R, "ketju_integrator_infinite_U_state_dump.bin");
+        }
+        terminate("U is not finite! State dumped to file.");
+    }
 
     is->U *= R->constants->G;
 }
@@ -1387,6 +1393,16 @@ void ketju_run_integrator(struct ketju_system *R, double time_interval) {
             // stepsize is updated by the extrapolation function
 
             R->perf->failed_steps += 1;
+        }
+
+        if (R->options->max_step_count > 0 &&
+            R->perf->failed_steps + R->perf->successful_steps >
+                R->options->max_step_count) {
+            if (R->internal_state->task_info->main_group_rank == 0) {
+                ketju_debug_dump_integrator_state(
+                    R, "ketju_integrator_max_steps_state_dump.bin");
+            }
+            terminate("Exceeded options->max_step_count steps! State dumped.");
         }
 
     } while (!finished);
