@@ -304,7 +304,7 @@ TEST(Integration_versus_old_integrator,
     // errors here than in the natural unit test. Could this be just rounding
     // differences due to the unit system, or is something actually wrong?
     const double reltol =
-        50 * R.options->gbs_relative_tolerance * R.perf->successful_steps;
+        60 * R.options->gbs_relative_tolerance * R.perf->successful_steps;
 
     ASSERT_EQ(R.num_pn_particles, 2);
     ASSERT_NEAR(R.physical_state->time, tend,

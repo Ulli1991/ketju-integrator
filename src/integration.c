@@ -920,7 +920,7 @@ struct gbs_storage {
 
 static void allocate_gbs_storage(struct gbs_storage *gs, int num_particles,
                                  int num_pn_particles, int kmax) {
-    gs->num_vars = (1 /*time*/ + 1 /*B*/ +
+    gs->num_vars = (1 /*time*/ +
                     (num_particles - 1) * (3 /*edge_pos*/ + 3 /*edge_vel*/) +
                     num_pn_particles * (3 /*spin*/));
     gs->num_rows = kmax + 1; // row for extrapolation result also
@@ -935,8 +935,7 @@ static void store_gbs_data(struct gbs_storage *gs, const struct ketju_system *R,
     double(*data)[gs->num_vars] = (double(*)[gs->num_vars])gs->data;
     const int k_ind = k - 1;
     data[k_ind][0] = R->physical_state->time;
-    data[k_ind][1] = R->internal_state->B;
-    int offset = 2;
+    int offset = 1;
     const struct spanning_tree_coordinate_system *mst = R->internal_state->mst;
     const size_t edge_vec_size = sizeof(double[mst->num_vertices-1][3]);
     memcpy(&data[k_ind][offset], mst->edge_rel_pos, edge_vec_size);
@@ -1081,8 +1080,7 @@ static void update_system_from_gbs_result(struct ketju_system *R,
                                           struct gbs_storage *gs) {
     double *data = ((double(*)[gs->num_vars])gs->data)[gs->num_rows - 1];
     R->physical_state->time = data[0];
-    R->internal_state->B = data[1];
-    int offset = 2;
+    int offset = 1;
     struct spanning_tree_coordinate_system *mst = R->internal_state->mst;
     const size_t edge_vec_size = sizeof(double[mst->num_vertices-1][3]);
     memcpy(mst->edge_rel_pos, &data[offset], edge_vec_size);
@@ -1358,6 +1356,7 @@ void ketju_run_integrator(struct ketju_system *R, double time_interval) {
 
         if (converged) {
             update_system_from_gbs_result(R, &gbs_storage);
+            compute_total_energy(R);
             R->perf->successful_steps += 1;
             steps_since_reconstruction += 1;
 
@@ -1369,7 +1368,6 @@ void ketju_run_integrator(struct ketju_system *R, double time_interval) {
                     R->options->output_time_absolute_tolerance) {
                 finished = true;
             } else {
-                compute_total_energy(R);
                 // Check that we're not overstepping and alter timestep if
                 // required
                 // Should work also for negative time intervals
