@@ -94,7 +94,7 @@ bool ketju_debug_read_integrator_state(struct ketju_system *R,
     count = fread(&R->num_pn_particles, sizeof(R->num_pn_particles), 1, f);
     success = success && count == 1;
 
-    if (comm == NULL) {
+    if (comm == MPI_COMM_NULL) {
         comm = MPI_COMM_SELF;    
     }
 

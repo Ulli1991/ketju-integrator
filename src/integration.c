@@ -946,31 +946,57 @@ static void store_gbs_data(struct gbs_storage *gs, const struct ketju_system *R,
            sizeof(double[R->num_pn_particles][3]));
 }
 
-static void comm_gbs_data(struct gbs_storage *gs,
-                          int (*gbs_ks_for_groups)[],
-                          const struct ketju_system *R) {
+// Make the non-blocking receiving calls for the rows of data that need to be
+// received. Called for all tasks
+static void post_gbs_receives(MPI_Request *requests, int *request_index,
+                              struct gbs_storage *gs,
+                              int (*gbs_ks_for_groups)[],
+                              const struct ketju_system *R) {
     tick(&R->perf->time_gbscomm);
 
     const struct task_info *ti = R->internal_state->task_info;
     const int kmax = R->options->gbs_kmax;
     double(*data)[gs->num_vars] = (double(*)[gs->num_vars])gs->data;
     int(*gbs_ks)[kmax] = (int(*)[kmax])gbs_ks_for_groups;
-
-    int request_index = 0;
-    MPI_Request requests[kmax];
     for (int i = 0; i < R->internal_state->group_info->num_gbs_groups; ++i) {
-        if (ti->gbs_data_comms[i] == MPI_COMM_NULL) continue;
+        // This task will be computing the data, so doesn't receive
+        if (i == ti->gbs_group_index) continue;
 
         for (int j = 0; j < kmax && gbs_ks[i][j] > 0; ++j) {
             int data_row = gbs_ks[i][j] - 1;
             MPI_Ibcast(data[data_row], gs->num_vars, MPI_DOUBLE, 0,
-                       ti->gbs_data_comms[i], &requests[request_index++]);
+                       ti->gbs_data_comms[i], &requests[(*request_index)++]);
         }
     }
+    tock(&R->perf->time_gbscomm);
+}
+
+// Make the non-blocking send call for a row of data corresponding to the given
+// gbs k. Only does anything on the root task of the gbs group,
+// but safe to call for all tasks in the gbs group handling the gbs k substeps.
+static void post_gbs_send(MPI_Request *requests, int *request_index,
+                          struct gbs_storage *gs, const struct ketju_system *R,
+                          int k) {
+
+    const struct task_info *ti = R->internal_state->task_info;
+    double(*data)[gs->num_vars] = (double(*)[gs->num_vars])gs->data;
+    const int i = ti->gbs_group_index;
+    if (ti->gbs_data_comms[i] == MPI_COMM_NULL) return;
+
+    tick(&R->perf->time_gbscomm);
+    int data_row = k - 1;
+    MPI_Ibcast(data[data_row], gs->num_vars, MPI_DOUBLE, 0,
+               ti->gbs_data_comms[i], &requests[(*request_index)++]);
+    tock(&R->perf->time_gbscomm);
+}
+
+// Wait for the communications to finish
+static void finish_gbs_comm(MPI_Request *requests, int request_index,
+                            const struct ketju_system *R) {
+    tick(&R->perf->time_gbscomm);
     if (request_index > 0) {
         MPI_Waitall(request_index, requests, MPI_STATUSES_IGNORE);
     }
-
     tock(&R->perf->time_gbscomm);
 }
 
@@ -1341,7 +1367,11 @@ void ketju_run_integrator(struct ketju_system *R, double time_interval) {
                 gbs_storage.num_vars -= num_merged * 9; // pos, vel, spin
             }
         }
-
+        // Run the gbs substeps, communicating results in the background.
+        int request_index = 0;
+        MPI_Request requests[kmax];
+        post_gbs_receives(requests, &request_index, &gbs_storage,
+                          gbs_ks_for_groups, R);
         for (int i = 0; i < kmax && gbs_ks_for_this_group[i]; ++i) {
             if (i) {
                 // not needed on the first round
@@ -1350,8 +1380,10 @@ void ketju_run_integrator(struct ketju_system *R, double time_interval) {
             int k = gbs_ks_for_this_group[i];
             mst_leapfrog(R, Hstep, num_gbs_substeps(k));
             store_gbs_data(&gbs_storage, R, k);
+            post_gbs_send(requests, &request_index, &gbs_storage, R, k);
         }
-        comm_gbs_data(&gbs_storage, gbs_ks_for_groups, R);
+        finish_gbs_comm(requests, request_index, R);
+
         bool converged = gbs_extrapolate(&gbs_storage, &Hstep, R);
 
         if (converged) {
