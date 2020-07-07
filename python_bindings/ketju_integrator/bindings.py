@@ -215,6 +215,8 @@ def run_integrator(instate, ts, nproc=1, c=1., G=1., **integrator_options):
 # Run this file using multiple tasks with mpirun. The below run_main() function gets called
 #TODO mpirun might not be the correct one to call on all systems, needs to be specifiable.
 # Pass the input data through stdin, get the output data through stdout as pickled objects
+#XXX: killing/interrupting the parent task can leave the workers behind,
+# even though mpirun should handle killing them in that case. How to fix that?
     ret = subprocess.check_output(['mpirun', '-np', str(nproc), 'python3',
                                    _this_file, "integrate"],
                     input=pickle.dumps(data, protocol=pickle.HIGHEST_PROTOCOL))

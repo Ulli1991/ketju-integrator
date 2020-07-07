@@ -8,10 +8,15 @@ Correctness
 
 % Divide and conquer prim broken at least for small systems (2 particles) and
   for small particle/task counts
+    ? Maybe fixed now?
     + force using standard prim in the small particle count case
     - Standard prim might be good enough for ~500-1000 particles
-    - should be fixed properly (if still broken),
+    ? should be fixed properly (if still broken),
       apparently can break down even with larger systems.
+
+- Softening with the gadget kernel appears to be numerically unstable when
+  combined with the high-order integrator used here. 
+  Probably best to remove the option completely.
 
 Optimization
 ------------

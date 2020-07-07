@@ -724,6 +724,8 @@ static void SolveMetaMST(struct ketju_system *R, int Nleafs, int *Npart,
     free(ind1s);
     free(ind2s);
 
+    // Filter out edges that clearly aren't part of the final tree, these get 
+    // the corresponding entry in the flag table set
     istart = 0;
     int istop = Nedge;
 
@@ -732,7 +734,7 @@ static void SolveMetaMST(struct ketju_system *R, int Nleafs, int *Npart,
     istop = (ti->main_group_rank + 1) * block;
     if (ti->main_group_rank == ti->main_group_size - 1) istop = Nedge;
 
-    int *flag = calloc(Nedge, sizeof(int));
+    bool *flag = calloc(Nedge, sizeof(bool));
 
     int Noff = 0;
     double w[3];
@@ -760,22 +762,22 @@ static void SolveMetaMST(struct ketju_system *R, int Nleafs, int *Npart,
             if (w[1] < 0 || w[2] < 0) continue;
             int elong = get_longest(w, ind);
 
-            flag[elong] = 1;
+            flag[elong] = true;
             W[elong].weight *= -1;
         }
     }
 
-    MPI_Allreduce(MPI_IN_PLACE, flag, Nedge, MPI_INT, MPI_SUM, ti->main_comm);
+    MPI_Allreduce(MPI_IN_PLACE, flag, Nedge, MPI_C_BOOL, MPI_LOR, ti->main_comm);
 
+    // How many are filtered
     for (int e1 = 0; e1 < Nedge; e1++) {
-        if (flag[e1] == 0) Noff++;
+        if (flag[e1]) Noff++;
     }
 
+    // Collect the remaining edges
     struct weight_index_2 *Wfilter =
         calloc(Nedge - Noff, sizeof(struct weight_index_2));
     
-    //FIXME for small systems this gives out of bounds writes.
-    // Not critical since this is not used for small systems at the moment.
     counter = 0;
     for (int e1 = 0; e1 < Nedge; e1++) {
         if (flag[e1] == 0) {
