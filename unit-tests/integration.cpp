@@ -520,3 +520,109 @@ TEST(Integration_versus_old_integrator, small_system_full_pn_spin) {
     }
 }
 
+// Some simple tests where the BHs merge
+TEST(Integration_with_mergers, head_on_merger) {
+
+    struct ketju_system R;
+    ketju_create_system(&R, 2, 0, MPI_COMM_WORLD);
+
+    R.constants->c = 1;
+    R.constants->G = 1;
+    R.options->PN_flags = KETJU_PN_ALL;
+
+    R.physical_state->mass[0] = 1;
+    R.physical_state->pos[0][0] = 40;
+
+    R.physical_state->mass[1] = 1;
+    R.physical_state->pos[1][0] = -40;
+
+    R.options->gbs_relative_tolerance = 1e-12;
+    R.options->output_time_relative_tolerance = 1e-12;
+
+    const double tend = 1e6;
+
+    ketju_run_integrator(&R, tend);
+    const double reltol =
+        40 * R.options->gbs_relative_tolerance * R.perf->successful_steps;
+
+    ASSERT_EQ(R.num_pn_particles, 1);
+    ASSERT_NEAR(R.physical_state->time, tend,
+                tend * R.options->output_time_relative_tolerance);
+
+    for (int i = 0; i < 3; ++i) {
+        ASSERT_NEAR(R.CoM_pos[i], 0, 1e-10);
+        ASSERT_NEAR(R.CoM_vel[i], 0, 1e-10);
+    }
+
+    ASSERT_EQ(R.physical_state->mass[0], 2.);
+
+    struct expected_vals {
+        double pos[3];
+        double vel[3];
+        double spin[3];
+    } expected[] = {{{0., 0., 0.}, {0., 0., 0.}, {0., 0., 0.}}};
+    for (int i = 0; i < 3; ++i) {
+        EXPECT_NEAR(R.physical_state->pos[0][i], expected[0].pos[i],
+                    std::abs(expected[0].pos[i] * reltol));
+        EXPECT_NEAR(R.physical_state->vel[0][i], expected[0].vel[i],
+                    std::abs(expected[0].vel[i] * reltol));
+        EXPECT_NEAR(R.physical_state->spin[0][i], expected[0].spin[i],
+                    std::abs(expected[0].spin[i] * reltol));
+    }
+}
+
+TEST(Integration_with_mergers, merger_from_orbit) {
+
+    struct ketju_system R;
+    ketju_create_system(&R, 2, 0, MPI_COMM_WORLD);
+
+    R.constants->c = 1;
+    R.constants->G = 1;
+    R.options->PN_flags = KETJU_PN_ALL;
+
+    R.physical_state->mass[0] = 1;
+    R.physical_state->pos[0][0] = 40;
+    const double v0[3] = {0., 0.05, 0.};
+    for (int i = 0; i < 3; ++i) {
+        R.physical_state->vel[0][i] = v0[i];
+    }
+
+    R.physical_state->mass[1] = 1;
+    R.physical_state->pos[1][0] = -40;
+
+    R.options->gbs_relative_tolerance = 1e-12;
+    R.options->output_time_relative_tolerance = 1e-12;
+
+    const double tend = 1e6;
+
+    ketju_run_integrator(&R, tend);
+    const double reltol =
+        40 * R.options->gbs_relative_tolerance * R.perf->successful_steps;
+
+    ASSERT_EQ(R.num_pn_particles, 1);
+    ASSERT_NEAR(R.physical_state->time, tend,
+                tend * R.options->output_time_relative_tolerance);
+
+    for (int i = 0; i < 3; ++i) {
+        ASSERT_NEAR(R.CoM_pos[i], tend * v0[i] / 2, 1e-10);
+        ASSERT_NEAR(R.CoM_vel[i], v0[i] / 2, 1e-10);
+    }
+
+    ASSERT_EQ(R.physical_state->mass[0], 2.);
+
+    struct expected_vals {
+        double pos[3];
+        double vel[3];
+        double spin[3];
+    } expected[] = {{{0., 0., 0.}, {0., 0., 0.}, {0., 0., 1.4868571757277591}}};
+    // XXX: the spin value is just what comes out, with v0 = {0,.05,0}, since
+    // there's no easy way to predict it.
+    for (int i = 0; i < 3; ++i) {
+        EXPECT_NEAR(R.physical_state->pos[0][i], expected[0].pos[i],
+                    std::abs(expected[0].pos[i] * reltol));
+        EXPECT_NEAR(R.physical_state->vel[0][i], expected[0].vel[i],
+                    std::abs(expected[0].vel[i] * reltol));
+        EXPECT_NEAR(R.physical_state->spin[0][i], expected[0].spin[i],
+                    std::abs(expected[0].spin[i] * reltol));
+    }
+}

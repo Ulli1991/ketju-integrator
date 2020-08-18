@@ -1065,7 +1065,19 @@ static bool gbs_extrapolate(struct gbs_storage *gs, double *Hstep,
         if (i == 0) {
             yscal += R->options->output_time_absolute_tolerance;
         }
+
         extrapolate_single_variable(y, yscal, kmax, &result, &error);
+
+        // Explicit nan/inf handling in case they are produced.
+        // The code after this can then assume finite values.
+        if (!isfinite(result)) {
+            // Set the max error so that the step size gets cut by a factor of
+            // ~10, and then bail as the step has failed anyway.
+            max_error = R->options->gbs_relative_tolerance * 0.65 /
+                        pow(0.1, 2 * kmax + 1);
+            break;
+        }
+
         data[kmax][i] = result;
         if (error > max_error) {
             max_error = error;
@@ -1092,8 +1104,10 @@ static bool gbs_extrapolate(struct gbs_storage *gs, double *Hstep,
         if (Hnextfac > 5.0) { Hnextfac = 5.0; }
         *Hstep *= Hnextfac;
     } else {
-        // Ensure that the stepsize is decreased enough if the step failed.
+        // Ensure that the stepsize is decreased enough if the step failed,
         if (Hnextfac > 0.7) { Hnextfac = 0.7; }
+        // but not excessively.
+        if (Hnextfac < 1e-3) { Hnextfac = 1e-3; }
         *Hstep *= Hnextfac;
     }
 
@@ -1442,8 +1456,12 @@ void ketju_run_integrator(struct ketju_system *R, double time_interval) {
     // free temp storage
     free_state_backup(&old_state);
     free_gbs_storage(&gbs_storage);
-    
-    R->perf->relative_energy_error = (R->internal_state->B-initial_B) /initial_B;
+
+    // Note that this is not really the error when dissipative PN forces are
+    // enabled
+    R->perf->relative_energy_error =
+        (R->internal_state->B - initial_B) / initial_B;
+
     tock(&R->perf->time_total);
 }
 
