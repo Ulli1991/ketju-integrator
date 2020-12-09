@@ -151,7 +151,8 @@ struct ketju_system {
     //
     // XXX: the integration works only in the chained coordinates, forcing the
     // CoM to stay at the origin. Not compatible with perturbations that don't
-    // conserve the CoM right now
+    // conserve the CoM right now.
+    // Kicks from BH mergers can affect the CoM motion during the integration.
     double CoM_pos[3];
     //< Position of the center of mass in the input coordinates
     // (origin of physical_state.pos).

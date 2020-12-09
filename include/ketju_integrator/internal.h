@@ -170,6 +170,21 @@ static inline void vector_cross(const double a[3], const double b[3],
     res[2] = a[0] * b[1] - b[0] * a[1];
 }
 
+static inline double vector_norm(const double a[3]) {
+    return sqrt(a[0] * a[0] + a[1] * a[1] + a[2] * a[2]);
+}
+
+static inline double vector_dot(const double a[3], const double b[3]) {
+    return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+}
+
+static inline void unit_vector(const double a[3], double res[3]) {
+    double norm = vector_norm(a);
+    res[0] = a[0] / norm;
+    res[1] = a[1] / norm;
+    res[2] = a[2] / norm;
+}
+
 
 // Divide work for a i = (0..N-1), j = (i+1..N-1) loop between Nt tasks.
 // For the given task, computes the starting value for i (istart), the starting
@@ -205,6 +220,8 @@ static inline void loop_scheduling_N2(int N, int Nt, int task, int *istart,
 }
 
 // declarations of internal functions used between compilation units
+
+int ketju_do_bh_mergers(struct ketju_system *R);
 
 void ketju_init_gbs_comms(struct ketju_system *R);
 

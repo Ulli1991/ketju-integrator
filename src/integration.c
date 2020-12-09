@@ -1,6 +1,5 @@
 // Main integration and force calculation functions
 
-#include <assert.h>
 #include <float.h>
 #include <limits.h>
 #include <math.h>
@@ -1139,92 +1138,6 @@ static void propagate_CoM(struct ketju_system *R, double dt) {
     }
 }
 
-// Merge BH (PN particle) j into i
-static void merge_bhs(struct ketju_system *R, int i, int j) {
-    assert(j < R->num_pn_particles);
-    assert(j != i);
-    if (j < i) {
-        int temp = i;
-        i = j;
-        j = temp;
-    }
-    // Conserve total momentum, angular momentum and mass
-    // TODO: GR effects on mass loss, spin etc.
-    struct ketju_system_physical_state *ps = R->physical_state;
-    double mi = ps->mass[i];
-    double mj = ps->mass[j];
-    double M = mi + mj;
-
-    double rxv[3];
-    double rr[3], vv[3];
-    for (int k = 0; k < 3; ++k) {
-        rr[k] = ps->pos[i][k] - ps->pos[j][k];
-        vv[k] = ps->vel[i][k] - ps->vel[j][k];
-    }
-    vector_cross(rr, vv, rxv);
-    for (int k = 0; k < 3; ++k) {
-        ps->pos[i][k] = (ps->pos[i][k] * mi + ps->pos[j][k] * mj) / M;
-        ps->vel[i][k] = (ps->vel[i][k] * mi + ps->vel[j][k] * mj) / M;
-        ps->spin[i][k] += mi * mj / M * rxv[k] + ps->spin[j][k];
-    }
-    ps->mass[i] = M;
-
-    // Shift everything right of particle j left by one place to overwrite
-    // j's data.
-    memmove(&ps->mass[j], &ps->mass[j + 1],
-            sizeof(double) * (R->num_particles - (j + 1)));
-    memmove(&ps->pos[j], &ps->pos[j + 1],
-            sizeof(double[3]) * (R->num_particles - (j + 1)));
-    memmove(&ps->vel[j], &ps->vel[j + 1],
-            sizeof(double[3]) * (R->num_particles - (j + 1)));
-    memmove(&ps->spin[j], &ps->spin[j + 1],
-            sizeof(double[3]) * (R->num_pn_particles - (j + 1)));
-
-    // The extra data of the merged particle is moved to the end of the array
-    size_t elem_size = R->particle_extra_data_elem_size;
-    char *extra_data = R->particle_extra_data;
-    if (extra_data) {
-        char rem_extra_data[elem_size];
-        memmove(rem_extra_data, extra_data + j * elem_size, elem_size);
-        memmove(extra_data + j * elem_size, extra_data + (j + 1) * elem_size,
-                elem_size * (R->num_particles - (j + 1)));
-        memmove(extra_data + (R->num_particles - 1) * elem_size, rem_extra_data,
-                elem_size);
-    }
-
-    R->num_particles -= 1;
-    R->num_pn_particles -= 1;
-    // The mst is rebuilt after all the mergers are done, only need to change
-    // the size for now.
-    R->internal_state->mst->num_vertices -= 1;
-}
-
-static int do_bh_mergers(struct ketju_system *R) {
-    int num_merged = 0;
-
-    for (int i = 0; i < R->num_pn_particles; ++i) {
-        for (int j = i + 1; j < R->num_pn_particles; ++j) {
-            double r2 = 0;
-            for (int k = 0; k < 3; ++k) {
-                double dr =
-                    R->physical_state->pos[i][k] - R->physical_state->pos[j][k];
-                r2 += dr * dr;
-            }
-            // Simple condition: merge if particles within 6 times their
-            // combined Schwarzschild radii.
-            double fac =
-                12 * R->constants->G / (R->constants->c * R->constants->c);
-            if (sqrt(r2) < fac * (R->physical_state->mass[i] +
-                                  R->physical_state->mass[j])) {
-                merge_bhs(R, i, j);
-                num_merged += 1;
-            }
-        }
-    }
-
-    return num_merged;
-}
-
 
 // Estimates a safe initial timestep that is sufficiently small compared to the
 // smallest two-body timescale in the system.
@@ -1361,17 +1274,19 @@ void ketju_run_integrator(struct ketju_system *R, double time_interval) {
                          R->options->gbs_kmax);
 
     bool finished = false;
+    double t_CoM = R->physical_state->time; // For propagating the CoM
     do {
         // Check mergers between BHs (PN particles)
-        if (R->options->enable_bh_mergers) {
-            int num_merged = do_bh_mergers(R);
+        // Need to be propagating forwards in time for mergers to make sense.
+        if (R->options->enable_bh_mergers && Hstep > 0) {
+            int num_merged = ketju_do_bh_mergers(R);
             if (num_merged) {
                 // We had mergers, need to redo tree and other things
                 if (R->num_particles < 2) {
                     // Particle motion becomes trivial.
-                    // Need to only propagate the CoM, this is done after the
-                    // loop.
+                    // Need to only propagate the CoM
                     R->physical_state->time = t_start + time_interval;
+                    propagate_CoM(R, R->physical_state->time - t_CoM);
                     break;
                 }
                 ketju_build_mst(R);
@@ -1405,6 +1320,11 @@ void ketju_run_integrator(struct ketju_system *R, double time_interval) {
             compute_total_energy(R);
             R->perf->successful_steps += 1;
             steps_since_reconstruction += 1;
+
+            // Propagate the CoM on every step, since the CoM velocity may
+            // change due to BH merger kicks between steps.
+            propagate_CoM(R, R->physical_state->time - t_CoM);
+            t_CoM = R->physical_state->time;
 
             double remaining_time =
                 time_interval - (R->physical_state->time - t_start);
@@ -1451,7 +1371,6 @@ void ketju_run_integrator(struct ketju_system *R, double time_interval) {
 
     } while (!finished);
 
-    propagate_CoM(R, R->physical_state->time - t_start);
 
     // free temp storage
     free_state_backup(&old_state);

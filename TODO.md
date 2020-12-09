@@ -29,9 +29,10 @@ Optimization
 Features
 --------
 
-% BH mergers
++ BH mergers
     + Basic merging conserving momentum, mass
-    - GR effects on mass loss, resulting spin, kicks
+    + GR effects on mass loss, resulting spin, kicks
+        ? are the current fits good enough
 
 Style
 -----
