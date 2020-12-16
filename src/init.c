@@ -138,6 +138,9 @@ void ketju_create_system(struct ketju_system *R, int num_pn_particles,
 
     R->particle_extra_data = NULL;
     R->particle_extra_data_elem_size = 0;
+
+    R->num_mergers = 0;
+    R->merger_infos = NULL;
 }
 
 void ketju_init_gbs_comms(struct ketju_system *R) {
@@ -249,4 +252,6 @@ void ketju_free_system(struct ketju_system *R) {
     free(R->perf);
     free(R->options);
     free(R->constants);
+
+    if (R->merger_infos) { free(R->merger_infos); }
 }

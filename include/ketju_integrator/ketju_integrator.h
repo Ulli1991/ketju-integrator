@@ -73,6 +73,10 @@ struct ketju_integration_options {
     bool enable_bh_mergers;
     //< Check for mergers between BHs (pn particles).
     // BHs are merged if they come within 6 Schwarzschild radii of each other.
+    bool enable_bh_merger_kicks;
+    //< Include the merger kick in BH mergers.
+    // If disabled the merger remnant moves at the CoM velocity of the merged
+    // BHs.
 };
 
 static const struct ketju_integration_options
@@ -89,6 +93,7 @@ static const struct ketju_integration_options
         .star_star_softening = 0.,
         .no_star_star_gravity = false,
         .enable_bh_mergers = true,
+        .enable_bh_merger_kicks = true,
 };
 
 struct ketju_natural_constants {
@@ -124,6 +129,13 @@ struct ketju_performance_counters {
     double relative_energy_error;
     //< Relative change in the energy of the system.
     //  Gives information on accuracy only when PN terms are disabled
+};
+
+struct ketju_bh_merger_info {
+    double t_merger; // time of the merger
+    double m1, m2, m_remnant; // masses
+    double chi1, chi2, chi_remnant; // dimensionless spin magnitudes
+    double v_kick; // magnitude of kick velocity
 };
 
 struct ketju_system {
@@ -170,6 +182,9 @@ struct ketju_system {
 
     size_t particle_extra_data_elem_size;
     //< Size of the extra data for a single particle.
+
+    int num_mergers; //< How many mergers there have been
+    struct ketju_bh_merger_info *merger_infos; //< contains num_mergers elements
 };
 
 // Function prototypes

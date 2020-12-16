@@ -39,7 +39,9 @@ class CIntegratorOptions(ctypes.Structure):
         ('star_star_softening', ctypes.c_double),
         ('no_star_star_gravity', ctypes.c_bool),
         ('enable_bh_mergers', ctypes.c_bool),
+        ('enable_bh_merger_kicks', ctypes.c_bool),
     ]
+
 class CNaturalConstants(ctypes.Structure):
     _fields_ = [
         ('G', ctypes.c_double),
@@ -67,6 +69,18 @@ class CPerformanceCounters(ctypes.Structure):
         ("relative_energy_error", ctypes.c_double),
     ]
 
+class CBHMergerInfo(ctypes.Structure):
+    _fields_ = [
+        ("t_merger", ctypes.c_double),
+        ("m1", ctypes.c_double),
+        ("m2", ctypes.c_double),
+        ("m_remnant", ctypes.c_double),
+        ("chi1", ctypes.c_double),
+        ("chi2", ctypes.c_double),
+        ("chi_remnant", ctypes.c_double),
+        ("vkick", ctypes.c_double),
+    ]
+
 class CSystem(ctypes.Structure):
     _fields_ = [
         ('num_particles', ctypes.c_int),
@@ -81,6 +95,9 @@ class CSystem(ctypes.Structure):
         ('CoM_vel', ctypes.c_double*3),
         ('particle_extra_data', ctypes.c_void_p),
         ('particle_extra_data_elem_size', ctypes.c_size_t),
+
+        ('num_mergers', ctypes.c_int),
+        ('merger_infos', ctypes.POINTER(CBHMergerInfo)),
     ]
 
 def struct_to_dict(struct):
@@ -291,7 +308,8 @@ def _integrate():
 # Dump the results to stdout
     if this_task == 0:
         perf = struct_to_dict(system.perf[0])
-        retval = dict(states=outstates, perf=perf)
+        merger_infos = [struct_to_dict(system.merger_infos[i]) for i in range(system.num_mergers)]
+        retval = dict(states=outstates, perf=perf, merger_infos=merger_infos)
         sys.stdout.buffer.write(pickle.dumps(retval, protocol=pickle.HIGHEST_PROTOCOL))
         sys.stdout.flush()
 

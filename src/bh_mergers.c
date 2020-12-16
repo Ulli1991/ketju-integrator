@@ -1,6 +1,7 @@
 #include <assert.h>
 #include <math.h>
 #include <string.h>
+#include <stdlib.h>
 
 #include "ketju_integrator/internal.h"
 #include "ketju_integrator/ketju_integrator.h"
@@ -15,17 +16,19 @@ struct bh_merger_input {
 };
 
 struct bh_merger_remnant_properties {
-    double m, x[3], v[3], S[3];
+    double m, xcom[3], vcom[3], vkick[3], S[3];
 };
 
-// Compute the fitted merger remnant properties based on 
+// Compute the fitted merger remnant properties based on
 // Zlochower and Lousto 2015, PhRvD 92, 024022 (arXiv:1503.07536)
 // The published version of the paper has been corrected with an additional
 // erratum, and the corrected values are also in the arXiv version.
 // It's unclear how accurate the results are for generic spinning binaries,
-// and the actual resulting kick values appear to depend sensitively on the 
-// arbitrary point where the merger is triggered, probably due to spin precession.
-// TODO: do we want an option to use Newtonian conserved values instead?
+// and the actual resulting kick values appear to depend sensitively on the
+// arbitrary point where the merger is triggered, probably due to the dependence
+// on the inplane total spin and difference in spins. The values used in the
+// fits are measured just before merger, whereas we need to use the values at
+// the separation where the merger is triggered.
 void ketju_calculate_bh_merger_remnant_properties(
     struct bh_merger_input *in, struct bh_merger_remnant_properties *out) {
     
@@ -36,18 +39,14 @@ void ketju_calculate_bh_merger_remnant_properties(
 
     // relative position, relative velocity and center of mass
     // quantities
-    double rv[3], vv[3], cm_pos[3], cm_vel[3];
+    double rv[3], vv[3];
     for (int i = 0; i < 3; i++) {
         rv[i]  = in->x1[i] - in->x2[i];
         vv[i]  = in->v1[i] - in->v2[i];
-        cm_pos[i] = (m1 * in->x1[i] + m2 * in->x2[i]) / m;
-        cm_vel[i] = (m1 * in->v1[i] + m2 * in->v2[i]) / m;
+        out->xcom[i] = (m1 * in->x1[i] + m2 * in->x2[i]) / m;
+        out->vcom[i] = (m1 * in->v1[i] + m2 * in->v2[i]) / m;
     }
 
-    // position remnant at CoM
-    for (int i = 0; i < 3; i++) {
-        out->x[i] = cm_pos[i];
-    }
  
     // orbital angular momentum (Newtonian) and corresponding unit vector
     double L[3], Lhat[3];
@@ -64,7 +63,7 @@ void ketju_calculate_bh_merger_remnant_properties(
         // so use Newtonian values
         out->m = m;
         for (int i=0; i<3; ++i) {
-            out->v[i] = cm_vel[i];
+            out->vkick[i] = 0;
             out->S[i] = 0;
         }
         return;
@@ -135,6 +134,7 @@ void ketju_calculate_bh_merger_remnant_properties(
 
 
     // calculate the components of recoil velocity, in km/s
+    // Eq. (37)
     const double v_para =
         pow(4 * eta, 2) *
         (vector_dot(Delta_tilde, n0) *
@@ -145,6 +145,7 @@ void ketju_calculate_bh_merger_remnant_properties(
                   (4315. - 1262. * pow(delta_m, 2) + 15970. * S0_tilde_para) -
               2256. * delta_m - 2231. * delta_m * S0_tilde_para));
 
+    // Eq. (39)
     double v_ortho2 = pow(4*eta, 4) * (
             2.106e5 * pow(Delta_tilde_para, 2)
             + 4.967e5 * Delta_tilde_para * delta_m
@@ -169,7 +170,7 @@ void ketju_calculate_bh_merger_remnant_properties(
     // initial separation of the simulations.
     // This makes the direction essentially random.
     for (int i = 0; i < 3; i++) {
-        out->v[i] = cm_vel[i] + km_per_s * (v_para * Lhat[i] + v_ortho * n0[i]);
+        out->vkick[i] = km_per_s * (v_para * Lhat[i] + v_ortho * n0[i]);
     }
 
     // for mass loss and spin, we need (dimensionless) energy and angular
@@ -182,6 +183,7 @@ void ketju_calculate_bh_merger_remnant_properties(
     // also dimensionless / in units of system mass
     const double r_isco = 3 + Z2 - sign_chi * sqrt((3 - Z1) * (3 + Z1 + 2 * Z2));
     const double E_isco = sqrt(1 - 2. / (3 * r_isco));
+    // Given after Eq. (35) in the corrected arXiv version
     const double L_isco = 2. / sqrt(3 * r_isco) * (3 * sqrt(r_isco) - 2 * chi);
 
     // Calculate mass loss.
@@ -248,9 +250,9 @@ void ketju_calculate_bh_merger_remnant_properties(
         out->m = m * (1 - Ec);
     }
 
-    // calculate square of remnant spin magnitude. spin direction is
-    // assumed to be equal to total angular momentum, which the paper
-    // assures is accurate to within 20 degrees
+    // Calculate square of remnant spin magnitude, using only the A_c term.
+    // Spin direction is  assumed to be equal to total angular momentum, which
+    // the paper assures is accurate to within 20 degrees
     {
 
         const double L0 = 0.686710;
@@ -326,7 +328,10 @@ void ketju_calculate_bh_merger_remnant_properties(
 
         // square of dimensionless spin magnitude now given by Ac. multiply in
         // G/c*remnant_mass^2 to get simulation units
-        const double spin_mag = sqrt(Ac);
+        double spin_mag = sqrt(Ac);
+
+        // Safety check if the fits don't extrapolate to extreme cases nicely.
+        if (spin_mag > 1.) spin_mag = 1.;
 
         const double rm2 = out->m * out->m;
         for (int i = 0; i < 3; i++) {
@@ -363,11 +368,31 @@ static void merge_bhs(struct ketju_system *R, int i, int j) {
     ketju_calculate_bh_merger_remnant_properties(&bh_input, &res);
 
     for (int k = 0; k < 3; ++k) {
-        ps->pos[i][k] = res.x[k];
-        ps->vel[i][k] = res.v[k];
+        ps->pos[i][k] = res.xcom[k];
+        ps->vel[i][k] = res.vcom[k] +
+                        (R->options->enable_bh_merger_kicks ? res.vkick[k] : 0);
         ps->spin[i][k] = res.S[k];
     }
     ps->mass[i] = res.m;
+
+
+    // Store the info on the merger
+    R->merger_infos =
+        realloc(R->merger_infos,
+                sizeof(struct ketju_bh_merger_info[R->num_mergers + 1]));
+    struct ketju_bh_merger_info *info = &R->merger_infos[R->num_mergers];
+    info->t_merger = ps->time;
+    info->m1 = bh_input.m1;
+    info->m2 = bh_input.m2;
+    info->m_remnant = res.m;
+    info->chi1 = vector_norm(bh_input.S1) /
+                 (bh_input.G / bh_input.c * bh_input.m1 * bh_input.m1);
+    info->chi2 = vector_norm(bh_input.S2) /
+                 (bh_input.G / bh_input.c * bh_input.m2 * bh_input.m2);
+    info->chi_remnant =
+        vector_norm(res.S) / (bh_input.G / bh_input.c * res.m * res.m);
+    info->v_kick = vector_norm(res.vkick);
+    R->num_mergers += 1;
 
     // Shift everything right of particle j left by one place to overwrite
     // j's data.
