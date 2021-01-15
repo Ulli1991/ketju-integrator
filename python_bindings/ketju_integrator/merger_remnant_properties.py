@@ -36,8 +36,9 @@ class BHMergerInput(ctypes.Structure):
 class BHMergerRemnantProperties(ctypes.Structure):
     _fields_ = [
     ('m', ctypes.c_double),
-    ('x', ctypes.c_double*3),
-    ('v', ctypes.c_double*3),
+    ('xcom', ctypes.c_double*3),
+    ('vcom', ctypes.c_double*3),
+    ('vkick', ctypes.c_double*3),
     ('S', ctypes.c_double*3),
     ]
 
@@ -64,6 +65,10 @@ def normalized_merger_properties(q, R, V, chi1_vec, chi2_vec):
     bh_out = BHMergerRemnantProperties()
     shim.ketju_calculate_bh_merger_remnant_properties(bh_in, bh_out)
 
-    return dict(mass=bh_out.m, x=np.array(bh_out.x), v=np.array(bh_out.v),
-                S=np.array(bh_out.S), chi=np.linalg.norm(bh_out.S)/bh_out.m**2)
+    return dict(mass=bh_out.m,
+                xcom=np.array(bh_out.xcom),
+                vcom=np.array(bh_out.vcom),
+                vkick=np.array(bh_out.vkick),
+                S=np.array(bh_out.S),
+                chi=np.linalg.norm(bh_out.S)/bh_out.m**2)
 
