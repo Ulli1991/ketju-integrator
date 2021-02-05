@@ -270,6 +270,10 @@ static void PrimMST(struct ketju_system *R) {
         }
     }
     mst->vertex[root].inMST = true;
+    for (int k = 0; k < 3; k++) {
+        mst->root_pos[k] = ps->pos[root][k];
+        mst->root_vel[k] = ps->vel[root][k];
+    }
 
     // Construct the MST
     for (int c = 0; c < mst->num_vertices - 1; ++c) {
@@ -925,7 +929,7 @@ static void CombineAllMST(struct ketju_system *R, int NumEdge) {
     const struct ketju_system_physical_state *ps = R->physical_state;
     struct spanning_tree_coordinate_system *mst = R->internal_state->mst;
 
-    int next = -1;
+    int root = -1;
     double rmin = DBL_MAX;
     for (int i = 0; i < mst->num_vertices; i++) {
         double r2 = 0;
@@ -936,12 +940,16 @@ static void CombineAllMST(struct ketju_system *R, int NumEdge) {
         double r = sqrt(r2);
         if (rmin > r) {
             rmin = r;
-            next = i;
+            root = i;
         }
     }
 
     int counter = 0;
-    mst->vertex[next].inMST = 1;
+    mst->vertex[root].inMST = true;
+    for (int k = 0; k < 3; k++) {
+        mst->root_pos[k] = ps->pos[root][k];
+        mst->root_vel[k] = ps->vel[root][k];
+    }
 
     int istop = NumEdge;
 

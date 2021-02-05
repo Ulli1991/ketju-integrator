@@ -30,9 +30,8 @@ enum ketju_PN_flags {
 
     KETJU_PN_1_5_SPIN_ACC = 1 << 8,
     KETJU_PN_2_0_SPIN_ACC = 1 << 9,
-    KETJU_PN_1_0_SPIN_EVOL = 1 << 10,
-    KETJU_PN_1_5_SPIN_EVOL = 1 << 11,
-    KETJU_PN_SPIN_ALL = 0xF00,
+    KETJU_PN_SPIN_EVOL = 1 << 10,
+    KETJU_PN_SPIN_ALL = 0x700,
 
     KETJU_PN_ALL = KETJU_PN_DYNAMIC_ALL | KETJU_PN_SPIN_ALL,
 };
@@ -170,6 +169,11 @@ struct ketju_system {
     // (origin of physical_state.pos).
     // The CoM of the input state is added to this at the start of the
     // integration, and the position is drifted based on CoM_vel.
+    // Note that due to to PN effects the CoM may not be exactly conserved,
+    // so that this value may differ slightly from the actual CoM.
+    // Kicks from BH mergers may cause the CoM motion to change during the
+    // integration, but this is accounted for in the propagation of the CoM so
+    // that it stays near the center of the system in these cases.
     double CoM_vel[3];
     //< Velocity of the center of mass in the input coordinates
     // (origin of physical_state.vel)

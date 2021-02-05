@@ -76,6 +76,13 @@ struct spanning_tree_coordinate_system {
     // TODO check if some of these can be removed
     struct graph_edge *local_edge, *local_edge_subset, *edge_in_mst;
 
+    // Absolute coordinates of the tree root.
+    // These are integrated to allow for forces that do not conserve the CoM of
+    // the system.
+    double root_pos[3]; 
+    double root_vel[3];
+    double root_aux_vel[3];
+    // Relative coordinates of the edges
     double (*edge_rel_pos)[3];
     double (*edge_rel_vel)[3];
     double (*edge_rel_aux_vel)[3];
@@ -157,7 +164,7 @@ static inline void terminate(const char *msg) {
     MPI_Abort(MPI_COMM_WORLD, 1);
 }
 
-static inline void get_v1_v2_fast(struct ketju_system *R, int i, int *v1,
+static inline void get_v1_v2_fast(const struct ketju_system *R, int i, int *v1,
                                   int *v2) {
     *v1 = R->internal_state->mst->edge_in_mst[i].vertex1;
     *v2 = R->internal_state->mst->edge_in_mst[i].vertex2;
@@ -183,6 +190,14 @@ static inline void unit_vector(const double a[3], double res[3]) {
     res[0] = a[0] / norm;
     res[1] = a[1] / norm;
     res[2] = a[2] / norm;
+}
+
+static inline double norm_and_unit_vector(const double a[3], double res[3]) {
+    double norm = vector_norm(a);
+    res[0] = a[0] / norm;
+    res[1] = a[1] / norm;
+    res[2] = a[2] / norm;
+    return norm;
 }
 
 
@@ -226,6 +241,9 @@ int ketju_do_bh_mergers(struct ketju_system *R);
 void ketju_init_gbs_comms(struct ketju_system *R);
 
 void ketju_build_mst(struct ketju_system *R);
+
+void ketju_compute_PN_acc(struct ketju_system *, double (*vel_to_use)[3],
+                          double (*spin_to_use)[3]);
 
 // These functions are called through the helper below
 bool ketju_check_relative_proximity_general(int v1, int v2, const int Nd,

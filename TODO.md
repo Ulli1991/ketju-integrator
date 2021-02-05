@@ -14,9 +14,12 @@ Correctness
     ? should be fixed properly (if still broken),
       apparently can break down even with larger systems.
 
-- Softening with the gadget kernel appears to be numerically unstable when
+? Softening with the gadget kernel appears to be numerically unstable when
   combined with the high-order integrator used here. 
-  Probably best to remove the option completely.
+  Possibly only affects systems consisting of only softened particles with
+  extremely small softenings.
+  Softening needed in full Ketju runs to avoid energy errors on the boundary
+  between gadget and this integrator.
 
 Optimization
 ------------
@@ -51,8 +54,7 @@ Other
 + Python bindings
     + Mostly work
     - Could be easier to use, but maybe simple is good enough
-    - Some things are probably not portable enough
-    - expose the performance counters
+    - Some things are probably not portable enough, mainly the mpirun stuff.
 
 + Automated tests
     + Basics setup and some tests done

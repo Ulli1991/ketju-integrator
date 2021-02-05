@@ -441,8 +441,17 @@ static void compute_U_and_Newtonian_Acc(struct ketju_system *R) {
     tock(&R->perf->time_force);
 }
 
-// TODO this could maybe go in mst.c, but maybe easier to have as few externally
-// visible symbols as possible
+// TODO the following few functions could maybe go in mst.c, but maybe easier to
+// have as few externally visible symbols as possible
+static int get_root_index(const struct ketju_system *R) {
+    const struct spanning_tree_coordinate_system *mst = R->internal_state->mst;
+
+    int v1, v2;
+    get_v1_v2_fast(R, 0, &v1, &v2);
+
+    return mst->vertex[v1].level == 0 ? v1 : v2;
+}
+
 static void into_Cartesian_from_MST(struct ketju_system *R) {
 
     tick(&R->perf->time_coord);
@@ -450,21 +459,14 @@ static void into_Cartesian_from_MST(struct ketju_system *R) {
     const struct spanning_tree_coordinate_system *mst = R->internal_state->mst;
     struct ketju_system_physical_state *ps = R->physical_state;
 
-    int v1, v2;
-    get_v1_v2_fast(R, 0, &v1, &v2);
-
-    int first;
-    if (mst->vertex[v1].level == 0) {
-        first = v1;
-    } else {
-        first = v2;
-    }
+    int first = get_root_index(R);
     for (int k = 0; k < 3; k++) {
-        ps->pos[first][k] = 0.0;
-        ps->vel[first][k] = 0.0;
+        ps->pos[first][k] = mst->root_pos[k];
+        ps->vel[first][k] = mst->root_vel[k];
     }
     for (int i = 0; i < mst->num_vertices - 1; i++) {
 
+        int v1, v2;
         get_v1_v2_fast(R, i, &v1, &v2);
 
         int lo, hi;
@@ -478,29 +480,6 @@ static void into_Cartesian_from_MST(struct ketju_system *R) {
         for (int k = 0; k < 3; k++) {
             ps->pos[hi][k] = ps->pos[lo][k] + mst->edge_rel_pos[i][k];
             ps->vel[hi][k] = ps->vel[lo][k] + mst->edge_rel_vel[i][k];
-        }
-    }
-
-    // The coordinate system is defined to have the CoM at the origin, but at
-    // this point the root particle is at the origin. Fix the situation.
-    double M = 0, CoM[3] = {0}, CoV[3] = {0};
-
-    for (int i = 0; i < R->num_particles; i++) {
-        M += ps->mass[i];
-        for (int k = 0; k < 3; k++) {
-            CoM[k] += ps->mass[i] * ps->pos[i][k];
-            CoV[k] += ps->mass[i] * ps->vel[i][k];
-        }
-    }
-    for (int k = 0; k < 3; k++) {
-        CoM[k] /= M;
-        CoV[k] /= M;
-    }
-
-    for (int i = 0; i < R->num_particles; i++) {
-        for (int k = 0; k < 3; k++) {
-            ps->pos[i][k] -= CoM[k];
-            ps->vel[i][k] -= CoV[k];
         }
     }
 
@@ -537,6 +516,8 @@ void ketju_into_CoM_frame(struct ketju_system *R) {
     for (int k = 0; k < 3; k++) {
         R->CoM_pos[k] += CoM_pos[k];
         R->CoM_vel[k] += CoM_vel[k];
+        R->internal_state->mst->root_pos[k] -= CoM_pos[k];
+        R->internal_state->mst->root_vel[k] -= CoM_vel[k];
     }
 
     tock(&R->perf->time_coord);
@@ -564,20 +545,14 @@ static void update_pos(struct ketju_system *R) {
     const struct spanning_tree_coordinate_system *mst = R->internal_state->mst;
     struct ketju_system_physical_state *ps = R->physical_state;
 
-    int v1, v2;
-    get_v1_v2_fast(R, 0, &v1, &v2);
 
-    int first;
-    if (mst->vertex[v1].level == 0) {
-        first = v1;
-    } else {
-        first = v2;
-    }
+    int first = get_root_index(R);
     for (int k = 0; k < 3; k++) {
-        ps->pos[first][k] = 0.0;
+        ps->pos[first][k] = mst->root_pos[k];
     }
     for (int i = 0; i < mst->num_vertices - 1; i++) {
 
+        int v1, v2;
         get_v1_v2_fast(R, i, &v1, &v2);
 
         int lo, hi;
@@ -593,48 +568,30 @@ static void update_pos(struct ketju_system *R) {
         }
     }
 
-    double M = 0, CoM[3] = {0};
-    for (int i = 0; i < R->num_particles; i++) {
-        M += ps->mass[i];
-        for (int k = 0; k < 3; k++) {
-            CoM[k] += ps->mass[i] * ps->pos[i][k];
-        }
-    }
-    for (int k = 0; k < 3; k++) {
-        CoM[k] /= M;
-    }
-    for (int i = 0; i < R->num_particles; i++) {
-        for (int k = 0; k < 3; k++) {
-            ps->pos[i][k] -= CoM[k];
-        }
-    }
-
     tock(&R->perf->time_coord);
 }
 
 // TODO this and the above update_pos are very similar to
 // into_Cartesian_from_MST, can they be deduplicated?
-static void update_vel(struct ketju_system *R, double (*vel_to_update)[3],
-                enum velocity_type propagated_velocity) {
+static void update_vel(struct ketju_system *R,
+                       enum velocity_type propagated_velocity) {
 
     tick(&R->perf->time_coord);
     const struct spanning_tree_coordinate_system *mst = R->internal_state->mst;
-    struct ketju_system_physical_state *ps = R->physical_state;
 
-    int v1, v2;
-    get_v1_v2_fast(R, 0, &v1, &v2);
+    double(*vel_to_update)[3] = propagated_velocity == PHYSICAL
+                                    ? R->physical_state->vel
+                                    : R->internal_state->aux_vel;
 
-    int first;
-    if (mst->vertex[v1].level == 0) {
-        first = v1;
-    } else {
-        first = v2;
-    }
+    int first = get_root_index(R);
     for (int k = 0; k < 3; k++) {
-        vel_to_update[first][k] = 0.0;
+        vel_to_update[first][k] = propagated_velocity == PHYSICAL
+                                      ? mst->root_vel[k]
+                                      : mst->root_aux_vel[k];
     }
     for (int i = 0; i < mst->num_vertices - 1; i++) {
 
+        int v1, v2;
         get_v1_v2_fast(R, i, &v1, &v2);
 
         int lo, hi;
@@ -653,22 +610,6 @@ static void update_vel(struct ketju_system *R, double (*vel_to_update)[3],
                 vel_to_update[hi][k] =
                     vel_to_update[lo][k] + mst->edge_rel_aux_vel[i][k];
             }
-        }
-    }
-
-    double M = 0, CoV[3] = {0};
-    for (int i = 0; i < R->num_particles; i++) {
-        M += ps->mass[i];
-        for (int k = 0; k < 3; k++) {
-            CoV[k] += ps->mass[i] * vel_to_update[i][k];
-        }
-    }
-    for (int k = 0; k < 3; k++) {
-        CoV[k] /= M;
-    }
-    for (int i = 0; i < R->num_particles; i++) {
-        for (int k = 0; k < 3; k++) {
-            vel_to_update[i][k] -= CoV[k];
         }
     }
 
@@ -691,6 +632,9 @@ static void drift(double ds, struct ketju_system *R) {
             mst->edge_rel_pos[i][k] += dt * mst->edge_rel_vel[i][k];
         }
     }
+    for (int k = 0; k < 3; k++) {
+        mst->root_pos[k] += dt * mst->root_vel[k];
+    }
     update_pos(R);
 }
 
@@ -703,13 +647,9 @@ static void set_auxiliary_variables(struct ketju_system *R) {
     memcpy(is->aux_vel, ps->vel, sizeof(double[R->num_particles][3]));
     memcpy(mst->edge_rel_aux_vel, mst->edge_rel_vel,
            sizeof(double[mst->num_vertices-1][3]));
+    memcpy(mst->root_aux_vel, mst->root_vel, sizeof(double[3]));
     memcpy(is->aux_spin, ps->spin, sizeof(double[R->num_pn_particles][3]));
 }
-
-// TODO: move declarations / reorganize
-static void compute_Post_Newtonian_Acc(struct ketju_system *,
-                                       double (*vel_to_use)[3],
-                                       double (*spin_to_use)[3]);
 
 static void physical_kick(double dt, struct ketju_system *R) {
 
@@ -717,8 +657,8 @@ static void physical_kick(double dt, struct ketju_system *R) {
     struct spanning_tree_coordinate_system *mst = is->mst;
     struct ketju_system_physical_state *ps = R->physical_state;
 
-    update_vel(R, is->aux_vel, AUXILIARY);
-    compute_Post_Newtonian_Acc(R, is->aux_vel, is->aux_spin);
+    update_vel(R, AUXILIARY);
+    ketju_compute_PN_acc(R, is->aux_vel, is->aux_spin);
 
     double dB = 0;
     for (int i = 0; i < R->num_particles; i++) {
@@ -734,6 +674,13 @@ static void physical_kick(double dt, struct ketju_system *R) {
                 dt * (mst->edge_rel_acc[i][k] + mst->edge_rel_acc_vd[i][k]);
         }
     }
+
+    int root = get_root_index(R);
+    for (int k = 0; k < 3; k++) {
+        mst->root_vel[k] +=
+            dt * (is->acc[root][k] + is->acc_vd[root][k]);
+    }
+
     for (int i = 0; i < R->num_pn_particles; ++i) {
         for (int k = 0; k < 3; k++) {
             ps->spin[i][k] += dt * is->spin_derivative[i][k];
@@ -747,14 +694,20 @@ static void auxiliary_kick(double dt, struct ketju_system *R) {
     struct spanning_tree_coordinate_system *mst = is->mst;
     struct ketju_system_physical_state *ps = R->physical_state;
 
-    update_vel(R, ps->vel, PHYSICAL);
-    compute_Post_Newtonian_Acc(R, ps->vel, ps->spin);
+    update_vel(R, PHYSICAL);
+    ketju_compute_PN_acc(R, ps->vel, ps->spin);
 
     for (int i = 0; i < mst->num_vertices - 1; i++) {
         for (int k = 0; k < 3; k++) {
             mst->edge_rel_aux_vel[i][k] +=
                 dt * (mst->edge_rel_acc[i][k] + mst->edge_rel_acc_vd[i][k]);
         }
+    }
+
+    int root = get_root_index(R);
+    for (int k = 0; k < 3; k++) {
+        mst->root_aux_vel[k] +=
+            dt * (is->acc[root][k] + is->acc_vd[root][k]);
     }
 
     for (int i = 0; i < R->num_pn_particles; ++i) {
@@ -768,7 +721,6 @@ static void kick(double ds, struct ketju_system *R) {
 
     struct ketju_system_internal_state *is = R->internal_state;
     struct spanning_tree_coordinate_system *mst = is->mst;
-    struct ketju_system_physical_state *ps = R->physical_state;
 
     compute_U_and_Newtonian_Acc(R);
     double dt = ds / is->U;
@@ -781,12 +733,16 @@ static void kick(double ds, struct ketju_system *R) {
                 mst->edge_rel_vel[i][k] += dt * mst->edge_rel_acc[i][k];
             }
         }
+        int root = get_root_index(R);
+        for (int k = 0; k < 3; k++) {
+            mst->root_vel[k] += dt * is->acc[root][k];
+        }
     } else {
         auxiliary_kick(dt / 2, R);
         physical_kick(dt, R);
         auxiliary_kick(dt / 2, R);
     }
-    update_vel(R, ps->vel, PHYSICAL);
+    update_vel(R, PHYSICAL);
 }
 
 static void compute_total_energy(struct ketju_system *R) {
@@ -853,6 +809,8 @@ static void get_gbs_ks_for_groups(struct ketju_system *R,
 
 struct state_backup {
     double time, B, U, T;
+    double root_pos[3];
+    double root_vel[3];
     double (*pos)[3];
     double (*vel)[3];
     double (*spin)[3];
@@ -876,6 +834,9 @@ static void store_state_backup(struct state_backup *sb,
     sb->U = R->internal_state->U;
     sb->T = R->internal_state->T;
 
+    memcpy(sb->root_pos, R->internal_state->mst->root_pos, sizeof(double[3]));
+    memcpy(sb->root_vel, R->internal_state->mst->root_vel, sizeof(double[3]));
+
     const int num_particles = R->num_particles;
     memcpy(sb->pos, R->physical_state->pos, sizeof(double[num_particles][3]));
     memcpy(sb->vel, R->physical_state->vel, sizeof(double[num_particles][3]));
@@ -892,6 +853,9 @@ static void restore_state_backup(struct state_backup *sb,
     R->internal_state->B = sb->B;
     R->internal_state->U = sb->U;
     R->internal_state->T = sb->T;
+
+    memcpy(R->internal_state->mst->root_pos, sb->root_pos, sizeof(double[3]));
+    memcpy(R->internal_state->mst->root_vel, sb->root_vel, sizeof(double[3]));
 
     const int num_particles = R->num_particles;
     memcpy(R->physical_state->pos, sb->pos, sizeof(double[num_particles][3]));
@@ -919,7 +883,7 @@ struct gbs_storage {
 
 static void allocate_gbs_storage(struct gbs_storage *gs, int num_particles,
                                  int num_pn_particles, int kmax) {
-    gs->num_vars = (1 /*time*/ +
+    gs->num_vars = (1 /*time*/ + 3 /*root_pos*/ + 3 /*root_vel*/ +
                     (num_particles - 1) * (3 /*edge_pos*/ + 3 /*edge_vel*/) +
                     num_pn_particles * (3 /*spin*/));
     gs->num_rows = kmax + 1; // row for extrapolation result also
@@ -936,6 +900,10 @@ static void store_gbs_data(struct gbs_storage *gs, const struct ketju_system *R,
     data[k_ind][0] = R->physical_state->time;
     int offset = 1;
     const struct spanning_tree_coordinate_system *mst = R->internal_state->mst;
+    memcpy(&data[k_ind][offset], mst->root_pos, sizeof(double[3]));
+    offset += 3;
+    memcpy(&data[k_ind][offset], mst->root_vel, sizeof(double[3]));
+    offset += 3;
     const size_t edge_vec_size = sizeof(double[mst->num_vertices-1][3]);
     memcpy(&data[k_ind][offset], mst->edge_rel_pos, edge_vec_size);
     offset += 3*(mst->num_vertices-1);
@@ -1121,6 +1089,10 @@ static void update_system_from_gbs_result(struct ketju_system *R,
     R->physical_state->time = data[0];
     int offset = 1;
     struct spanning_tree_coordinate_system *mst = R->internal_state->mst;
+    memcpy(mst->root_pos, &data[offset], sizeof(double[3]));
+    offset += 3;
+    memcpy(mst->root_vel, &data[offset], sizeof(double[3]));
+    offset += 3;
     const size_t edge_vec_size = sizeof(double[mst->num_vertices-1][3]);
     memcpy(mst->edge_rel_pos, &data[offset], edge_vec_size);
     offset += 3*(mst->num_vertices-1);
@@ -1382,352 +1354,4 @@ void ketju_run_integrator(struct ketju_system *R, double time_interval) {
         (R->internal_state->B - initial_B) / initial_B;
 
     tock(&R->perf->time_total);
-}
-
-// XXX this PN stuff probably is good to put in this file as well for now at
-// least
-
-// relative velocity of particle 1 seen from particle 2 = v_1 - v_2. return
-// v_rel^2.
-inline static double relative_velocity(const double *v1, const double *v2,
-                                       double *v12) {
-    double vrel2 = 0;
-    for (int k = 0; k < 3; k++) {
-        v12[k] = v1[k] - v2[k];
-        vrel2 += v12[k] * v12[k];
-    }
-    return vrel2;
-}
-
-// Spin independent terms from Mora & Will (2004), Phys. Rev. D 69, 104021.
-// Spin terms from Barker & O'Connel (1975), Phys. Rev D 12, 329 and
-// Kidder (1995), Phys. rev. D 52, 821 (better notation).
-// The quadrupole terms from Barker & O'connel have been specialized for black
-// holes.
-static void compute_PN_twobody_Acc(struct ketju_system *R,
-                                   double (*vel)[3],
-                                   double (*spin)[3], double (*AccPN)[3],
-                                   double (*spin_derivative)[3], int i, int j) {
-
-    struct ketju_system_internal_state *is = R->internal_state;
-    struct spanning_tree_coordinate_system *mst = is->mst;
-    struct ketju_system_physical_state *ps = R->physical_state;
-
-    const double c = R->constants->c;
-    const double c2 = c * c;
-    const double c3 = c * c2;
-    const double c4 = c2 * c2;
-    const double c5 = c * c4;
-    const double c6 = c3 * c3;
-    const double c7 = c * c6;
-    const double pi2 = M_PI * M_PI;
-
-    double acc[3] = {0};
-
-    // mass constants
-    const double m1 = ps->mass[i];
-    const double m2 = ps->mass[j];
-    const double m = m1 + m2;
-    const double eta = m1 * m2 / (m * m);
-    const double eta2 = eta * eta;
-    const double eta3 = eta2 * eta;
-    const double G = R->constants->G;
-    const double gm = G * m;
-
-    // relative separation & velocity & unit separation
-    double rv[3] = {0};
-    double vv[3] = {0};
-    double nv[3] = {0};
-
-    // calculate relative quantities and derived quantities.
-    // every relative quantity x = x_1 - x_2, where x_1 corresponds to
-    // index i and x_2 to index j
-
-    const int Nd = R->options->max_tree_distance;
-    int path[Nd];
-    int sign[Nd];
-    int d;
-    bool proximity = ketju_check_relative_proximity(i, j, Nd, R, &d, path, sign);
-
-    if (proximity) {
-        for (int k = 0; k < 3; k++) {
-            for (int l = 0; l < d; l++) {
-                int index = path[l];
-                rv[k] += sign[l] * mst->edge_rel_pos[index][k];
-            }
-        }
-    } else {
-        for (int k = 0; k < 3; k++) {
-            rv[k] = ps->pos[i][k] - ps->pos[j][k];
-        }
-    }
-
-    // relative velocity is also v_1 - v_2
-    const double v2 = relative_velocity(vel[i], vel[j], vv);
-
-    double r2 = 0;
-    // rdot = (rv dot vv) / r
-    double rdot = 0;
-
-    for (int k = 0; k < 3; k++) {
-        rdot += rv[k] * vv[k];
-        r2 += rv[k] * rv[k];
-    }
-    const double r = sqrt(r2);
-    rdot /= r;
-    const double r3 = r*r2;
-    const double r4 = r2*r2;
-
-    for (int k = 0; k < 3; k++) {
-        nv[k] = rv[k] / r;
-    }
-
-    // powers of v, rdot and G(m1+m2)/r
-    const double v4 = v2 * v2;
-    const double v6 = v4 * v2;
-
-    const double rdot2 = rdot * rdot;
-    const double rdot4 = rdot2 * rdot2;
-    const double rdot6 = rdot2 * rdot4;
-
-    const double gmpr = gm / r;
-    const double gmpr2 = gmpr * gmpr;
-    const double gmpr3 = gmpr * gmpr2;
-
-    // the PN acceleration coefficients
-    double A1 = 0, A2 = 0, A2p5 = 0, A3 = 0, A3p5 = 0, Atot = 0;
-    double B1 = 0, B2 = 0, B2p5 = 0, B3 = 0, B3p5 = 0, Btot = 0;
-
-    // Spin contribution to acceleration
-    double acc_spin[3] = {0, 0, 0};
-
-    // Compute the enabled terms
-    unsigned int flags = R->options->PN_flags;
-
-    if (flags & KETJU_PN_1_0_ACC) {
-        A1 = 2 * (2 + eta) * gmpr - (1 + 3 * eta) * v2 + 1.5e0 * eta * rdot2;
-        B1 = 2 * (2 - eta) * rdot;
-    }
-    if (flags & KETJU_PN_2_0_ACC) {
-        A2 = -(3. / 4) * (12 + 29 * eta) * gmpr2 - eta * (3 - 4 * eta) * v4 -
-             (15. / 8) * eta * (1 - 3 * eta) * rdot4 +
-             (1. / 2) * eta * (13 - 4 * eta) * gmpr * v2 +
-             (2 + 25 * eta + 2 * eta2) * gmpr * rdot2 +
-             (3. / 2) * eta * (3 - 4 * eta) * v2 * rdot2;
-        B2 = -(1. / 2) * rdot *
-             ((4 + 41 * eta + 8 * eta2) * gmpr - eta * (15 + 4 * eta) * v2 +
-              3 * eta * (3 + 2 * eta) * rdot2);
-    }
-
-    if (flags & KETJU_PN_2_5_ACC) {
-        A2p5 = 8. / 5 * eta * gmpr * rdot * (17. / 3 * gmpr + 3 * v2);
-        B2p5 = -8. / 5. * eta * gmpr * (3 * gmpr + v2);
-    }
-
-    if (flags & KETJU_PN_3_0_ACC) {
-        A3 = (16 + (1399. / 12 - 41. / 16 * pi2) * eta + 71. / 2 * eta2) *
-                 gmpr3 +
-             eta * (20827. / 840 + 123. / 64 * pi2 - eta2) * gmpr2 * v2 -
-             (1 + (22717. / 168 + 615. / 64 * pi2) * eta + 11. / 8 * eta2 -
-              7 * eta3) *
-                 gmpr2 * rdot2 -
-             .25 * eta * (11 - 49 * eta + 52 * eta2) * v6 +
-             35. / 16 * eta * (1 - 5 * eta + 5 * eta2) * rdot6 -
-             .25 * eta * (75 + 32 * eta - 40 * eta2) * gmpr * v2 * v2 -
-             .5 * eta * (158 - 69 * eta - 60 * eta2) * gmpr * rdot4 +
-             eta * (121 - 16 * eta - 20 * eta2) * gmpr * v2 * rdot2 +
-             3. / 8 * eta * (20 - 79 * eta + 60 * eta2) * v2 * v2 * rdot2 -
-             15. / 8 * eta * (4 - 18 * eta + 17 * eta2) * v2 * rdot4;
-        B3 = rdot *
-             ((4 + (5849. / 840. + 123. / 32. * pi2) * eta - 25 * eta2 -
-               8 * eta3) *
-                  gmpr2 +
-              1. / 8. * eta * (65 - 152 * eta - 48 * eta2) * v2 * v2 +
-              15 / 8. * eta * (3 - 8 * eta - 2 * eta2) * rdot4 +
-              eta * (15 + 27 * eta + 10 * eta2) * gmpr * v2 -
-              1. / 6. * eta * (329 + 177 * eta + 108 * eta2) * gmpr * rdot2 -
-              .75 * eta * (16 - 37 * eta - 16 * eta2) * v2 * rdot2);
-    }
-    if (flags & KETJU_PN_3_5_ACC) {
-        A3p5 = -8. / 5 * eta * gmpr * rdot *
-               (23. / 14 * (43 + 14 * eta) * gmpr2 +
-                3. / 28 * (61 + 70 * eta) * v2 * v2 + 70 * rdot4 +
-                1. / 42 * (519 - 1267 * eta) * gmpr * v2 +
-                .25 * (147 + 188 * eta) * gmpr * rdot2 -
-                15 / 4. * (19 + 2 * eta) * v2 * rdot2);
-        B3p5 = 8. / 5. * eta * gmpr *
-               (1. / 42. * (1325 + 546 * eta) * gmpr2 +
-                1. / 28. * (313 + 42 * eta) * v2 * v2 + 75 * rdot4 -
-                1. / 42. * (205 + 777 * eta) * gmpr * v2 +
-                1. / 12. * (205 + 424 * eta) * gmpr * rdot2 -
-                .75 * (113 + 2 * eta) * v2 * rdot2);
-    }
-
-    if (flags & KETJU_PN_SPIN_ALL) {
-        // Compute all the supplementary quantities if any of spin terms are
-        // enabled
-        double mu           = (m1*m2)/(m1+m2);
-        double sigma[3]     = {0,0,0};      // m2/m1 * S1 + m1/m2 * S2
-        double S[3]         = {0,0,0};      // S1 + S2
-        double n_cross_v[3] = {0,0,0};
-        double S1_2         = 0;
-        double S2_2         = 0;
-        double S1_dot_S2    = 0;
-        double n_dot_S1     = 0;
-        double n_dot_S2     = 0;
-
-        const double *S_1 = spin[i];
-        const double *S_2 = spin[j];
-
-
-        // n x v
-        vector_cross(nv, vv, n_cross_v);
-
-        // supplementary quantities & dot products
-        for (int k = 0; k < 3; k++) {
-            S[k]        = S_1[k] + S_2[k];
-            // sigma = S + dm/m*Delta in Kidder's notation
-            sigma[k]    = m2/m1 * S_1[k] + m1/m2 * S_2[k];
-            S1_dot_S2  += S_1[k] * S_2[k];
-            n_dot_S1   += nv[k] * S_1[k];
-            n_dot_S2   += nv[k] * S_2[k];
-            S1_2       += S_1[k] * S_1[k];
-            S2_2 += S_2[k] * S_2[k];
-        }
-
-        // spin contributions to acceleration
-        if (flags & KETJU_PN_1_5_SPIN_ACC) {
-            double A_SO_term1    = 0;
-            double A_SO_term2[3] = {0,0,0};
-            double A_SO_term3[3] = {0,0,0};
-            double buffer1[3]    = {0,0,0};
-            double buffer2[3]    = {0,0,0};
-            for (int k = 0; k < 3; k++) {
-                A_SO_term1 += 6 * n_cross_v[k] * (S[k] + sigma[k]);
-                buffer1[k] = 4 * S[k] + 3 * sigma[k];
-                buffer2[k] = 3 * rdot * (2 * S[k] + sigma[k]);
-            }
-
-            vector_cross(vv, buffer1, A_SO_term2);
-            vector_cross(nv, buffer2, A_SO_term3);
-
-            for (int k = 0; k < 3; k++) {
-                // Spin-orbit term
-                acc_spin[k] +=
-                    G / (c2 * r3) *
-                    (nv[k] * A_SO_term1 - A_SO_term2[k] + A_SO_term3[k]);
-            }
-        }
-
-        if (flags & KETJU_PN_2_0_SPIN_ACC) {
-
-            for (int k = 0; k < 3; ++k) {
-                // Spin-spin term
-                acc_spin[k] +=
-                    -3 * G / (mu * c2 * r4) *
-                    (S1_dot_S2 * nv[k] - 5 * n_dot_S1 * n_dot_S2 * nv[k] +
-                     n_dot_S1 * S_2[k] + n_dot_S2 * S_1[k]);
-                // Quadrupole term
-                acc_spin[k] += -3. / 2 * G * m / (r4 * c2) *
-                               ((1 / (m1 * m1) *
-                                 ((S1_2 - 5 * n_dot_S1 * n_dot_S1) * nv[k] +
-                                  2 * n_dot_S1 * S_1[k])) +
-                                (1 / (m2 * m2) *
-                                 ((S2_2 - 5 * n_dot_S2 * n_dot_S2) * nv[k] +
-                                  2 * n_dot_S2 * S_2[k])));
-            }
-        }
-
-        // Spin derivatives
-        // The derivatives of the bodies are just index reversed versions of
-        // each other.
-        double buffer1[3]    = {0,0,0};
-        double buffer2[3]    = {0,0,0};
-
-        if (flags & KETJU_PN_1_0_SPIN_EVOL) {
-            for (int k = 0; k < 3; ++k) {
-                // Omega_SO
-                buffer1[k] = 2 * G * mu / (c2 * r2) * (1 + 3 * m2 / (4 * m1)) *
-                             n_cross_v[k];
-                buffer2[k] = 2 * G * mu / (c2 * r2) * (1 + 3 * m1 / (4 * m2)) *
-                             n_cross_v[k];
-            }
-        }
-
-        if (flags & KETJU_PN_1_5_SPIN_EVOL) {
-            for (int k = 0; k < 3; ++k) {
-                // Omega_SS
-                buffer1[k] += G / (c2 * r3) * (3 * n_dot_S2 * nv[k] - S_2[k]);
-                buffer2[k] += G / (c2 * r3) * (3 * n_dot_S1 * nv[k] - S_1[k]);
-                // Omega_Q
-                buffer1[k] +=
-                    G * m2 / (c2 * r3 * m1) * (3 * n_dot_S1 * nv[k] - S_1[k]);
-                buffer2[k] +=
-                    G * m1 / (c2 * r3 * m2) * (3 * n_dot_S2 * nv[k] - S_2[k]);
-            }
-        }
-        double dSpin1[3];
-        double dSpin2[3];
-        vector_cross(buffer1, S_1, dSpin1);
-        vector_cross(buffer2, S_2, dSpin2);
-        for (int k=0; k<3; ++k) {
-            spin_derivative[i][k] += dSpin1[k];   
-            spin_derivative[j][k] += dSpin2[k];   
-        }
-    }
-    
-    // sum all terms with correct powers of c
-    Atot = A1 / c2 + A2 / c4 + A2p5 / c5 + A3 / c6 + A3p5 / c7;
-    Btot = B1 / c2 + B2 / c4 + B2p5 / c5 + B3 / c6 + B3p5 / c7;
-
-    for (int k = 0; k < 3; k++) {
-        acc[k] = gm / r2 * (nv[k] * Atot + vv[k] * Btot) + acc_spin[k];
-    }
-
-    // Divide up the acceleration assuming action = reaction.
-    // XXX: This is not true for PN terms,
-    // but is correct to 1PN (Mora & Will 2004), _for the CoM_.
-    // Relative accelerations are correct, and the CoM motion corrections are
-    // likely insignificant for our purposes.
-    for (int k = 0; k < 3; k++) {
-        AccPN[i][k] += (m2 / m) * acc[k];
-        AccPN[j][k] -= (m1 / m) * acc[k];
-    }
-}
-
-static void compute_Post_Newtonian_Acc(struct ketju_system *R,
-                                       double (*vel_to_use)[3],
-                                       double (*spin_to_use)[3]) {
-    if (!R->options->PN_flags) return;
-
-    double(*acc_pn)[3] = R->internal_state->acc_vd;
-    memset(acc_pn, 0, sizeof(double[R->num_particles][3]));
-    double(*spin_derivative)[3] = R->internal_state->spin_derivative;
-    memset(spin_derivative, 0, sizeof(double[R->num_pn_particles][3]));
-
-    // Compute the PN accelerations for SMBHs
-    for (int i = 0; i < R->num_pn_particles; i++) {
-        for (int j = i + 1; j < R->num_pn_particles; j++) {
-            compute_PN_twobody_Acc(R, vel_to_use, spin_to_use, acc_pn,
-                                   spin_derivative, i, j);
-        }
-    }
-
-    // Finally the chained PN accelerations
-    struct spanning_tree_coordinate_system *mst = R->internal_state->mst;
-    int hi, lo;
-    for (int i = 0; i < mst->num_edges; i++) {
-        int v1, v2;
-        get_v1_v2_fast(R, i, &v1, &v2);
-        if (mst->vertex[v1].level > mst->vertex[v2].level) {
-            hi = v1;
-            lo = v2;
-        } else {
-            hi = v2;
-            lo = v1;
-        }
-        for (int k = 0; k < 3; k++) {
-            mst->edge_rel_acc_vd[i][k] = acc_pn[hi][k] - acc_pn[lo][k];
-        }
-    }
 }

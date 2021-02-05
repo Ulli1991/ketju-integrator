@@ -115,9 +115,8 @@ class PNFlags(enum.IntFlag):
 
     PN_1_5_SPIN_ACC = 1 << 8
     PN_2_0_SPIN_ACC = 1 << 9
-    PN_1_0_SPIN_EVOL = 1 << 10
-    PN_1_5_SPIN_EVOL = 1 << 11
-    PN_SPIN_ALL = 0xF00
+    PN_SPIN_EVOL = 1 << 10
+    PN_SPIN_ALL = 0x700
 
     PN_ALL = PN_DYNAMIC_ALL | PN_SPIN_ALL
 
