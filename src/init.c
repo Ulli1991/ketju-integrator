@@ -133,9 +133,6 @@ void ketju_create_system(struct ketju_system *R, int num_pn_particles,
     R->constants = calloc(1, sizeof(struct ketju_natural_constants));
     *R->constants = ketju_default_natural_constants;
 
-    memset(R->CoM_pos, 0, sizeof(double[3]));
-    memset(R->CoM_vel, 0, sizeof(double[3]));
-
     R->particle_extra_data = NULL;
     R->particle_extra_data_elem_size = 0;
 

@@ -45,16 +45,21 @@ set(LIBRARY_OUTPUT_PATH "${MAINFOLDER}/lib")
 LIST (APPEND CMAKE_PREFIX_PATH "${MAINFOLDER}")
 LIST (APPEND CMAKE_PREFIX_PATH "${MAINFOLDER}/thirdparty")
 
-#TODO is this useful
-# generate appinfo.h
-#configure_file("${MAINFOLDER}/include/appinfo.h.in.cmake" 
-#               "${MAINFOLDER}/include/appinfo.h")
-
 
 # get the library sources
-# TODO see if this can be done in a better way
-file(GLOB lib_headers RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} include/ketju_integrator/*.h)
-file(GLOB lib_sources RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} src/*.c)
+set(lib_headers
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/ketju_integrator/ketju_integrator.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/ketju_integrator/internal.h
+    )
+set(lib_sources
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/init.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/mst.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/integration.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/util.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/pn.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/bh_mergers.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/debug.c
+    )
 source_group("" FILES ${lib_headers} ${lib_sources})
 
 

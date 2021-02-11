@@ -21,7 +21,6 @@ static void init_random_positions(struct ketju_system *R, int N, RNG &&gen) {
             R->physical_state->pos[i][k] = dist(gen);
         }
     }
-    ketju_into_CoM_frame(R);
 }
 
 static bool connected_to_root(struct ketju_system *R, int i) {

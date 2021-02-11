@@ -446,11 +446,6 @@ int ketju_do_bh_mergers(struct ketju_system *R) {
             }
         }
     }
-    if (num_merged > 0) {
-        // The CoM of the system changes when a merger happens due to GW
-        // emission
-        ketju_into_CoM_frame(R);
-    }
 
     return num_merged;
 }

@@ -253,15 +253,16 @@ static void PrimMST(struct ketju_system *R) {
         mst->vertex[i].inMST = false;
     }
     
-    // Find the root of the tree = the particle closest to the origin in CoM
-    // coordinates.
+    // Find the root of the tree = the particle closest to the CoM.
     double rmin = DBL_MAX;
     int root = -1;
+    double CoM_pos[3], CoM_vel[3];
+    ketju_compute_CoM(R, CoM_pos, CoM_vel);
 
     for (int i = 0; i < R->num_particles; i++) {
         double r2 = 0;
         for (int k = 0; k < 3; k++) {
-            double ds = ps->pos[i][k];
+            double ds = ps->pos[i][k] - CoM_pos[k];
             r2 += ds * ds;
         }
         if (rmin > sqrt(r2)) {
@@ -316,11 +317,13 @@ static void PrimMST(struct ketju_system *R) {
 
 static double get_rmax(struct ketju_system *R) {
     double rmax2 = 0;
+    double CoM_pos[3], CoM_vel[3];
+    ketju_compute_CoM(R, CoM_pos, CoM_vel);
     for (int i = 0; i < R->num_particles; i++) {
         double ds;
         double r2 = 0;
         for (int k = 0; k < 3; k++) {
-            ds = R->physical_state->pos[i][k];
+            ds = R->physical_state->pos[i][k] - CoM_pos[k];
             r2 += ds * ds;
         }
         if (r2 > rmax2) { rmax2 = r2; }
@@ -931,10 +934,13 @@ static void CombineAllMST(struct ketju_system *R, int NumEdge) {
 
     int root = -1;
     double rmin = DBL_MAX;
+    double CoM_pos[3], CoM_vel[3];
+    ketju_compute_CoM(R, CoM_pos, CoM_vel);
+
     for (int i = 0; i < mst->num_vertices; i++) {
         double r2 = 0;
         for (int k = 0; k < 3; k++) {
-            double ds = ps->pos[i][k];
+            double ds = ps->pos[i][k] - CoM_pos[k];
             r2 += ds * ds;
         }
         double r = sqrt(r2);

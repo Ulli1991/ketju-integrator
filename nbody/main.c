@@ -65,6 +65,9 @@ int main(int argc, char *argv[]) {
 
     struct ketju_system R;
     init_from_ic_file(&R, argv[1]);
+    // Do the integration in the CoM frame
+    double CoM_pos[3], CoM_vel[3];
+    ketju_into_CoM_frame(&R, CoM_pos, CoM_vel);
     // TODO read param file
     R.options->gbs_relative_tolerance = 1e-9;
     R.options->mst_algorithm = KETJU_MST_PRIM;
@@ -111,12 +114,12 @@ int main(int argc, char *argv[]) {
                 "Particle %d\n"
                 " pos = [%e, %e, %e]\n"
                 " vel = [%e, %e, %e]\n",
-                i, R.physical_state->pos[i][0] + R.CoM_pos[0],
-                R.physical_state->pos[i][1] + R.CoM_pos[1],
-                R.physical_state->pos[i][2] + R.CoM_pos[2],
-                R.physical_state->vel[i][0] + R.CoM_vel[0],
-                R.physical_state->vel[i][1] + R.CoM_vel[1],
-                R.physical_state->vel[i][2] + R.CoM_vel[2]);
+                i, R.physical_state->pos[i][0] + CoM_pos[0],
+                R.physical_state->pos[i][1] + CoM_pos[1],
+                R.physical_state->pos[i][2] + CoM_pos[2],
+                R.physical_state->vel[i][0] + CoM_vel[0],
+                R.physical_state->vel[i][1] + CoM_vel[1],
+                R.physical_state->vel[i][2] + CoM_vel[2]);
         }
     }
 

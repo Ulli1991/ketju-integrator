@@ -103,6 +103,7 @@ struct ketju_natural_constants {
 static const struct ketju_natural_constants ketju_default_natural_constants = {
     .G = 43007.1, .c = 299792.0};
 
+
 struct ketju_system_physical_state {
     double time;
     double *mass;
@@ -111,6 +112,16 @@ struct ketju_system_physical_state {
     double (*spin)[3]; //spin only for pn particles
 };
 
+// The physical state of the system.
+// The coordinate system is arbitrary, but it is numerically favorable to have
+// the CoM of the system stay near the origin.
+// Note that the PN corrections depend slightly on the coordinate velocities
+// so that different choices of the reference frame lead to slightly different
+// results. The PN corrected equations of motion are approximately
+// Lorentz-invariant, while the standard Newtonian equations are
+// Galilei-invariant, so for general systems mixing these particle types there
+// is no real 'correct' way to choose the coordinates. The differences caused by
+// these effects are very small for reasonable choices of rest frame.
 struct ketju_performance_counters {
     double time_force;
     double time_force_comm;
@@ -120,7 +131,7 @@ struct ketju_performance_counters {
     double time_gbsextr;
     double time_total;
 
-    // check what these actually mean
+    // TODO: check what these actually mean
     double tprim1, tprim2, tprim3, tprim4, tprim5;
 
     int successful_steps;
@@ -159,25 +170,6 @@ struct ketju_system {
     struct ketju_natural_constants *constants;
     //< Values of natural constants which define the unit system
     
-    //
-    // XXX: the integration works only in the chained coordinates, forcing the
-    // CoM to stay at the origin. Not compatible with perturbations that don't
-    // conserve the CoM right now.
-    // Kicks from BH mergers can affect the CoM motion during the integration.
-    double CoM_pos[3];
-    //< Position of the center of mass in the input coordinates
-    // (origin of physical_state.pos).
-    // The CoM of the input state is added to this at the start of the
-    // integration, and the position is drifted based on CoM_vel.
-    // Note that due to to PN effects the CoM may not be exactly conserved,
-    // so that this value may differ slightly from the actual CoM.
-    // Kicks from BH mergers may cause the CoM motion to change during the
-    // integration, but this is accounted for in the propagation of the CoM so
-    // that it stays near the center of the system in these cases.
-    double CoM_vel[3];
-    //< Velocity of the center of mass in the input coordinates
-    // (origin of physical_state.vel)
-
     void *particle_extra_data;
     //< Optional extra data (e.g. IDs) associated with the particles, which is
     // reordered in case of mergers so that the removed particle data are found
@@ -195,7 +187,11 @@ struct ketju_system {
 void ketju_create_system(struct ketju_system *R, int num_pn_particles,
                          int num_other_particles, MPI_Comm comm);
 void ketju_free_system(struct ketju_system *R);
-void ketju_into_CoM_frame(struct ketju_system *R);
+
+// Compute the centre of mass of the system
+void ketju_compute_CoM(const struct ketju_system *R, double CoM_pos[3], double CoM_vel[3]);
+// Shift the coordinate origin of the system to the CoM, outputs the original values
+void ketju_into_CoM_frame(struct ketju_system *R, double CoM_pos[3], double CoM_vel[3]);
 // Runs the integrator for a given time interval.
 // The time interval can be negative for backwards-in-time integration.
 void ketju_run_integrator(struct ketju_system *R, double time_interval);

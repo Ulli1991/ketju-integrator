@@ -91,8 +91,6 @@ class CSystem(ctypes.Structure):
         ('options', ctypes.POINTER(CIntegratorOptions)),
         ('constants', ctypes.POINTER(CNaturalConstants)),
 
-        ('CoM_pos', ctypes.c_double*3),
-        ('CoM_vel', ctypes.c_double*3),
         ('particle_extra_data', ctypes.c_void_p),
         ('particle_extra_data_elem_size', ctypes.c_size_t),
 
@@ -168,9 +166,7 @@ class State:
         time = float(st.time)
         mass = np.copy(np.ctypeslib.as_array(st.mass, shape=(N,)))
         pos = np.copy(np.ctypeslib.as_array(st.pos, shape=(N,3)))
-        pos += np.ctypeslib.as_array(system.CoM_pos, shape=(1,3))
         vel = np.copy(np.ctypeslib.as_array(st.vel, shape=(N,3)))
-        vel += np.ctypeslib.as_array(system.CoM_vel, shape=(1,3))
         if system.num_pn_particles > 0:
             spin = np.copy(np.ctypeslib.as_array(st.spin, shape=(system.num_pn_particles,3)))
         else:

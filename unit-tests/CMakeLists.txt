@@ -25,7 +25,7 @@ target_link_libraries(ketju-integrator-unit-tests
 target_link_libraries(ketju-integrator-unit-tests
                       PUBLIC ${MPI_CXX_LINK_FLAGS})
 
-set(tests_max_num_mpi_tasks "8" CACHE STRING
+set(tests_max_num_mpi_tasks "4" CACHE STRING
     "Maximum number of tasks to use when running unit tests")
 
 # unit tests are not run automatically, only through the run-unit-tests target
