@@ -80,11 +80,11 @@ struct ketju_integration_options {
 
 static const struct ketju_integration_options
     ketju_default_integration_options = {
-        .gbs_kmax = 8,
+        .gbs_kmax = 4,
         .gbs_relative_tolerance = 1e-9,
         .output_time_relative_tolerance = 1e-6,
         .output_time_absolute_tolerance = 1e-300,
-        .PN_flags = KETJU_PN_NONE,
+        .PN_flags = KETJU_PN_ALL,
         .steps_between_mst_reconstruction = 10,
         .max_tree_distance = 2,
         .max_step_count = -1,
