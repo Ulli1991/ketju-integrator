@@ -148,31 +148,38 @@ static void compute_PN_acc_single(struct ketju_system *R, int i,
 
             double nij_factor = vi2 + 2. * vj2 - 4. * vivj - 1.5 * vjnij2;
 
-            for (int k = 0; k < N; ++k) {
-                double mk = ps->mass[k];
+            if (flags & KETJU_PN_THREEBODY) {
+                for (int k = 0; k < N; ++k) {
+                    double mk = ps->mass[k];
 
-                if (k != i) {
-                    double rv_ik[3];
-                    particle_separation(R, i, k, rv_ik);
-                    const double rik = vector_norm(rv_ik);
+                    if (k != i) {
+                        double rv_ik[3];
+                        particle_separation(R, i, k, rv_ik);
+                        const double rik = vector_norm(rv_ik);
 
-                    nij_factor -= 4. * G * mk / rik;
-                }
+                        nij_factor -= 4. * G * mk / rik;
+                    }
 
-                if (k != j) {
-                    double rv_jk[3], nv_jk[3];
-                    particle_separation(R, j, k, rv_jk);
-                    double rjk = norm_and_unit_vector(rv_jk, nv_jk);
+                    if (k != j) {
+                        double rv_jk[3], nv_jk[3];
+                        particle_separation(R, j, k, rv_jk);
+                        double rjk = norm_and_unit_vector(rv_jk, nv_jk);
 
-                    nij_factor -=
-                        G * mk / rjk *
-                        (1. - .5 * rij / rjk * vector_dot(nv_ij, nv_jk));
+                        nij_factor -=
+                            G * mk / rjk *
+                            (1. - .5 * rij / rjk * vector_dot(nv_ij, nv_jk));
 
-                    for (int l = 0; l < 3; ++l) {
-                        acc[l] -= 3.5 * nv_jk[l] * G2 * mj * mk /
-                                  (rij * rjk * rjk * c2);
+                        for (int l = 0; l < 3; ++l) {
+                            acc[l] -= 3.5 * nv_jk[l] * G2 * mj * mk /
+                                      (rij * rjk * rjk * c2);
+                        }
                     }
                 }
+            } else {
+                // the k=j part from above
+                nij_factor -= 4. * G * mj / rij;
+                // the k=i part from above
+                nij_factor -= 5. * G * mi / rij;
             }
 
             nij_factor *= -G * mj / (rij2 * c2);
@@ -265,7 +272,7 @@ static void compute_PN_acc_single(struct ketju_system *R, int i,
             }
         }
 
-        // The rest is from Blanchet (2014) e.q. 203
+        // The rest is from Blanchet (2014) eq. 203
         // Everything is decomposed into components along n_ij, v_ij, so
         // calculate the total factors first
         double nij_factor = 0.;

@@ -104,6 +104,7 @@ def struct_to_dict(struct):
 class PNFlags(enum.IntFlag):
     PN_NONE = 0
     PN_1_0_ACC = 1 << 0
+    PN_THREEBODY = 1 << 1
     PN_2_0_ACC = 1 << 2
     PN_2_5_ACC = 1 << 3
     PN_3_0_ACC = 1 << 4

@@ -32,7 +32,7 @@ set(tests_max_num_mpi_tasks "4" CACHE STRING
 add_custom_target(run-unit-tests)
 foreach(ntasks 1 2 ${tests_max_num_mpi_tasks})
     add_custom_target(run-unit-tests-${ntasks}
-                      COMMAND ${MPIEXEC} -np ${ntasks} 
+                      COMMAND ${MPIEXEC} -np ${ntasks} --oversubscribe
                       $<TARGET_FILE:ketju-integrator-unit-tests>
                       DEPENDS ketju-integrator-unit-tests
                       WORKING_DIRECTORY ${EXECUTABLE_OUTPUT_PATH}

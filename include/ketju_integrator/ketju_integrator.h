@@ -20,13 +20,15 @@ extern "C" {
 enum ketju_PN_flags {
     KETJU_PN_NONE = 0,
     KETJU_PN_1_0_ACC = 1 << 0,
+    KETJU_PN_THREEBODY = 1 << 1,
     KETJU_PN_2_0_ACC = 1 << 2,
     KETJU_PN_2_5_ACC = 1 << 3,
     KETJU_PN_3_0_ACC = 1 << 4,
     KETJU_PN_3_5_ACC = 1 << 5,
-    KETJU_PN_CONSERVATIVE = KETJU_PN_1_0_ACC | KETJU_PN_2_0_ACC | KETJU_PN_3_0_ACC,
-    KETJU_PN_DYNAMIC_ALL = 0xFF, // all the spin independent terms, is this a good name?
-    
+    KETJU_PN_CONSERVATIVE = KETJU_PN_1_0_ACC | KETJU_PN_2_0_ACC |
+                            KETJU_PN_3_0_ACC | KETJU_PN_THREEBODY,
+    KETJU_PN_DYNAMIC_ALL =
+        0xFF, // all the spin independent terms, is this a good name?
 
     KETJU_PN_1_5_SPIN_ACC = 1 << 8,
     KETJU_PN_2_0_SPIN_ACC = 1 << 9,
