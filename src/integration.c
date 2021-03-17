@@ -1168,7 +1168,7 @@ static void trivial_propagation(struct ketju_system *R, double time_interval) {
 }
 
 void ketju_run_integrator(struct ketju_system *R, double time_interval) {
-    // TODO return status/error code
+    // TODO return status/error code?
 
     // special case for when no actual integration is needed
     if (R->num_particles < 2) {
@@ -1192,7 +1192,9 @@ void ketju_run_integrator(struct ketju_system *R, double time_interval) {
     double dt = copysign(1, time_interval) *
                 fmin(estimate_initial_timestep(R), fabs(time_interval) / 10);
     double Hstep = dt * R->internal_state->U;
+     // set the start point to 0 for better accuracy when the t_start is large
     const double t_start = R->physical_state->time;
+    R->physical_state->time = 0;
     const double initial_B = R->internal_state->B;
 
     const int kmax = R->options->gbs_kmax;
@@ -1220,7 +1222,7 @@ void ketju_run_integrator(struct ketju_system *R, double time_interval) {
                 if (R->num_particles < 2) {
                     // Particle motion becomes trivial.
                     // Need to only propagate the CoM
-                    trivial_propagation(R, t_start + time_interval -
+                    trivial_propagation(R, time_interval -
                                                R->physical_state->time);
                     break;
                 }
@@ -1256,8 +1258,7 @@ void ketju_run_integrator(struct ketju_system *R, double time_interval) {
             R->perf->successful_steps += 1;
             steps_since_reconstruction += 1;
 
-            double remaining_time =
-                time_interval - (R->physical_state->time - t_start);
+            double remaining_time = time_interval - R->physical_state->time;
             if (fabs(remaining_time / time_interval) <
                     R->options->output_time_relative_tolerance ||
                 fabs(remaining_time) <
@@ -1267,8 +1268,8 @@ void ketju_run_integrator(struct ketju_system *R, double time_interval) {
                 // Check that we're not overstepping and alter timestep if
                 // required
                 // Should work also for negative time intervals
-                // TODO this should be improved to allow for better accuracy in
-                // time
+                // TODO this could maybe be improved to allow for better
+                // accuracy in time
                 if (fabs(remaining_time) < fabs(Hstep / R->internal_state->U) ||
                     copysign(1, time_interval) * remaining_time < 0) {
                     Hstep = R->internal_state->U * remaining_time;
@@ -1300,6 +1301,9 @@ void ketju_run_integrator(struct ketju_system *R, double time_interval) {
         }
 
     } while (!finished);
+
+    // Restore the initial physical time offset
+    R->physical_state->time += t_start;
 
 
     // free temp storage
