@@ -3,6 +3,14 @@
 A highly parallel regularized N-body integrator library.
 
 ## Building
+Depending on whether you want to build the included unit tests 
+(recommended for developing the code), you will either first need to run
+    
+    git submodule update --init
+
+to pull in the unit test libraries required for building the tests;
+or pass `-DUNIT_TESTS=OFF` as an option to `cmake` in the commands below
+to disable the tests.
 
 Run
 
@@ -12,12 +20,12 @@ Run
 
 to configure the build system.
 Configuration options can then be changed by editing the `CMakeCache.txt` file
-either directly or using e.g. `ccmake`.
+either directly or using e.g. `ccmake`, but doing this is not typically required.
 
 After configuration, the library, a python shim and the standalone driver 
 program can be built by running `make` in the build directory.
 The standalone `nbody` program is found under `bin/`.
-*TODO: improve and document usage.*
+*TODO: improve and document usage of `nbody`.*
 
 ## Usage in other codes
 
