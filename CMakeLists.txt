@@ -87,6 +87,9 @@ target_compile_options(ketju-integrator
         $<$<OR:$<C_COMPILER_ID:Clang>,$<C_COMPILER_ID:AppleClang>>:
             -Wall -Wextra -Wpedantic -Wno-missing-braces -fPIC
         >
+        $<$<C_COMPILER_ID:Intel>:
+            -w3 -diag-disable:remark -fPIC
+        >
 )
 
 target_link_libraries(ketju-integrator PUBLIC m) # math lib
@@ -100,7 +103,7 @@ target_link_libraries(ketju-integrator PUBLIC ${MPI_C_LIBRARIES})
 # Need the linker flags also, target_link_options is only available in very
 # new cmake versions, so use this.
 # First need to strip extra whitespace in the MPI variable which causes errors
-string(STRIP ${MPI_C_LINK_FLAGS} MPI_C_LINK_FLAGS)
+string(STRIP "${MPI_C_LINK_FLAGS}" MPI_C_LINK_FLAGS)
 target_link_libraries(ketju-integrator PUBLIC ${MPI_C_LINK_FLAGS})
 
 # standalone executable
