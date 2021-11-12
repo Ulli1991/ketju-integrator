@@ -153,9 +153,9 @@ void ketju_init_gbs_comms(struct ketju_system *R) {
     // For now just split into even chunks, giving the extra tasks to the
     // first groups since they get slightly more work in some cases.
     // For the 2*k step sequence we're using, we can get perfectly even
-    // work distribution for kmax/2 groups (or kmax/2^n, n>=1, but the largest
+    // work distribution for k/2 groups (or k/2^n, n>=1, but the largest
     // number of groups is likely most efficient), so should aim for that.
-    const int max_num_gbs_groups = R->options->gbs_kmax / 2;
+    const int max_num_gbs_groups = R->internal_state->gbs_k / 2;
     const int num_gbs_groups = ti->main_group_size > max_num_gbs_groups
                                    ? max_num_gbs_groups
                                    : ti->main_group_size;
@@ -170,6 +170,7 @@ void ketju_init_gbs_comms(struct ketju_system *R) {
             tasks_per_group + (i < remaining_tasks ? 1 : 0);
     }
     int group_start_rank = 0, group_end_rank = gi->gbs_group_sizes[0] - 1;
+    ti->gbs_group_index = 0; // The starting state is not calloc'd necessarily
     for (int i = 1; ti->main_group_rank > group_end_rank; ++i) {
         group_start_rank += gi->gbs_group_sizes[i - 1];
         group_end_rank = group_start_rank + gi->gbs_group_sizes[i] -1 ;
@@ -222,7 +223,7 @@ void ketju_init_gbs_comms(struct ketju_system *R) {
     ti->gbs_comms_initialized = true;
 }
 
-static void free_gbs_comms(struct ketju_system *R) {
+void ketju_free_gbs_comms(struct ketju_system *R) {
     if (!R->internal_state->task_info->gbs_comms_initialized) {
         // not allocated
         return;
@@ -240,7 +241,7 @@ static void free_gbs_comms(struct ketju_system *R) {
 }
 
 void ketju_free_system(struct ketju_system *R) {
-    free_gbs_comms(R);
+    ketju_free_gbs_comms(R);
     MPI_Comm_free(&R->internal_state->task_info->main_comm);
     free_internal_state(R);
 

@@ -44,7 +44,7 @@ enum ketju_mst_algorithm {
 };
 
 struct ketju_integration_options {
-    int gbs_kmax;
+    int gbs_kmax; //< Maximum k (number of rows) the integrator can use
 
     double gbs_relative_tolerance;
 
@@ -82,7 +82,7 @@ struct ketju_integration_options {
 
 static const struct ketju_integration_options
     ketju_default_integration_options = {
-        .gbs_kmax = 4,
+        .gbs_kmax = 12,
         .gbs_relative_tolerance = 1e-9,
         .output_time_relative_tolerance = 1e-6,
         .output_time_absolute_tolerance = 1e-300,

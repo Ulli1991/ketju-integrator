@@ -130,6 +130,8 @@ struct ketju_system_internal_state {
     double T;
     double B;
 
+    int gbs_k;
+
     double (*aux_vel)[3]; 
     double (*acc)[3]; // velocity independent acceleration
     double (*acc_vd)[3]; // velocity dependent acceleration (for all particles at least for now)
@@ -239,6 +241,7 @@ static inline void loop_scheduling_N2(int N, int Nt, int task, int *istart,
 int ketju_do_bh_mergers(struct ketju_system *R);
 
 void ketju_init_gbs_comms(struct ketju_system *R);
+void ketju_free_gbs_comms(struct ketju_system *R);
 
 void ketju_build_mst(struct ketju_system *R);
 

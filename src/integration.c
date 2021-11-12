@@ -732,7 +732,15 @@ static void mst_leapfrog(struct ketju_system *R, double Hstep,
     drift(h / 2, R);
 }
 
-static int num_gbs_substeps(int k) { return 2 * k; }
+static int num_gbs_substeps(int row) { return 2 * row; }
+// sum of the number of function evalutations for a given number of rows k
+static int gbs_total_cost(int k) {
+    int sum = 1;
+    for (int i = 1; i <= k; ++i){
+        sum = sum + num_gbs_substeps(i);
+    }
+    return sum;
+}
 
 static int argmin_int(int *arr, int size) {
     int min = arr[0];
@@ -748,24 +756,24 @@ static int argmin_int(int *arr, int size) {
 
 // Get the values of k that are done by the gbs groups.
 // The values are in descending order
-static void get_gbs_ks_for_groups(struct ketju_system *R,
-                                  int (*gbs_ks_for_groups)[]) {
-    const int kmax = R->options->gbs_kmax;
+static void get_gbs_rows_for_groups(struct ketju_system *R,
+                                    int *gbs_rows_for_groups) {
+    const int k = R->internal_state->gbs_k;
     const int num_groups = R->internal_state->group_info->num_gbs_groups;
-    memset(gbs_ks_for_groups, 0, sizeof(int[num_groups][kmax]));
-    int(*gbs_ks)[kmax] = (int(*)[kmax])gbs_ks_for_groups;
+    memset(gbs_rows_for_groups, 0, sizeof(int[num_groups][k]));
+    int(*gbs_rows)[k] = (int(*)[k])gbs_rows_for_groups;
 
     int group_workloads[num_groups];
     memset(group_workloads, 0, sizeof group_workloads);
-    int k_ind[num_groups];
-    memset(k_ind, 0, sizeof k_ind);
+    int row_ind[num_groups];
+    memset(row_ind, 0, sizeof row_ind);
     // TODO could take into account group sizes also, or even divide the groups
     // based on the most even division of gbs steps/task
-    for (int k = kmax; k > 0; --k) {
-        int cost = num_gbs_substeps(k);
+    for (int row = k; row > 0; --row) {
+        int cost = num_gbs_substeps(row);
         int group_ind = argmin_int(group_workloads, num_groups);
         group_workloads[group_ind] += cost;
-        gbs_ks[group_ind][k_ind[group_ind]++] = k;
+        gbs_rows[group_ind][row_ind[group_ind]++] = row;
     }
 }
 
@@ -844,11 +852,11 @@ struct gbs_storage {
 };
 
 static void allocate_gbs_storage(struct gbs_storage *gs, int num_particles,
-                                 int num_pn_particles, int kmax) {
+                                 int num_pn_particles, int k) {
     gs->num_vars = (1 /*time*/ + 3 /*root_pos*/ + 3 /*root_vel*/ +
                     (num_particles - 1) * (3 /*edge_pos*/ + 3 /*edge_vel*/) +
                     num_pn_particles * (3 /*spin*/));
-    gs->num_rows = kmax + 1; // row for extrapolation result also
+    gs->num_rows = k + 1; // row for extrapolation result also
     gs->data = calloc(1, sizeof(double[gs->num_rows][gs->num_vars]));
 }
 
@@ -879,20 +887,20 @@ static void store_gbs_data(struct gbs_storage *gs, const struct ketju_system *R,
 // received. Called for all tasks
 static void post_gbs_receives(MPI_Request *requests, int *request_index,
                               struct gbs_storage *gs,
-                              int (*gbs_ks_for_groups)[],
+                              int *gbs_rows_for_groups,
                               const struct ketju_system *R) {
     tick(&R->perf->time_gbscomm);
 
     const struct task_info *ti = R->internal_state->task_info;
-    const int kmax = R->options->gbs_kmax;
+    const int k = R->internal_state->gbs_k;
     double(*data)[gs->num_vars] = (double(*)[gs->num_vars])gs->data;
-    int(*gbs_ks)[kmax] = (int(*)[kmax])gbs_ks_for_groups;
+    int(*gbs_rows)[k] = (int(*)[k])gbs_rows_for_groups;
     for (int i = 0; i < R->internal_state->group_info->num_gbs_groups; ++i) {
         // This task will be computing the data, so doesn't receive
         if (i == ti->gbs_group_index) continue;
 
-        for (int j = 0; j < kmax && gbs_ks[i][j] > 0; ++j) {
-            int data_row = gbs_ks[i][j] - 1;
+        for (int j = 0; j < k && gbs_rows[i][j] > 0; ++j) {
+            int data_row = gbs_rows[i][j] - 1;
             MPI_Ibcast(data[data_row], gs->num_vars, MPI_DOUBLE, 0,
                        ti->gbs_data_comms[i], &requests[(*request_index)++]);
         }
@@ -931,7 +939,8 @@ static void finish_gbs_comm(MPI_Request *requests, int request_index,
 
 static double get_n_double(int i) { return (2.0 * (i + 1.0)); }
 static void extrapolate_single_variable(double *y, double yscal, const int N,
-                                        double *result, double *error) {
+                                        double *result, double *error,
+                                        double *error_lower_order) {
     double gbsS[N][N];
     for (int i = 0; i < N; i++) {
         gbsS[i][0] = y[i];
@@ -945,10 +954,17 @@ static void extrapolate_single_variable(double *y, double yscal, const int N,
     }
     *result = gbsS[0][N - 1];
     *error = fabs(gbsS[0][N - 1] - gbsS[0][N - 2]) / yscal;
+    *error_lower_order = fabs(gbsS[0][N - 2] - gbsS[0][N - 3]) / yscal;
 }
+
+// Factor for next stepsize, from the Hairer et al. diff. eq. book
+static double gbs_new_stepsize_fac(double scaled_err, int k) {
+    return 0.94 * pow(0.65 / scaled_err, 1.0 / (2 * k - 1));
+}
+
 // Extrapolate a subset of variables on each task, comm the results.
 // Updates the fictitious timestep Hstep with the new estimate.
-static bool gbs_extrapolate(struct gbs_storage *gs, double *Hstep,
+static bool gbs_extrapolate(struct gbs_storage *gs, double *Hstep, int *new_k,
                             const struct ketju_system *R) {
     tick(&R->perf->time_gbsextr);
     // figure out which variables each task handles
@@ -974,11 +990,11 @@ static bool gbs_extrapolate(struct gbs_storage *gs, double *Hstep,
     int end_ind = start_ind + var_counts[rank];
 
     // run the extrapolation
-    const int kmax = R->options->gbs_kmax;
-    double y[kmax];
+    const int k = R->internal_state->gbs_k;
+    double y[k];
     double yscal;
-    double error;
-    double max_error = 0;
+    double error, error_lower_order;
+    double max_error[2] = {0., 0.};
     double result;
     double(*data)[gs->num_vars] = (double(*)[gs->num_vars])gs->data;
 
@@ -986,53 +1002,91 @@ static bool gbs_extrapolate(struct gbs_storage *gs, double *Hstep,
     const double abs_tol = 1e-100;
 
     for (int i = start_ind; i < end_ind; ++i) {
-        for (int j = 0; j < kmax; ++j) {
+        for (int j = 0; j < k; ++j) {
             y[j] = data[j][i];
         }
-        yscal = fabs(y[kmax-1]) + abs_tol;
+        yscal = fabs(y[k-1]) + abs_tol;
 
         if (i == 0) {
             yscal += R->options->output_time_absolute_tolerance;
         }
 
-        extrapolate_single_variable(y, yscal, kmax, &result, &error);
+        extrapolate_single_variable(y, yscal, k, &result, &error, &error_lower_order);
 
         // Explicit nan/inf handling in case they are produced.
         // The code after this can then assume finite values.
         if (!isfinite(result)) {
             // Set the max error so that the step size gets cut by a factor of
             // ~10, and then bail as the step has failed anyway.
-            max_error = R->options->gbs_relative_tolerance * 0.65 /
-                        pow(0.1, 2 * kmax + 1);
+            max_error[0] =
+                R->options->gbs_relative_tolerance * 0.65 / pow(0.1, 2 * k - 1);
             break;
         }
 
-        data[kmax][i] = result;
-        if (error > max_error) {
-            max_error = error;
+        data[k][i] = result;
+        if (error > max_error[0]) {
+            max_error[0] = error;
+        }
+        if (error_lower_order > max_error[1]) {
+            max_error[1] = error_lower_order;
         }
     }
     tock(&R->perf->time_gbsextr);
 
     tick(&R->perf->time_gbscomm);
     // check convergence across all task
-    MPI_Allreduce(MPI_IN_PLACE, &max_error, 1, MPI_DOUBLE, MPI_MAX,
+    MPI_Allreduce(MPI_IN_PLACE, &max_error, 2, MPI_DOUBLE, MPI_MAX,
                   R->internal_state->task_info->main_comm);
 
-    double Hnextfac =
-        0.94 * pow(0.65 / (max_error / R->options->gbs_relative_tolerance),
-                   1.0 / (2 * kmax + 1));
-    const bool converged = max_error < R->options->gbs_relative_tolerance;
+    const double scaled_err = max_error[0] / R->options->gbs_relative_tolerance;
+    const double scaled_err_lower = max_error[1] / R->options->gbs_relative_tolerance;
+    const bool converged = max_error[0] < R->options->gbs_relative_tolerance;
     if (converged) {
         // success, communicate data and set new timestep
-        MPI_Allgatherv(MPI_IN_PLACE, 0, MPI_DATATYPE_NULL, data[kmax],
-                       var_counts, start_inds, MPI_DOUBLE,
+        MPI_Allgatherv(MPI_IN_PLACE, 0, MPI_DATATYPE_NULL, data[k], var_counts,
+                       start_inds, MPI_DOUBLE,
                        R->internal_state->task_info->main_comm);
 
+#ifdef GBS_FIXED_ORDER
+        double Hnext = *Hstep * gbs_new_stepsize_fac(scaled_err, k);
+        *new_k = k;
+#else
+        // should we change the order?
+        // Check the conditions like in the Hairer et al. book case when
+        // convergence occurs on line k. We can't do the other cases stopping at
+        // k-1 or k+1 due to the parallelization strategy.
+        // The parameters might need tweaking for optimal performance in our
+        // implementation.
+        // TODO should the changes be done 2 at a time to ensure better load
+        // balance?
+        double H_k = *Hstep * gbs_new_stepsize_fac(scaled_err, k);
+        double H_km1 = *Hstep * gbs_new_stepsize_fac(scaled_err_lower, k - 1);
+        int A_k = gbs_total_cost(k);
+        int A_km1 = gbs_total_cost(k - 1);
+        double W_k = A_k / H_k;
+        double W_km1 = A_km1 / H_km1;
+        double Hnext = H_k;
+        
+        // Do division instead of W_km1 * 0.9 to handle negative stepsizes
+        // The k is kept in the range 4,kmax since very low orders are poor
+        // for parallelization.
+        if (W_k / W_km1 < 0.9  && k + 1 <= R->options->gbs_kmax) {
+            *new_k = k + 1;
+            Hnext = (H_k * gbs_total_cost(k + 1)) / A_k;
+        } else if (W_km1 / W_k < 0.9 && k > 4) {
+            *new_k = k - 1;
+            Hnext = H_km1;
+        } else {
+            *new_k = k;
+        }
+#endif
+
         // Avoid increasing the stepsize too aggressively
-        if (Hnextfac > 5.0) { Hnextfac = 5.0; }
-        *Hstep *= Hnextfac;
+        if (Hnext / *Hstep > 5.0) { Hnext = 5.0 * *Hstep; }
+        *Hstep = Hnext;
     } else {
+        *new_k = k; // keep the same order
+        double Hnextfac = gbs_new_stepsize_fac(scaled_err, k);
         // Ensure that the stepsize is decreased enough if the step failed,
         if (Hnextfac > 0.7) { Hnextfac = 0.7; }
         // but not excessively.
@@ -1179,10 +1233,30 @@ void ketju_run_integrator(struct ketju_system *R, double time_interval) {
     }
 
     tick(&R->perf->time_total);
-    // Initialize necessary comms if not done already by the caller
-    if (!R->internal_state->task_info->gbs_comms_initialized) {
-        ketju_init_gbs_comms(R);
-    }
+
+
+    // Init GBS stuff
+#ifdef GBS_FIXED_ORDER
+    R->internal_state->gbs_k = R->options->gbs_kmax;
+#else
+    R->internal_state->gbs_k =
+        R->options->gbs_kmax >= 4 ? 4 : R->options->gbs_kmax;
+#endif
+    ketju_init_gbs_comms(R);
+
+    int *gbs_rows_for_groups =
+        malloc(sizeof(int[R->internal_state->group_info->num_gbs_groups]
+                         [R->internal_state->gbs_k]));
+    get_gbs_rows_for_groups(R, gbs_rows_for_groups);
+    int *gbs_rows_for_this_group =
+        &gbs_rows_for_groups[R->internal_state->task_info->gbs_group_index *
+                             R->internal_state->gbs_k];
+
+    struct gbs_storage gbs_storage;
+    allocate_gbs_storage(&gbs_storage, R->num_particles, R->num_pn_particles,
+                         R->internal_state->gbs_k);
+
+    // Other init stuff
 
     ketju_build_mst(R);
     int steps_since_reconstruction = 0;
@@ -1197,19 +1271,11 @@ void ketju_run_integrator(struct ketju_system *R, double time_interval) {
     R->physical_state->time = 0;
     const double initial_B = R->internal_state->B;
 
-    const int kmax = R->options->gbs_kmax;
-    int gbs_ks_for_groups[R->internal_state->group_info->num_gbs_groups][kmax];
-    get_gbs_ks_for_groups(R, gbs_ks_for_groups);
-    int *gbs_ks_for_this_group =
-        gbs_ks_for_groups[R->internal_state->task_info->gbs_group_index];
 
     struct state_backup old_state;
     allocate_state_backup(&old_state, R->num_particles, R->num_pn_particles);
     store_state_backup(&old_state, R);
 
-    struct gbs_storage gbs_storage;
-    allocate_gbs_storage(&gbs_storage, R->num_particles, R->num_pn_particles,
-                         R->options->gbs_kmax);
 
     bool finished = false;
     do {
@@ -1234,23 +1300,25 @@ void ketju_run_integrator(struct ketju_system *R, double time_interval) {
             }
         }
         // Run the gbs substeps, communicating results in the background.
+        const int k = R->internal_state->gbs_k;
         int request_index = 0;
-        MPI_Request requests[kmax];
+        MPI_Request requests[k];
         post_gbs_receives(requests, &request_index, &gbs_storage,
-                          gbs_ks_for_groups, R);
-        for (int i = 0; i < kmax && gbs_ks_for_this_group[i]; ++i) {
+                          gbs_rows_for_groups, R);
+        for (int i = 0; i < k && gbs_rows_for_this_group[i]; ++i) {
             if (i) {
                 // not needed on the first round
                 restore_state_backup(&old_state, R);
             }
-            int k = gbs_ks_for_this_group[i];
-            mst_leapfrog(R, Hstep, num_gbs_substeps(k));
-            store_gbs_data(&gbs_storage, R, k);
-            post_gbs_send(requests, &request_index, &gbs_storage, R, k);
+            int row = gbs_rows_for_this_group[i];
+            mst_leapfrog(R, Hstep, num_gbs_substeps(row));
+            store_gbs_data(&gbs_storage, R, row);
+            post_gbs_send(requests, &request_index, &gbs_storage, R, row);
         }
         finish_gbs_comm(requests, request_index, R);
-
-        bool converged = gbs_extrapolate(&gbs_storage, &Hstep, R);
+        
+        int new_k;
+        bool converged = gbs_extrapolate(&gbs_storage, &Hstep, &new_k, R);
 
         if (converged) {
             update_system_from_gbs_result(R, &gbs_storage);
@@ -1282,6 +1350,30 @@ void ketju_run_integrator(struct ketju_system *R, double time_interval) {
                 }
 
                 store_state_backup(&old_state, R);
+
+                // Did the optimal GBS k change?
+                if (new_k != k) {
+
+                    R->internal_state->gbs_k = new_k;
+                    // Reinit the gbs structures
+                    ketju_free_gbs_comms(R);
+                    ketju_init_gbs_comms(R);
+                    gbs_rows_for_groups = realloc(
+                        gbs_rows_for_groups,
+                        sizeof(
+                            int[R->internal_state->group_info->num_gbs_groups]
+                               [R->internal_state->gbs_k]));
+                    get_gbs_rows_for_groups(R, gbs_rows_for_groups);
+                    gbs_rows_for_this_group =
+                        &gbs_rows_for_groups[R->internal_state->task_info
+                                                 ->gbs_group_index *
+                                             R->internal_state->gbs_k];
+
+                    free_gbs_storage(&gbs_storage);
+                    allocate_gbs_storage(&gbs_storage, R->num_particles,
+                                         R->num_pn_particles,
+                                         R->internal_state->gbs_k);
+                }
             }
         } else {
             restore_state_backup(&old_state, R);
@@ -1309,6 +1401,7 @@ void ketju_run_integrator(struct ketju_system *R, double time_interval) {
     // free temp storage
     free_state_backup(&old_state);
     free_gbs_storage(&gbs_storage);
+    ketju_free_gbs_comms(R);
 
     // Note that this is not really the error when dissipative PN forces are
     // enabled
