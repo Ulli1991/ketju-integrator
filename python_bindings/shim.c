@@ -26,7 +26,7 @@ void init_system(struct ketju_system *R, int num_pn_particles,
 int comm_initial_data(struct ketju_system *R, int num_ts) {
     int task;
     MPI_Comm_rank(MPI_COMM_WORLD, &task);
-    MPI_Bcast(&num_ts, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+    MPI_Bcast(&num_ts, 1, MPI_INT, 0, MPI_COMM_WORLD);
 
     MPI_Bcast(&R->physical_state->time, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
     MPI_Bcast(R->physical_state->mass, R->num_particles, MPI_DOUBLE, 0,
