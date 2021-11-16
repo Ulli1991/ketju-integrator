@@ -735,8 +735,26 @@ static void mst_leapfrog(struct ketju_system *R, double Hstep,
 static int num_gbs_substeps(int row) { return 2 * row; }
 // sum of the number of function evalutations for a given number of rows k
 static int gbs_total_cost(int k) {
-    int sum = 1;
-    for (int i = 1; i <= k; ++i){
+    // Cache values that are likely to be needed
+    static int values[16];
+    static bool inited = false;
+    if (!inited) {
+        int sum = 1;
+        for (int i = 1; i <= 16; ++i){
+            sum = sum + num_gbs_substeps(i);
+            values[i - 1] = sum;
+        }
+        inited = true;
+    }
+
+    if (k < 1) { return 0;}
+    if (k <= 16) {
+        return values[k - 1];
+    }
+
+    // Handle the unlikely larger values
+    int sum = values[15];
+    for (int i = 17; i <= k; ++i){
         sum = sum + num_gbs_substeps(i);
     }
     return sum;
@@ -963,8 +981,12 @@ static double gbs_new_stepsize_fac(double scaled_err, int k) {
 }
 
 // Extrapolate a subset of variables on each task, comm the results.
-// Updates the fictitious timestep Hstep with the new estimate.
-static bool gbs_extrapolate(struct gbs_storage *gs, double *Hstep, int *new_k,
+// Updates the fictitious timestep Hstep (data in/out) with the new optimal
+// timestep estimate for the current k value,
+// and new_k and Hstep_new_k (only out) for the values at the new proposed k.
+// Whether the k is actually changed is decided in the main loop.
+static bool gbs_extrapolate(struct gbs_storage *gs, double *Hstep,
+                            int *new_k, double *Hstep_new_k,
                             const struct ketju_system *R) {
     tick(&R->perf->time_gbsextr);
     // figure out which variables each task handles
@@ -1050,15 +1072,19 @@ static bool gbs_extrapolate(struct gbs_storage *gs, double *Hstep, int *new_k,
 #ifdef GBS_FIXED_ORDER
         double Hnext = *Hstep * gbs_new_stepsize_fac(scaled_err, k);
         *new_k = k;
+        // Avoid increasing the stepsize too aggressively
+        if (Hnext / *Hstep > 5.0) { Hnext = 5.0 * *Hstep; }
+        *Hstep_new_k = Hnext;
+        *Hstep = Hnext;
 #else
-        // should we change the order?
+        // Should we change the integration order?
         // Check the conditions like in the Hairer et al. book case when
         // convergence occurs on line k. We can't do the other cases stopping at
         // k-1 or k+1 due to the parallelization strategy.
-        // The parameters might need tweaking for optimal performance in our
-        // implementation.
-        // TODO should the changes be done 2 at a time to ensure better load
-        // balance?
+        // Odd k values cause slightly uneven workload balance for the
+        // parallelization, but changing the order 2 at a time would likely
+        // also lead to extra work in some cases, so it's not clear which is 
+        // better in general. Doing the standard change by one for now.
         double H_k = *Hstep * gbs_new_stepsize_fac(scaled_err, k);
         double H_km1 = *Hstep * gbs_new_stepsize_fac(scaled_err_lower, k - 1);
         int A_k = gbs_total_cost(k);
@@ -1079,11 +1105,13 @@ static bool gbs_extrapolate(struct gbs_storage *gs, double *Hstep, int *new_k,
         } else {
             *new_k = k;
         }
-#endif
 
         // Avoid increasing the stepsize too aggressively
         if (Hnext / *Hstep > 5.0) { Hnext = 5.0 * *Hstep; }
-        *Hstep = Hnext;
+        if (H_k / *Hstep > 5.0) { H_k = 5.0 * *Hstep; }
+        *Hstep_new_k = Hnext;
+        *Hstep = H_k;
+#endif
     } else {
         *new_k = k; // keep the same order
         double Hnextfac = gbs_new_stepsize_fac(scaled_err, k);
@@ -1092,6 +1120,7 @@ static bool gbs_extrapolate(struct gbs_storage *gs, double *Hstep, int *new_k,
         // but not excessively.
         if (Hnextfac < 1e-3) { Hnextfac = 1e-3; }
         *Hstep *= Hnextfac;
+        *Hstep_new_k = *Hstep;
     }
 
     tock(&R->perf->time_gbscomm);
@@ -1318,7 +1347,9 @@ void ketju_run_integrator(struct ketju_system *R, double time_interval) {
         finish_gbs_comm(requests, request_index, R);
         
         int new_k;
-        bool converged = gbs_extrapolate(&gbs_storage, &Hstep, &new_k, R);
+        double Hstep_new_k;
+        bool converged = gbs_extrapolate(&gbs_storage, &Hstep,
+                                         &new_k, &Hstep_new_k, R);
 
         if (converged) {
             update_system_from_gbs_result(R, &gbs_storage);
@@ -1333,27 +1364,40 @@ void ketju_run_integrator(struct ketju_system *R, double time_interval) {
                     R->options->output_time_absolute_tolerance) {
                 finished = true;
             } else {
-                // Check that we're not overstepping and alter timestep if
-                // required
+                bool change_order = false;
+                // Check that we're not overstepping or already past the end
+                // and alter timestep if required.
                 // Should work also for negative time intervals
                 // TODO this could maybe be improved to allow for better
                 // accuracy in time
                 if (fabs(remaining_time) < fabs(Hstep / R->internal_state->U) ||
-                    copysign(1, time_interval) * remaining_time < 0) {
+                    time_interval * remaining_time < 0
+                    ) {
+
                     Hstep = R->internal_state->U * remaining_time;
+
+                    if (new_k < k) {
+                        // Order can be reduced even if near the end, since it
+                        // should always reduce the workload.
+                        // But the new proposed timestep can be smaller than the
+                        // step to the end, and have the wrong sign.
+                        change_order = true;
+                        if (fabs(Hstep_new_k) < fabs(Hstep)) {
+                            Hstep = copysign(Hstep_new_k, Hstep);
+                        }
+                    }
+                } else if (new_k != k &&
+                           fabs(remaining_time)
+                           > fabs(Hstep_new_k / R->internal_state->U)
+                          ) {
+                    // Change order only if it doesn't result in overstepping,
+                    // otherwise the work/step calculation doesn't give the
+                    // correct result.
+                    change_order = true;
+                    Hstep = Hstep_new_k;
                 }
-                // new stepsize set by gbs_extrapolate otherwise
-                if (steps_since_reconstruction >=
-                    R->options->steps_between_mst_reconstruction) {
-                    ketju_build_mst(R);
-                    steps_since_reconstruction = 0;
-                }
 
-                store_state_backup(&old_state, R);
-
-                // Did the optimal GBS k change?
-                if (new_k != k) {
-
+                if (change_order) {
                     R->internal_state->gbs_k = new_k;
                     // Reinit the gbs structures
                     ketju_free_gbs_comms(R);
@@ -1374,6 +1418,15 @@ void ketju_run_integrator(struct ketju_system *R, double time_interval) {
                                          R->num_pn_particles,
                                          R->internal_state->gbs_k);
                 }
+
+                if (steps_since_reconstruction >=
+                    R->options->steps_between_mst_reconstruction) {
+                    ketju_build_mst(R);
+                    steps_since_reconstruction = 0;
+                }
+
+                store_state_backup(&old_state, R);
+
             }
         } else {
             restore_state_backup(&old_state, R);
