@@ -90,6 +90,7 @@ int main(int argc, char *argv[]) {
             "time_total:       %f\n"
             "successful_steps: %d\n"
             "failed_steps: %d\n"
+            "total_work: %g\n"
             "relative_energy_error: %e\n"
             ,
             R.perf->time_force,
@@ -105,6 +106,7 @@ int main(int argc, char *argv[]) {
             R.perf->time_gbsextr,
             R.perf->time_gbsextr/R.perf->time_total*100,
             R.perf->time_total, R.perf->successful_steps, R.perf->failed_steps,
+            R.perf->total_work,
             R.perf->relative_energy_error);
 
         printf("Physical time %e\n", R.physical_state->time);

@@ -980,36 +980,49 @@ static double gbs_new_stepsize_fac(double scaled_err, int k) {
     return 0.94 * pow(0.65 / scaled_err, 1.0 / (2 * k - 1));
 }
 
+// Indices for the variables each task handles
+struct gbs_extrapolation_indices {
+    int *start_inds;
+    int *var_counts;
+};
+
+void init_gbs_extrapolation_indices(struct gbs_extrapolation_indices *inds,
+                                    int num_tasks, int num_vars) {
+    inds->start_inds = calloc(1, sizeof(int[num_tasks]));
+    inds->var_counts = calloc(1, sizeof(int[num_tasks]));
+    // figure out which variables each task handles
+    const int vars_per_task = num_vars / num_tasks;
+    const int remainder = num_vars % num_tasks;
+    
+    for (int i = 0; i < num_tasks; ++i) {
+        inds->start_inds[i] = i > 0 ? 
+                    inds->start_inds[i - 1] + inds->var_counts[i - 1] : 0;
+        inds->var_counts[i] = vars_per_task;
+        // handle the remainder on the last (remainder) tasks, one extra var
+        // each
+        if (i >= num_tasks - remainder) { inds->var_counts[i] += 1; }
+    }
+}
+
+void free_gbs_extrapolation_inds(struct gbs_extrapolation_indices *inds) {
+    free(inds->start_inds);
+    free(inds->var_counts);
+}
+
 // Extrapolate a subset of variables on each task, comm the results.
 // Updates the fictitious timestep Hstep (data in/out) with the new optimal
 // timestep estimate for the current k value,
 // and new_k and Hstep_new_k (only out) for the values at the new proposed k.
 // Whether the k is actually changed is decided in the main loop.
-static bool gbs_extrapolate(struct gbs_storage *gs, double *Hstep,
-                            int *new_k, double *Hstep_new_k,
+static bool gbs_extrapolate(struct gbs_storage *gs,
+                            struct gbs_extrapolation_indices *ei,
+                            double *Hstep, int *new_k, double *Hstep_new_k,
                             const struct ketju_system *R) {
     tick(&R->perf->time_gbsextr);
-    // figure out which variables each task handles
-    // TODO this should stay the same during the integration (except mergers)
-    // so could be moved out of the inner loop
-    const int num_tasks = R->internal_state->task_info->main_group_size;
-    const int vars_per_task = gs->num_vars / num_tasks;
-    const int remainder =
-        gs->num_vars % R->internal_state->task_info->main_group_size;
-
-    int start_inds[num_tasks];
-    int var_counts[num_tasks];
-    for (int i = 0; i < num_tasks; ++i) {
-        start_inds[i] = i > 0 ? start_inds[i - 1] + var_counts[i - 1] : 0;
-        var_counts[i] = vars_per_task;
-        // handle the remainder on the last (remainder) tasks, one extra var
-        // each
-        if (i >= num_tasks - remainder) { var_counts[i] += 1; }
-    }
 
     const int rank = R->internal_state->task_info->main_group_rank;
-    int start_ind = start_inds[rank];
-    int end_ind = start_ind + var_counts[rank];
+    int start_ind = ei->start_inds[rank];
+    int end_ind = start_ind + ei->var_counts[rank];
 
     // run the extrapolation
     const int k = R->internal_state->gbs_k;
@@ -1065,18 +1078,10 @@ static bool gbs_extrapolate(struct gbs_storage *gs, double *Hstep,
     const bool converged = max_error[0] < R->options->gbs_relative_tolerance;
     if (converged) {
         // success, communicate data and set new timestep
-        MPI_Allgatherv(MPI_IN_PLACE, 0, MPI_DATATYPE_NULL, data[k], var_counts,
-                       start_inds, MPI_DOUBLE,
+        MPI_Allgatherv(MPI_IN_PLACE, 0, MPI_DATATYPE_NULL,
+                       data[k], ei->var_counts, ei->start_inds, MPI_DOUBLE,
                        R->internal_state->task_info->main_comm);
 
-#ifdef GBS_FIXED_ORDER
-        double Hnext = *Hstep * gbs_new_stepsize_fac(scaled_err, k);
-        *new_k = k;
-        // Avoid increasing the stepsize too aggressively
-        if (Hnext / *Hstep > 5.0) { Hnext = 5.0 * *Hstep; }
-        *Hstep_new_k = Hnext;
-        *Hstep = Hnext;
-#else
         // Should we change the integration order?
         // Check the conditions like in the Hairer et al. book case when
         // convergence occurs on line k. We can't do the other cases stopping at
@@ -1111,7 +1116,6 @@ static bool gbs_extrapolate(struct gbs_storage *gs, double *Hstep,
         if (H_k / *Hstep > 5.0) { H_k = 5.0 * *Hstep; }
         *Hstep_new_k = Hnext;
         *Hstep = H_k;
-#endif
     } else {
         *new_k = k; // keep the same order
         double Hnextfac = gbs_new_stepsize_fac(scaled_err, k);
@@ -1250,6 +1254,21 @@ static void trivial_propagation(struct ketju_system *R, double time_interval) {
     R->physical_state->time += time_interval;
 }
 
+static double step_total_work(const struct ketju_system *R) {
+    double substeps = gbs_total_cost(R->internal_state->gbs_k);
+    double interactions_per_step =
+            .5 * R->num_particles * (R->options->no_star_star_gravity ?
+                                     R->num_pn_particles : R->num_particles - 1)
+                // PN terms are more expensive than other force terms, but
+                // that's hard to quantify so just use the number of
+                // interactions here as well.
+                + ((double)R->num_pn_particles * (R->num_pn_particles - 1)
+                   * (R->options->PN_flags & KETJU_PN_THREEBODY ?
+                      R->num_pn_particles - 2 : 1)
+                  );
+    return substeps * interactions_per_step;
+}
+
 void ketju_run_integrator(struct ketju_system *R, double time_interval) {
     // TODO return status/error code?
 
@@ -1265,12 +1284,8 @@ void ketju_run_integrator(struct ketju_system *R, double time_interval) {
 
 
     // Init GBS stuff
-#ifdef GBS_FIXED_ORDER
-    R->internal_state->gbs_k = R->options->gbs_kmax;
-#else
     R->internal_state->gbs_k =
         R->options->gbs_kmax >= 4 ? 4 : R->options->gbs_kmax;
-#endif
     ketju_init_gbs_comms(R);
 
     int *gbs_rows_for_groups =
@@ -1284,6 +1299,10 @@ void ketju_run_integrator(struct ketju_system *R, double time_interval) {
     struct gbs_storage gbs_storage;
     allocate_gbs_storage(&gbs_storage, R->num_particles, R->num_pn_particles,
                          R->internal_state->gbs_k);
+    struct gbs_extrapolation_indices gbs_indices;
+    init_gbs_extrapolation_indices(&gbs_indices,
+                                   R->internal_state->task_info->main_group_size,
+                                   gbs_storage.num_vars);
 
     // Other init stuff
 
@@ -1326,6 +1345,10 @@ void ketju_run_integrator(struct ketju_system *R, double time_interval) {
                 compute_total_energy(R);
                 store_state_backup(&old_state, R);
                 gbs_storage.num_vars -= num_merged * 9; // pos, vel, spin
+                free_gbs_extrapolation_inds(&gbs_indices);
+                init_gbs_extrapolation_indices(&gbs_indices,
+                                   R->internal_state->task_info->main_group_size,
+                                   gbs_storage.num_vars);
             }
         }
         // Run the gbs substeps, communicating results in the background.
@@ -1348,9 +1371,10 @@ void ketju_run_integrator(struct ketju_system *R, double time_interval) {
         
         int new_k;
         double Hstep_new_k;
-        bool converged = gbs_extrapolate(&gbs_storage, &Hstep,
+        bool converged = gbs_extrapolate(&gbs_storage, &gbs_indices, &Hstep,
                                          &new_k, &Hstep_new_k, R);
 
+        R->perf->total_work += step_total_work(R);
         if (converged) {
             update_system_from_gbs_result(R, &gbs_storage);
             compute_total_energy(R);
@@ -1368,8 +1392,6 @@ void ketju_run_integrator(struct ketju_system *R, double time_interval) {
                 // Check that we're not overstepping or already past the end
                 // and alter timestep if required.
                 // Should work also for negative time intervals
-                // TODO this could maybe be improved to allow for better
-                // accuracy in time
                 if (fabs(remaining_time) < fabs(Hstep / R->internal_state->U) ||
                     time_interval * remaining_time < 0
                     ) {
@@ -1417,6 +1439,7 @@ void ketju_run_integrator(struct ketju_system *R, double time_interval) {
                     allocate_gbs_storage(&gbs_storage, R->num_particles,
                                          R->num_pn_particles,
                                          R->internal_state->gbs_k);
+                    // extrapolation indices not changed here
                 }
 
                 if (steps_since_reconstruction >=
@@ -1454,6 +1477,7 @@ void ketju_run_integrator(struct ketju_system *R, double time_interval) {
     // free temp storage
     free_state_backup(&old_state);
     free_gbs_storage(&gbs_storage);
+    free_gbs_extrapolation_inds(&gbs_indices);
     ketju_free_gbs_comms(R);
 
     // Note that this is not really the error when dissipative PN forces are

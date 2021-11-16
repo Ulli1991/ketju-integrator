@@ -80,9 +80,10 @@ struct ketju_integration_options {
     // BHs.
 };
 
+// Default values applied when creating the system
 static const struct ketju_integration_options
     ketju_default_integration_options = {
-        .gbs_kmax = 12,
+        .gbs_kmax = 16,
         .gbs_relative_tolerance = 1e-9,
         .output_time_relative_tolerance = 1e-6,
         .output_time_absolute_tolerance = 1e-300,
@@ -138,6 +139,7 @@ struct ketju_performance_counters {
 
     int successful_steps;
     int failed_steps;
+    double total_work; //< ~ Number of force evaluations done
     double relative_energy_error;
     //< Relative change in the energy of the system.
     //  Gives information on accuracy only when PN terms are disabled

@@ -66,6 +66,7 @@ class CPerformanceCounters(ctypes.Structure):
 
         ("successful_steps", ctypes.c_int),
         ("failed_steps", ctypes.c_int),
+        ("total_work", ctypes.c_double),
         ("relative_energy_error", ctypes.c_double),
     ]
 
