@@ -124,6 +124,8 @@ TEST(Integration_versus_old_integrator, binary_system_no_pn) {
                         std::abs(expected[p].spin[i] * reltol));
         }
     }
+
+    ketju_free_system(&R);
 }
 
 TEST(Integration_threebody_terms,
@@ -190,6 +192,8 @@ TEST(Integration_threebody_terms,
                         std::abs(0.085 * reltol));
         }
     }
+    ketju_free_system(&R);
+    ketju_free_system(&R2);
 }
 
 // The full PN case with different unit systems to check that the units
@@ -273,6 +277,8 @@ TEST(Integration_units,
                         std::abs(R.physical_state->spin[p][i] * reltol));
         }
     }
+    ketju_free_system(&R);
+    ketju_free_system(&R2);
 }
 
 // Some simple tests where the BHs merge
@@ -316,6 +322,7 @@ TEST(Integration_with_mergers, head_on_merger) {
         EXPECT_NEAR(R.physical_state->vel[0][i], expected[0].vel[i], tol);
         EXPECT_NEAR(R.physical_state->spin[0][i], expected[0].spin[i], tol);
     }
+    ketju_free_system(&R);
 }
 
 TEST(Integration_with_mergers, merger_from_orbit) {
@@ -357,4 +364,6 @@ TEST(Integration_with_mergers, merger_from_orbit) {
     ASSERT_GT(R.physical_state->mass[0], 1.8);
 
     // Don't know what to check for in the coordinates
+
+    ketju_free_system(&R);
 }

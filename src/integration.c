@@ -1478,6 +1478,7 @@ void ketju_run_integrator(struct ketju_system *R, double time_interval) {
     free_state_backup(&old_state);
     free_gbs_storage(&gbs_storage);
     free_gbs_extrapolation_inds(&gbs_indices);
+    free(gbs_rows_for_groups);
     ketju_free_gbs_comms(R);
 
     // Note that this is not really the error when dissipative PN forces are
