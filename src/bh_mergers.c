@@ -392,6 +392,19 @@ static void merge_bhs(struct ketju_system *R, int i, int j) {
     info->chi_remnant =
         vector_norm(res.S) / (bh_input.G / bh_input.c * res.m * res.m);
     info->v_kick = vector_norm(res.vkick);
+    info->extra_index1 = i;
+    info->extra_index2 = R->num_particles - 1;
+
+    // Update extra_index1 for previous mergers, index2 won't change (see below)
+    for (int k = 0; k < R->num_mergers; ++k) {
+        struct ketju_bh_merger_info *old_info = &R->merger_infos[k];
+        if (old_info->extra_index1 == j) {
+            old_info->extra_index1 = info->extra_index2;
+        } else if (old_info->extra_index1 > j) {
+            old_info->extra_index1 -= 1;
+        }
+    }
+
     R->num_mergers += 1;
 
     // Shift everything right of particle j left by one place to overwrite
@@ -406,6 +419,9 @@ static void merge_bhs(struct ketju_system *R, int i, int j) {
             sizeof(double[3]) * (R->num_pn_particles - (j + 1)));
 
     // The extra data of the merged particle is moved to the end of the array
+    // after the particles that still exist.
+    // If there are multiple mergers, the removed particles will stay where they
+    // are so that their merger_info extra_indices don't need to be updated.
     size_t elem_size = R->particle_extra_data_elem_size;
     char *extra_data = R->particle_extra_data;
     if (extra_data) {

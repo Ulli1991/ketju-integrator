@@ -10,6 +10,7 @@ set(UNIT_TEST_SRCS
     main.cpp
     mst_construction.cpp
     integration.cpp
+    mergers.cpp
     )
 
 add_executable(ketju-integrator-unit-tests ${UNIT_TEST_SRCS})

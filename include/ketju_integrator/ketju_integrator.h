@@ -150,6 +150,8 @@ struct ketju_bh_merger_info {
     double m1, m2, m_remnant; // masses
     double chi1, chi2, chi_remnant; // dimensionless spin magnitudes
     double v_kick; // magnitude of kick velocity
+    int extra_index1,
+        extra_index2; // Indices of the components in particle_extra_data
 };
 
 struct ketju_system {
