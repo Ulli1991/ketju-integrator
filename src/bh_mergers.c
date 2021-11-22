@@ -400,7 +400,8 @@ static void merge_bhs(struct ketju_system *R, int i, int j) {
         struct ketju_bh_merger_info *old_info = &R->merger_infos[k];
         if (old_info->extra_index1 == j) {
             old_info->extra_index1 = info->extra_index2;
-        } else if (old_info->extra_index1 > j) {
+        } else if (old_info->extra_index1 > j &&
+                   old_info->extra_index1 < R->num_particles) {
             old_info->extra_index1 -= 1;
         }
     }

@@ -80,6 +80,8 @@ class CBHMergerInfo(ctypes.Structure):
         ("chi2", ctypes.c_double),
         ("chi_remnant", ctypes.c_double),
         ("vkick", ctypes.c_double),
+        ("extra_index1", ctypes.c_int),
+        ("extra_index2", ctypes.c_int),
     ]
 
 class CSystem(ctypes.Structure):
