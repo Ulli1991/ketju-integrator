@@ -314,18 +314,6 @@ static void compute_PN_acc_single(struct ketju_system *R, int i,
                           c5;
         }
 
-        // XXX: There may still be some error in the following terms: in a
-        // perfectly symmetrical system which is in it's PN CoM rest frame by
-        // construction there is a small secular difference compared to the old
-        // implementation using the relative acceleration formula, while up
-        // to 2.5PN the results agree. The error is ~10x larger for the 3.5
-        // terms than for the 3.0 terms (but e.g. ignoring the additional gauge
-        // transform terms results in ~1000x larger error). In practice the
-        // moving PN CoM from any kind of mass asymmetry (>~1%), spins or other
-        // particles will dominate over this small difference, so it shouldn't
-        // matter in practice. One possibility is some numerical cancellation in
-        // the long formulae, if there is no typo either below or in the papers.
-
         if (flags & KETJU_PN_3_0_ACC) {
             // Here the logarithmic terms have been removed using the gauge
             // transformation eq. (204), which is explained in more detail in
@@ -342,7 +330,7 @@ static void compute_PN_acc_single(struct ketju_system *R, int i,
                       15. / 2. * vjnij2 * vj4 + 4. * vivj * vj4 -
                       2. * vj4 * vj2) +
                  G2 * mi * mj / rij3 *
-                     (171. / 8. * vinij2 * vinij2 +
+                     (-171. / 8. * vinij2 * vinij2 +
                       171. / 2. * vinij2 * vinij * vjnij -
                       723. / 4. * vinij2 * vjnij2 +
                       383. / 2. * vinij * vjnij2 * vjnij - 455. / 8. * vjnij4 +
@@ -370,7 +358,7 @@ static void compute_PN_acc_single(struct ketju_system *R, int i,
                       18. * vi2 + 123. / 64. * pi2 * vij2 + 33. * vivj -
                       33. / 2. * vj2) +
                  G3 * mi2 * mj / rij4 *
-                     (-45887 / 168 * vinij2 + 24025. / 42. * vinij * vjnij -
+                     (-45887. / 168. * vinij2 + 24025. / 42. * vinij * vjnij -
                       10469. / 42. * vjnij2 + 48197. / 840. * vi2 -
                       36227. / 420. * vivj + 36227. / 840. * vj2) +
                  G4 / (rij4 * rij) *
@@ -471,7 +459,7 @@ static void compute_PN_acc_single(struct ketju_system *R, int i,
                       2864. / 105. * vivj - 1768. / 105. * vj2) +
                  G2 * mi * mj / rij3 *
                      (60. * vijnij4 - 348. / 5. * vinij2 * vij2 +
-                      648. / 5. * vinij * vjnij * vij2 - 66. * vjnij2 * vij2 +
+                      684. / 5. * vinij * vjnij * vij2 - 66. * vjnij2 * vij2 +
                       334. / 35. * vi2 * vi2 - 1336. / 35. * vi2 * vivj +
                       1308. / 35. * vivj * vivj + 654. / 35. * vi2 * vj2 -
                       1252. / 35. * vivj * vj2 + 292. / 35. * vj4)) /

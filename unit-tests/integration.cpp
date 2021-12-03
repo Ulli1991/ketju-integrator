@@ -8,10 +8,6 @@
 // Comparisons to the old AR-CHAIN based integrator, with the reference values
 // computed using gbs tolerance = 1e-14 and output time tolerance = 1e-12.
 
-// In principle situations in which the PN corrected CoM is at rest can be
-// compared reliably, but for some reason starting at 3PN level there is a small
-// secular error so the below test doesn't pass.
-#if 0
 TEST(Integration_versus_old_integrator, binary_system_full_pn_no_spin) {
     
     struct ketju_system R;
@@ -39,7 +35,7 @@ TEST(Integration_versus_old_integrator, binary_system_full_pn_no_spin) {
     ketju_run_integrator(&R, tend);
     
     const double reltol =
-        5 * R.options->gbs_relative_tolerance * R.perf->successful_steps;
+        10 * R.options->gbs_relative_tolerance * R.perf->successful_steps;
 
     ASSERT_EQ(R.num_pn_particles, 2);
     ASSERT_NEAR(R.physical_state->time, tend,
@@ -67,7 +63,6 @@ TEST(Integration_versus_old_integrator, binary_system_full_pn_no_spin) {
         }
     }
 }
-#endif
 
 TEST(Integration_versus_old_integrator, binary_system_no_pn) {
     
