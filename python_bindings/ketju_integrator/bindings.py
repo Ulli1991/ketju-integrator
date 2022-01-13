@@ -39,6 +39,7 @@ class CIntegratorOptions(ctypes.Structure):
         ('star_star_softening', ctypes.c_double),
         ('no_star_star_gravity', ctypes.c_bool),
         ('enable_bh_mergers', ctypes.c_bool),
+        ('bh_merger_distance_in_Rs', ctypes.c_double),
         ('enable_bh_merger_kicks', ctypes.c_bool),
     ]
 

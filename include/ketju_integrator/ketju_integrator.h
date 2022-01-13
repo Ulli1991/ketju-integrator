@@ -73,7 +73,11 @@ struct ketju_integration_options {
     // including pn-particles are computed.
     bool enable_bh_mergers;
     //< Check for mergers between BHs (pn particles).
-    // BHs are merged if they come within 6 Schwarzschild radii of each other.
+    double bh_merger_distance_in_Rs;
+    //< If BH mergers are enabled, the particles are merged when they come within
+    // this factor * 2G/c^2 * (m1 + m2).
+    // The PN forces break down below about 5, and for suppressing PN CoM
+    // oscillations values of ~>10 are recommended.
     bool enable_bh_merger_kicks;
     //< Include the merger kick in BH mergers.
     // If disabled the merger remnant moves at the CoM velocity of the merged
@@ -95,6 +99,7 @@ static const struct ketju_integration_options
         .star_star_softening = 0.,
         .no_star_star_gravity = false,
         .enable_bh_mergers = true,
+        .bh_merger_distance_in_Rs = 12,
         .enable_bh_merger_kicks = true,
 };
 

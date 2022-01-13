@@ -506,3 +506,219 @@ void ketju_compute_PN_acc(struct ketju_system *R, double (*vel_to_use)[3],
     }
     tock(&R->perf->time_force);
 }
+
+// PN CoM calculations, needed for merger remnants.
+// The PN terms shift the CoM of the system, so that near the merger the
+// Newtonian CoM oscillates with a velocity of several hundred km/s.
+// This corrects for that, but the formulae aren't perfect and have some
+// remaining oscillations.
+
+static double binary_PN_CoM_momentum_single_contribution(struct ketju_system *R,
+                                                         int i, int j,
+                                                         double CoM_vel[3]);
+
+// Calculate the PN corrected CoM velocity of a binary at indices i, j <
+// num_pn_particles (returns immediatedly otherwise).
+// If spin terms are enabled, the acceleration of the binary
+// is needed, and this calculation changes the internal acc_vd values, which is
+// safe to do if we're not in the middle of kick calculation. The CoM velocity
+// is calculated from the momentum based on the total mass + Newtonian energy of
+// the system (~1PN accuracy), which should be accurate enough for the main
+// purpose of calculating the binary rest frame for mergers, as the CoM
+// calculated with these formulae isn't completely conserved anyway, likely due
+// to missing higher order terms (e.g. the actual conserved CoM for equations of
+// motion at 1PN level contains 2PN and maybe higher terms, but now we have only
+// 1PN for that case).
+void ketju_binary_PN_CoM_velocity(struct ketju_system *R, int i, int j,
+                                  double CoM_vel[3]) {
+    if (i > R->num_pn_particles || j > R->num_pn_particles || i < 0 || j < 0)
+        return;
+
+    double(*acc_pn)[3] = R->internal_state->acc_vd;
+    memset(acc_pn, 0, sizeof(double[R->num_particles][3]));
+
+    // The contribution is the of the same form for both particles, so use a
+    // helper function
+    double CoM_p1[3], CoM_p2[3];
+    double m1 = binary_PN_CoM_momentum_single_contribution(R, i, j, CoM_p1);
+    double m2 = binary_PN_CoM_momentum_single_contribution(R, j, i, CoM_p2);
+
+    for (int k = 0; k < 3; ++k) {
+        CoM_vel[k] = (CoM_p1[k] + CoM_p2[k]) / (m1 + m2);
+    }
+}
+
+// helper used above
+static double binary_PN_CoM_momentum_single_contribution(struct ketju_system *R,
+                                                         int i, int j,
+                                                         double CoM_p[3]) {
+
+    struct ketju_system_physical_state *ps = R->physical_state;
+    double(*vel)[3] = ps->vel;
+    // Compute the enabled terms
+    const unsigned int flags = R->options->PN_flags;
+
+    // Helper values
+    const double G = R->constants->G;
+    const double G2 = G * G;
+    const double G3 = G2 * G;
+    const double c = R->constants->c;
+    const double c2 = c * c;
+    const double c4 = c2 * c2;
+    const double c6 = c4 * c2;
+
+    const double mi = ps->mass[i];
+    const double mi2 = mi * mi;
+    const double mi3 = mi2 * mi;
+    const double vi2 = vector_dot(vel[i], vel[i]);
+    const double vi4 = vi2 * vi2;
+
+    double rv_ij[3], nv_ij[3], vv_ij[3];
+    particle_separation_and_relative_velocity(R, i, j, rv_ij, vv_ij, vel);
+    const double rij = norm_and_unit_vector(rv_ij, nv_ij);
+    const double rij2 = rij * rij;
+    const double rij3 = rij2 * rij;
+
+    const double mj = ps->mass[j];
+    const double mj2 = mj * mj;
+    const double mj3 = mj2 * mj;
+
+    const double vivj = vector_dot(vel[i], vel[j]);
+    const double vj2 = vector_dot(vel[j], vel[j]);
+    const double vj4 = vj2 * vj2;
+
+    const double vjnij = vector_dot(vel[j], nv_ij);
+    const double vjnij2 = vjnij * vjnij;
+    const double vjnij3 = vjnij2 * vjnij;
+    const double vjnij4 = vjnij2 * vjnij2;
+
+    const double vinij = vector_dot(vel[i], nv_ij);
+    const double vinij2 = vinij * vinij;
+    const double vinij3 = vinij2 * vinij;
+    const double vinij4 = vinij2 * vinij2;
+
+    // Newtonian part
+    double vi_fac = mi;
+    double nij_fac = 0;
+
+    // Spin independend part.
+    // From de Andrade et al. 2001 Class. Quantum Grav. 18 753
+    // doi:10.1088/0264-9381/18/5/301
+    // eq. 4.2 with the gauge transform applied to remove the log terms at 3PN
+    // level.
+
+    if (flags & KETJU_PN_1_0_ACC) {
+        nij_fac += -G * mi * mj / (2. * rij) * vinij / c2;
+        vi_fac += (.5 * mi * vi2 - G * mi * mj / (2. * rij)) / c2;
+    }
+
+    if (flags & KETJU_PN_2_0_ACC) {
+        nij_fac +=
+            (G2 * mi2 * mj / rij2 * (29. / 4. * vinij - 9. / 4. * vjnij) +
+             G * mi * mj / rij *
+                 (3. / 8. * vinij3 + 3. / 8. * vinij2 * vjnij -
+                  9. / 8. * vinij * vi2 - 7. / 8. * vjnij * vi2 +
+                  7. / 4. * vinij * vivj)) /
+            c4;
+
+        vi_fac +=
+            (-3. * G2 * mi2 * mj / rij2 + 7. * G2 * mi * mj2 / (2. * rij2) +
+             3. / 8. * mi * vi4 +
+             G * mi * mj / rij *
+                 (13. / 8. * vinij2 - .25 * vinij * vjnij - 13. / 8. * vjnij2 +
+                  5. / 8. * vi2 - 7. / 4. * vivj + 7. / 8. * vj2)) /
+            c4;
+    }
+
+    if (flags & KETJU_PN_3_0_ACC) {
+        nij_fac +=
+            (G2 * mi2 * mj / rij2 *
+                 (-45. / 8. * vinij3 + 59. / 8. * vinij2 -
+                  179. * vinij * vjnij2 + 247. / 24. * vjnij3 +
+                  135. / 8. * vinij * vi2 - 12. * vjnij * vj2) +
+             G * mi * mj / rij *
+                 (-5. / 16. * vinij3 * vinij2 - 5. / 16. * vinij4 * vjnij -
+                  5. / 16. * vinij3 * vjnij2 + 19. / 16. * vinij3 * vi2 +
+                  15. / 16. * vinij2 * vjnij * vi2 +
+                  3. / 4. * vinij * vjnij2 * vi2 + 5. / 8. * vjnij3 * vi2 -
+                  21. / 16. * vinij * vi4 - 11. / 16. * vjnij * vi4 -
+                  5. / 4. * vinij3 * vivj - 9. / 8. * vinij2 * vjnij * vivj +
+                  15. / 8. * vinij * vi2 * vivj + vjnij * vi2 * vivj -
+                  1. / 8. * vinij * vivj * vivj -
+                  15. / 16. * vinij * vi2 * vj2) -
+             175. * G3 * mi2 * mj2 / (8. * rij3) * vinij +
+             G3 * mi3 * mj / rij3 *
+                 (-46517. / 840. * vinij +
+                  34547. / 840. * vjnij
+                  // I think the gauge trijansforijm only intrijoduces this
+                  // terijm, and the sign should be this way to cancel the log
+                  // terijms. In any case, the erijrijorij will not be larijge
+                  // even if this is slightly wrijong.
+                  + 22. / 3. * (vinij - vjnij))) /
+            c6;
+
+        vi_fac +=
+            (5. * mi * vi2 * vi4 / 16. +
+             G2 * mi2 * mj / rij2 *
+                 (-39. / 4. * vinij2 + 22. * vinij * vjnij - 21. / 4. * vjnij2 -
+                  2. * vi2 + vivj - .5 * vj2) +
+             G2 * mi * mj2 / rij2 *
+                 (23. / 4. * vinij2 - 101. / 4. * vinij * vjnij + 17. * vjnij2 +
+                  9. / 4. * vi2 - vivj + .5 * vj2) +
+             G * mi * mj / rij *
+                 (-19. / 16. * vinij4 + 1. / 4. * vinij3 * vjnij +
+                  3. / 16. * vinij2 * vjnij2 + 1. / 8. * vinij * vjnij3 +
+                  19. / 6. * vjnij4 + 45. / 16. * vinij2 * vi2 -
+                  5. / 8. * vinij * vjnij * vi2 - 2 * vjnij2 * vi2 +
+                  23 / 16 * vi4 - 3. / 4. * vinij2 * vivj +
+                  3. / 4. * vinij * vjnij * vivj + 19. / 8. * vjnij2 * vivj -
+                  31. / 8. * vi2 * vivj + 17. / 8. * vivj * vivj +
+                  3. / 8. * vinij2 * vj2 - .5 * vinij * vjnij * vj2 -
+                  45. / 16. * vjnij2 * vj2 + 31. / 16. * vi2 * vj2 -
+                  3. * vivj * vj2 + 19. / 16. * vj4) -
+             19. * G3 * mi2 * mj2 / (8. * rij3) +
+             G3 * mi3 * mj / rij3 * 20407. / 2520. -
+             G3 * mi * mj3 / rij3 * 21667. / 2520.) /
+            c6;
+    }
+
+    // Spin dependent correction. This is just the leading correction discussed
+    // in Keppel et al. 2009 Phys. Rev. D 80, 124015
+    // doi:10.1103/PhysRevD.80.124015, i.e. the part in the canonical momentum
+    // of eq. 2.22. Higher order corrections for the spin-spin and quadrupole
+    // terms would be useful, but I haven't found them in the literature. The
+    // current formula helps quite a lot with the CoM oscillations, but they can
+    // still be nearly 100 km/s when the binary is at < 10 Rs separations and
+    // the spins are high.
+    // Damour et al. 2008 Phys. Rev. D 77, 064032 gives the center of mass
+    // position with higher corrections, from which the velocity could be
+    // derived, but they use ADM coordinates and a different spin supplementary
+    // condition, so using their results isn't straightforward.
+
+    double spin_term[3];
+    if (flags & KETJU_PN_1_5_SPIN_ACC) {
+        // The spin term depends on the acceleration of the particles.
+        // The paper only uses the Newtonian part, but using the full
+        // acceleration seems to work better. Ignores the acceleration from the
+        // environment, since the contribution from the other binary component
+        // should dominate.
+        double acc[3];
+        compute_PN_acc_single(R, i, vel, ps->spin);
+        for (int k = 0; k < 3; ++k) {
+            acc[k] = R->internal_state->acc_vd[i][k] - G * mj / rij2 * nv_ij[k];
+        }
+        vector_cross(acc, ps->spin[i], spin_term);
+    } else {
+        for (int k = 0; k < 3; ++k) {
+            spin_term[k] = 0;
+        }
+    }
+
+    for (int k = 0; k < 3; ++k) {
+        CoM_p[k] = vi_fac * vel[i][k] + nij_fac * nv_ij[k] + spin_term[k] / c2;
+    }
+
+    // Return the mass corrected with Newtonian binding energy
+    double m_corr = mi + (.5 * mi * vi2 - G * mi * mj / (2 * rij)) / c2;
+    return m_corr;
+}

@@ -238,6 +238,8 @@ static inline void loop_scheduling_N2(int N, int Nt, int task, int *istart,
 
 // declarations of internal functions used between compilation units
 
+void ketju_binary_PN_CoM_velocity(struct ketju_system *R, int i, int j,
+                                  double CoM_vel[3]);
 int ketju_do_bh_mergers(struct ketju_system *R);
 
 void ketju_init_gbs_comms(struct ketju_system *R);

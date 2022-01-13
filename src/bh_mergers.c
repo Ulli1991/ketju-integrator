@@ -16,7 +16,7 @@ struct bh_merger_input {
 };
 
 struct bh_merger_remnant_properties {
-    double m, xcom[3], vcom[3], vkick[3], S[3];
+    double m, vkick[3], S[3];
 };
 
 // Compute the fitted merger remnant properties based on
@@ -29,6 +29,16 @@ struct bh_merger_remnant_properties {
 // on the inplane total spin and difference in spins. The values used in the
 // fits are measured just before merger, whereas we need to use the values at
 // the separation where the merger is triggered.
+//
+// Note that we don't have access to the exact rest frame of the binary,
+// as the PN CoM velocity formulae implemented in pn.c are only accurate to
+// a few tens of km/s in the worst cases, depending on the configuration of the
+// binary (mostly spins).
+// As a result, the kick that is calculated by this function and reported in the
+// merger remnant properties is not the actual velocity the remnant gets
+// relative to the actual binary rest frame, but the actual velocity is offset
+// by a small error that can't be determined from the instantaneous
+// configuration.
 void ketju_calculate_bh_merger_remnant_properties(
     struct bh_merger_input *in, struct bh_merger_remnant_properties *out) {
     
@@ -37,14 +47,11 @@ void ketju_calculate_bh_merger_remnant_properties(
     const double m1 = in->m1, m2 = in->m2;
     const double m = m1 + m2;
 
-    // relative position, relative velocity and center of mass
-    // quantities
+    // relative position and velocity
     double rv[3], vv[3];
     for (int i = 0; i < 3; i++) {
         rv[i]  = in->x1[i] - in->x2[i];
         vv[i]  = in->v1[i] - in->v2[i];
-        out->xcom[i] = (m1 * in->x1[i] + m2 * in->x2[i]) / m;
-        out->vcom[i] = (m1 * in->v1[i] + m2 * in->v2[i]) / m;
     }
 
  
@@ -364,13 +371,24 @@ static void merge_bhs(struct ketju_system *R, int i, int j) {
         .S2 = {ps->spin[j][0], ps->spin[j][1], ps->spin[j][2]},
     };
 
+    // CoM quantities.
+    // Position using Newtonian formulae, since it's close enough (somewhere
+    // between the BHs), but velocity needs PN corrections.
+    double xcom[3], vcom[3];
+    for (int k = 0; k < 3; k++) {
+        xcom[k] =
+            (bh_input.m1 * bh_input.x1[k] + bh_input.m2 * bh_input.x2[k]) /
+            (bh_input.m1 + bh_input.m2);
+    }
+    ketju_binary_PN_CoM_velocity(R, i, j, vcom);
+
     struct bh_merger_remnant_properties res;
     ketju_calculate_bh_merger_remnant_properties(&bh_input, &res);
 
     for (int k = 0; k < 3; ++k) {
-        ps->pos[i][k] = res.xcom[k];
-        ps->vel[i][k] = res.vcom[k] +
-                        (R->options->enable_bh_merger_kicks ? res.vkick[k] : 0);
+        ps->pos[i][k] = xcom[k];
+        ps->vel[i][k] =
+            vcom[k] + (R->options->enable_bh_merger_kicks ? res.vkick[k] : 0);
         ps->spin[i][k] = res.S[k];
     }
     ps->mass[i] = res.m;
@@ -454,8 +472,8 @@ int ketju_do_bh_mergers(struct ketju_system *R) {
             }
             // Simple condition: merge if particles within 6 times their
             // combined Schwarzschild radii.
-            double fac =
-                12 * R->constants->G / (R->constants->c * R->constants->c);
+            double fac = R->options->bh_merger_distance_in_Rs * 2 *
+                         R->constants->G / (R->constants->c * R->constants->c);
             if (sqrt(r2) < fac * (R->physical_state->mass[i] +
                                   R->physical_state->mass[j])) {
                 merge_bhs(R, i, j);

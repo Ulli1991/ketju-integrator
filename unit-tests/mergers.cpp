@@ -119,6 +119,7 @@ TEST(Instant_mergers, binary_merger_with_extra_data) {
 
     R.options->gbs_relative_tolerance = 1e-12;
     R.options->output_time_relative_tolerance = 1e-12;
+    R.options->bh_merger_distance_in_Rs = 6;
 
     const double tend = 1;
 
@@ -173,6 +174,7 @@ TEST(Instant_mergers, multiple_merger_with_extra_data1) {
 
     R.options->gbs_relative_tolerance = 1e-12;
     R.options->output_time_relative_tolerance = 1e-12;
+    R.options->bh_merger_distance_in_Rs = 6;
 
     const double tend = 1;
 
@@ -229,6 +231,7 @@ TEST(Instant_mergers, multiple_merger_with_extra_data2) {
 
     R.options->gbs_relative_tolerance = 1e-12;
     R.options->output_time_relative_tolerance = 1e-12;
+    R.options->bh_merger_distance_in_Rs = 6;
 
     const double tend = 1;
 
@@ -288,6 +291,7 @@ TEST(Instant_mergers, multiple_merger_with_extra_data3) {
 
     R.options->gbs_relative_tolerance = 1e-12;
     R.options->output_time_relative_tolerance = 1e-12;
+    R.options->bh_merger_distance_in_Rs = 6;
 
     const double tend = 1;
 
