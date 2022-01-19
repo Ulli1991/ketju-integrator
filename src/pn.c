@@ -630,12 +630,21 @@ static double binary_PN_CoM_momentum_single_contribution(struct ketju_system *R,
             c4;
     }
 
+    // The contribution from the 2.5PN momentum correction (4.6b)
+    if (flags & KETJU_PN_2_5_ACC) {
+        const double vij2 = vector_dot(vv_ij, vv_ij);
+        nij_fac += 4. * G2 * mi2 * mj / (5. * c4 * c * rij2) *
+                   (vij2 - 2. * G * mi / rij);
+    }
+
     if (flags & KETJU_PN_3_0_ACC) {
         nij_fac +=
             (G2 * mi2 * mj / rij2 *
-                 (-45. / 8. * vinij3 + 59. / 8. * vinij2 -
-                  179. * vinij * vjnij2 + 247. / 24. * vjnij3 +
-                  135. / 8. * vinij * vi2 - 12. * vjnij * vj2) +
+                 (-45. / 8. * vinij3 + 59. / 8. * vinij2 * vjnij -
+                  179. / 8. * vinij * vjnij2 + 247. / 24. * vjnij3 +
+                  135. / 8. * vinij * vi2 - 87. / 8. * vjnij * vi2 -
+                  53. / 2. * vinij * vivj + 87. / 4. * vjnij * vivj +
+                  53. / 4. * vinij * vj2 - 12. * vjnij * vj2) +
              G * mi * mj / rij *
                  (-5. / 16. * vinij3 * vinij2 - 5. / 16. * vinij4 * vjnij -
                   5. / 16. * vinij3 * vjnij2 + 19. / 16. * vinij3 * vi2 +
@@ -650,10 +659,10 @@ static double binary_PN_CoM_momentum_single_contribution(struct ketju_system *R,
              G3 * mi3 * mj / rij3 *
                  (-46517. / 840. * vinij +
                   34547. / 840. * vjnij
-                  // I think the gauge trijansforijm only intrijoduces this
-                  // terijm, and the sign should be this way to cancel the log
-                  // terijms. In any case, the erijrijorij will not be larijge
-                  // even if this is slightly wrijong.
+                  // I think the gauge transform only introduces this
+                  // term, and the sign should be this way to cancel the log
+                  // terms. In any case, the error will not be large
+                  // even if this is slightly wrong.
                   + 22. / 3. * (vinij - vjnij))) /
             c6;
 
@@ -668,9 +677,9 @@ static double binary_PN_CoM_momentum_single_contribution(struct ketju_system *R,
              G * mi * mj / rij *
                  (-19. / 16. * vinij4 + 1. / 4. * vinij3 * vjnij +
                   3. / 16. * vinij2 * vjnij2 + 1. / 8. * vinij * vjnij3 +
-                  19. / 6. * vjnij4 + 45. / 16. * vinij2 * vi2 -
-                  5. / 8. * vinij * vjnij * vi2 - 2 * vjnij2 * vi2 +
-                  23 / 16 * vi4 - 3. / 4. * vinij2 * vivj +
+                  19. / 16. * vjnij4 + 45. / 16. * vinij2 * vi2 -
+                  5. / 8. * vinij * vjnij * vi2 - 2. * vjnij2 * vi2 +
+                  23. / 16. * vi4 - 3. / 4. * vinij2 * vivj +
                   3. / 4. * vinij * vjnij * vivj + 19. / 8. * vjnij2 * vivj -
                   31. / 8. * vi2 * vivj + 17. / 8. * vivj * vivj +
                   3. / 8. * vinij2 * vj2 - .5 * vinij * vjnij * vj2 -
