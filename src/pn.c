@@ -519,23 +519,17 @@ static double binary_PN_CoM_momentum_single_contribution(struct ketju_system *R,
 
 // Calculate the PN corrected CoM velocity of a binary at indices i, j <
 // num_pn_particles (returns immediatedly otherwise).
-// If spin terms are enabled, the acceleration of the binary
-// is needed, and this calculation changes the internal acc_vd values, which is
-// safe to do if we're not in the middle of kick calculation. The CoM velocity
-// is calculated from the momentum based on the total mass + Newtonian energy of
-// the system (~1PN accuracy), which should be accurate enough for the main
-// purpose of calculating the binary rest frame for mergers, as the CoM
-// calculated with these formulae isn't completely conserved anyway, likely due
-// to missing higher order terms (e.g. the actual conserved CoM for equations of
-// motion at 1PN level contains 2PN and maybe higher terms, but now we have only
-// 1PN for that case).
+// The CoM velocity is calculated from the momentum based on the total mass +
+// Newtonian energy of the system (~1PN accuracy), which should be accurate
+// enough for the main purpose of calculating the binary rest frame for
+// mergers. The CoM calculated with these formulae isn't completely
+// conserved anyway, likely due to missing higher order terms (e.g. the actual
+// conserved CoM for equations of motion at 1PN level contains 2PN and maybe
+// higher terms, but now we have only 1PN for that case).
 void ketju_binary_PN_CoM_velocity(struct ketju_system *R, int i, int j,
                                   double CoM_vel[3]) {
     if (i > R->num_pn_particles || j > R->num_pn_particles || i < 0 || j < 0)
         return;
-
-    double(*acc_pn)[3] = R->internal_state->acc_vd;
-    memset(acc_pn, 0, sizeof(double[R->num_particles][3]));
 
     // The contribution is the of the same form for both particles, so use a
     // helper function
@@ -707,14 +701,12 @@ static double binary_PN_CoM_momentum_single_contribution(struct ketju_system *R,
     double spin_term[3];
     if (flags & KETJU_PN_1_5_SPIN_ACC) {
         // The spin term depends on the acceleration of the particles.
-        // The paper only uses the Newtonian part, but using the full
-        // acceleration seems to work better. Ignores the acceleration from the
-        // environment, since the contribution from the other binary component
-        // should dominate.
+        // The paper only uses the Newtonian part, and that seems to work ok.
+        // Ignores the acceleration from the environment, since the
+        // contribution from the other binary component should dominate.
         double acc[3];
-        compute_PN_acc_single(R, i, vel, ps->spin);
         for (int k = 0; k < 3; ++k) {
-            acc[k] = R->internal_state->acc_vd[i][k] - G * mj / rij2 * nv_ij[k];
+            acc[k] = - G * mj / rij2 * nv_ij[k];
         }
         vector_cross(acc, ps->spin[i], spin_term);
     } else {
