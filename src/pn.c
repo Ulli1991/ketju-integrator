@@ -3,7 +3,9 @@
 #include "ketju_integrator/internal.h"
 #include "ketju_integrator/ketju_integrator.h"
 
-inline static void particle_separation(const struct ketju_system *R, int i,
+// Particle separation vector calculation, implemented in this file
+// since needed for PN corrections.
+void ketju_particle_separation(const struct ketju_system *R, int i,
                                        int j, double rv[3]) {
 
     struct ketju_system_physical_state *ps = R->physical_state;
@@ -28,7 +30,7 @@ inline static void particle_separation(const struct ketju_system *R, int i,
     }
 }
 
-inline static void particle_separation_and_relative_velocity(
+void ketju_particle_separation_and_relative_velocity(
     const struct ketju_system *R, int i, int j, double rv[3], double vv[3],
     double (*vel)[3]) {
 
@@ -116,7 +118,7 @@ static void compute_PN_acc_single(struct ketju_system *R, int i,
         if (j == i) continue;
 
         double rv_ij[3], nv_ij[3], vv_ij[3];
-        particle_separation_and_relative_velocity(R, i, j, rv_ij, vv_ij, vel);
+        ketju_particle_separation_and_relative_velocity(R, i, j, rv_ij, vv_ij, vel);
         const double rij = norm_and_unit_vector(rv_ij, nv_ij);
         const double rij2 = rij * rij;
         const double rij3 = rij2 * rij;
@@ -154,7 +156,7 @@ static void compute_PN_acc_single(struct ketju_system *R, int i,
 
                     if (k != i) {
                         double rv_ik[3];
-                        particle_separation(R, i, k, rv_ik);
+                        ketju_particle_separation(R, i, k, rv_ik);
                         const double rik = vector_norm(rv_ik);
 
                         nij_factor -= 4. * G * mk / rik;
@@ -162,7 +164,7 @@ static void compute_PN_acc_single(struct ketju_system *R, int i,
 
                     if (k != j) {
                         double rv_jk[3], nv_jk[3];
-                        particle_separation(R, j, k, rv_jk);
+                        ketju_particle_separation(R, j, k, rv_jk);
                         double rjk = norm_and_unit_vector(rv_jk, nv_jk);
 
                         nij_factor -=
@@ -474,35 +476,16 @@ static void compute_PN_acc_single(struct ketju_system *R, int i,
 
 void ketju_compute_PN_acc(struct ketju_system *R, double (*vel_to_use)[3],
                           double (*spin_to_use)[3]) {
+    // clear the memory always in case there's an extra force that's applied as well
+    memset(R->internal_state->acc_vd, 0, sizeof(double[R->num_particles][3]));
+    memset(R->internal_state->spin_derivative, 0, sizeof(double[R->num_pn_particles][3]));
+
     if (!R->options->PN_flags) return;
+
     tick(&R->perf->time_force);
-
-    double(*acc_pn)[3] = R->internal_state->acc_vd;
-    memset(acc_pn, 0, sizeof(double[R->num_particles][3]));
-    double(*spin_derivative)[3] = R->internal_state->spin_derivative;
-    memset(spin_derivative, 0, sizeof(double[R->num_pn_particles][3]));
-
     // Compute the PN accelerations for SMBHs
     for (int i = 0; i < R->num_pn_particles; ++i) {
         compute_PN_acc_single(R, i, vel_to_use, spin_to_use);
-    }
-
-    // Then the chained PN accelerations
-    struct spanning_tree_coordinate_system *mst = R->internal_state->mst;
-    int hi, lo;
-    for (int i = 0; i < mst->num_edges; ++i) {
-        int v1, v2;
-        get_v1_v2_fast(R, i, &v1, &v2);
-        if (mst->vertex[v1].level > mst->vertex[v2].level) {
-            hi = v1;
-            lo = v2;
-        } else {
-            hi = v2;
-            lo = v1;
-        }
-        for (int k = 0; k < 3; k++) {
-            mst->edge_rel_acc_vd[i][k] = acc_pn[hi][k] - acc_pn[lo][k];
-        }
     }
     tock(&R->perf->time_force);
 }
@@ -568,7 +551,7 @@ static double binary_PN_CoM_momentum_single_contribution(struct ketju_system *R,
     const double vi4 = vi2 * vi2;
 
     double rv_ij[3], nv_ij[3], vv_ij[3];
-    particle_separation_and_relative_velocity(R, i, j, rv_ij, vv_ij, vel);
+    ketju_particle_separation_and_relative_velocity(R, i, j, rv_ij, vv_ij, vel);
     const double rij = norm_and_unit_vector(rv_ij, nv_ij);
     const double rij2 = rij * rij;
     const double rij3 = rij2 * rij;

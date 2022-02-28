@@ -159,6 +159,24 @@ struct ketju_bh_merger_info {
         extra_index2; // Indices of the components in particle_extra_data
 };
 
+struct ketju_system; // forward declaration for the following function types
+
+// Function pointer types for user specified extra forces.
+// The vindep_force may only depend on the positions and constant properties
+// of the particles, while vdep_force may depend on the velocities and spins
+// as well.
+// For the auxiliary velocity trick used by the integrator to work correctly,
+// the velocity and spin fields must be accessed through the pointer arguments
+// to the function.
+// For both functions, the additional accelerations must be added to the acc_out
+// argument values, which must not be modified otherwise.
+typedef void (*ketju_extra_vindep_force)(const struct ketju_system*,
+                                         double (*acc_out)[3]);
+typedef void (*ketju_extra_vdep_force)(const struct ketju_system*,
+                                       double (*vel)[3],
+                                       double (*spin)[3],
+                                       double (*acc_out)[3]);
+
 struct ketju_system {
     int num_particles; //< Total number of particles
     int num_pn_particles; //< Number of PN enabled particles
@@ -190,6 +208,11 @@ struct ketju_system {
     size_t particle_extra_data_elem_size;
     //< Size of the extra data for a single particle.
 
+    ketju_extra_vindep_force extra_vindep_force;
+    //< Optional extra velocity independent force component
+    ketju_extra_vdep_force extra_vdep_force;
+    //< Optional extra velocity dependent force component
+
     int num_mergers; //< How many mergers there have been
     struct ketju_bh_merger_info *merger_infos; //< contains num_mergers elements
 };
@@ -213,7 +236,15 @@ void ketju_debug_dump_integrator_state(const struct ketju_system *R,
 bool ketju_debug_read_integrator_state(struct ketju_system *R,
                                        const char *fname, MPI_Comm comm);
 
+// Compute the separation vector rv between particles i and j
+void ketju_particle_separation(const struct ketju_system *R, int i,
+                                       int j, double rv[3]);
 
+// Compute the separation vector rv and relative velocity vv between particles
+// i and j, using the velocity data in vel
+void ketju_particle_separation_and_relative_velocity(
+    const struct ketju_system *R, int i, int j, double rv[3], double vv[3],
+    double (*vel)[3]);
 
 #ifdef __cplusplus
 }

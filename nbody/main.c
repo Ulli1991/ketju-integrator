@@ -52,15 +52,68 @@ void init_from_ic_file(struct ketju_system *R, char *ic_file_name) {
     }
 }
 
+// A super simple output file format
+void write_output_file(FILE *fp, struct ketju_system *R) {
+    if (ThisTask != 0) return;
+
+
+
+    fprintf(fp, "%g %d %d\n", R->physical_state->time, R->num_particles, R->num_pn_particles);
+    for (int i = 0; i<R->num_particles; ++i) {
+        fprintf(fp, "%g ", R->physical_state->mass[i]);
+    }
+    fprintf(fp, "\n");
+    for (int i = 0; i<R->num_particles; ++i) {
+        for (int k=0; k<3; ++k) {
+           fprintf(fp, "%g ", R->physical_state->pos[i][k]);
+        }
+    }
+    fprintf(fp, "\n");
+    for (int i = 0; i<R->num_particles; ++i) {
+        for (int k=0; k<3; ++k) {
+           fprintf(fp, "%g ", R->physical_state->vel[i][k]);
+        }
+    }
+    fprintf(fp, "\n");
+    for (int i = 0; i<R->num_pn_particles; ++i) {
+        for (int k=0; k<3; ++k) {
+           fprintf(fp, "%g ", R->physical_state->spin[i][k]);
+        }
+    }
+    fprintf(fp, "\n");
+}
+
+void extra_vindep_force(const struct ketju_system *R, double (*acc_out)[3]) {
+    for (int i=0; i<R->num_particles; ++i) {
+        acc_out[i][0] += R->physical_state->pos[i][0]*1e10; // funny force
+    }
+}
+void extra_vdep_force(const struct ketju_system *R, double (*vel)[3],
+            double(*spin)[3], double (*acc_out)[3]) {
+    for (int i=0; i<R->num_particles; ++i) {
+        acc_out[i][0] += vel[i][0]*1e5; // funny force ver. 2
+    }
+}
+
 int main(int argc, char *argv[]) {
     MPI_Init(&argc, &argv);
     MPI_Comm_rank(MPI_COMM_WORLD, &ThisTask);
-    if (argc != 3) {
+    if (argc != 4) {
         if (ThisTask == 0) {
-            printf("Usage:\nnbody ic_file integration_time\n");
+            printf("Usage:\nnbody ic_file integration_time substeps\n");
         }
         MPI_Finalize();
         return -2;
+    }
+
+    FILE *outfile;
+    if (ThisTask == 0) {
+        const char* out_file_name = "nbody_output.txt";
+        outfile = fopen(out_file_name, "w");
+        if (!outfile) {
+            printf("Error opening file %s on task %d\n", out_file_name, ThisTask);
+            MPI_Abort(MPI_COMM_WORLD, -1);
+        }
     }
 
     struct ketju_system R;
@@ -75,8 +128,16 @@ int main(int argc, char *argv[]) {
     R.options->max_tree_distance = 2;
     R.options->PN_flags = KETJU_PN_ALL;
 
+    // XXX testing extra forces
+    R.extra_vdep_force = extra_vdep_force;
+    R.extra_vindep_force = extra_vindep_force;
+
     double time_interval = strtof(argv[2], NULL);
-    ketju_run_integrator(&R, time_interval);
+    long substeps = strtol(argv[3], NULL, 0);
+    for (long i=0; i<substeps; ++i) {
+        ketju_run_integrator(&R, time_interval/substeps);
+        write_output_file(outfile, &R);
+    }
 
     if (ThisTask == 0) {
         printf("Timers:\n");
@@ -123,6 +184,7 @@ int main(int argc, char *argv[]) {
                 R.physical_state->vel[i][1] + CoM_vel[1],
                 R.physical_state->vel[i][2] + CoM_vel[2]);
         }
+        fclose(outfile);
     }
 
     ketju_free_system(&R);

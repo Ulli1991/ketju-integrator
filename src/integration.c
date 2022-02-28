@@ -386,13 +386,38 @@ static inline void comp_U_acc_loop_softened_star_star(struct ketju_system *R) {
     }
 }
 
+static void set_chained_acceleration(const struct ketju_system *R, double (*rel_acc)[3], double (*acc)[3]) {
+
+    tick(&R->perf->time_force);
+
+    struct spanning_tree_coordinate_system *mst = R->internal_state->mst;
+    int hi, lo;
+    for (int i = 0; i < mst->num_vertices - 1; i++) {
+
+        int v1, v2;
+        get_v1_v2_fast(R, i, &v1, &v2);
+
+        if (mst->vertex[v1].level > mst->vertex[v2].level) {
+            hi = v1;
+            lo = v2;
+        } else {
+            hi = v2;
+            lo = v1;
+        }
+        for (int k = 0; k < 3; k++) {
+            rel_acc[i][k] = acc[hi][k] - acc[lo][k];
+        }
+    }
+    tock(&R->perf->time_force);
+
+}
+
 // computes the force function and newtonian acceleration
 static void compute_U_and_Newtonian_Acc(struct ketju_system *R) {
 
     tick(&R->perf->time_force);
 
     struct ketju_system_internal_state *is = R->internal_state;
-    struct spanning_tree_coordinate_system *mst = is->mst;
 
     memset(is->acc, 0, sizeof(double[R->num_particles][3]));
     is->U = 0;
@@ -418,26 +443,7 @@ static void compute_U_and_Newtonian_Acc(struct ketju_system *R) {
     }
     tock(&R->perf->time_force_comm);
 
-    tick(&R->perf->time_force);
-    int hi, lo;
-    for (int i = 0; i < mst->num_vertices - 1; i++) {
 
-        int v1, v2;
-        get_v1_v2_fast(R, i, &v1, &v2);
-
-        if (mst->vertex[v1].level > mst->vertex[v2].level) {
-            hi = v1;
-            lo = v2;
-        } else {
-            hi = v2;
-            lo = v1;
-        }
-        for (int k = 0; k < 3; k++) {
-            mst->edge_rel_acc[i][k] = is->acc[hi][k] - is->acc[lo][k];
-        }
-    }
-
-    tock(&R->perf->time_force);
 }
 
 // TODO the following few functions could maybe go in mst.c, but maybe easier to
@@ -621,6 +627,10 @@ static void physical_kick(double dt, struct ketju_system *R) {
 
     update_vel(R, AUXILIARY);
     ketju_compute_PN_acc(R, is->aux_vel, is->aux_spin);
+    if (R->extra_vdep_force) {
+        R->extra_vdep_force(R, is->aux_vel, is->aux_spin, is->acc_vd);
+    }
+    set_chained_acceleration(R, mst->edge_rel_acc_vd, is->acc_vd);
 
     double dB = 0;
     for (int i = 0; i < R->num_particles; i++) {
@@ -658,6 +668,10 @@ static void auxiliary_kick(double dt, struct ketju_system *R) {
 
     update_vel(R, PHYSICAL);
     ketju_compute_PN_acc(R, ps->vel, ps->spin);
+    if (R->extra_vdep_force) {
+        R->extra_vdep_force(R, ps->vel, ps->spin, is->acc_vd);
+    }
+    set_chained_acceleration(R, mst->edge_rel_acc_vd, is->acc_vd);
 
     for (int i = 0; i < mst->num_vertices - 1; i++) {
         for (int k = 0; k < 3; k++) {
@@ -685,10 +699,13 @@ static void kick(double ds, struct ketju_system *R) {
     struct spanning_tree_coordinate_system *mst = is->mst;
 
     compute_U_and_Newtonian_Acc(R);
+    if (R->extra_vindep_force) { R->extra_vindep_force(R, is->acc); }
+    set_chained_acceleration(R, mst->edge_rel_acc, is->acc);
+
     double dt = ds / is->U;
 
-    if (!R->options->PN_flags) {
-        // no velocity dependent forces (only PN for now), just the newtonian
+    if (!R->options->PN_flags && !R->extra_vdep_force) {
+        // no velocity dependent forces, just the newtonian
         // part needed
         for (int i = 0; i < mst->num_vertices - 1; i++) {
             for (int k = 0; k < 3; k++) {

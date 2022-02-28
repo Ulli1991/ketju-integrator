@@ -97,6 +97,8 @@ class CSystem(ctypes.Structure):
 
         ('particle_extra_data', ctypes.c_void_p),
         ('particle_extra_data_elem_size', ctypes.c_size_t),
+        ('extra_vindep_force', ctypes.c_void_p),
+        ('extra_vdep_force', ctypes.c_void_p),
 
         ('num_mergers', ctypes.c_int),
         ('merger_infos', ctypes.POINTER(CBHMergerInfo)),

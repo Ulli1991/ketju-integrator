@@ -135,6 +135,8 @@ void ketju_create_system(struct ketju_system *R, int num_pn_particles,
 
     R->particle_extra_data = NULL;
     R->particle_extra_data_elem_size = 0;
+    R->extra_vindep_force = NULL;
+    R->extra_vdep_force = NULL;
 
     R->num_mergers = 0;
     R->merger_infos = NULL;
