@@ -244,12 +244,11 @@ static inline void comp_U_acc_loop_no_star_star(struct ketju_system *R) {
     if (group_size > R->num_particles) {
         // in case we for some reason have more tasks than particles
         group_size = R->num_particles;
-        if (rank > group_size) return;
+        if (rank >= group_size) return;
     }
 
     const int part_per_task = R->num_particles / group_size;
-    const int part_per_task_remainder =
-        R->num_particles % is->task_info->gbs_group_size;
+    const int part_per_task_remainder = R->num_particles % group_size;
     int jstart = rank * part_per_task;
     if (rank < part_per_task_remainder) {
         jstart += rank; // the non-evenly split particles go to the first tasks
