@@ -25,13 +25,11 @@ static inline double softened_inverse_r(double r, double h) {
     if (u >= 1.) {
         return 1. / r;
     } else if (u < 0.5) {
-        return -hinv *
-               (-2.8 + u * u * (5.333333333333 + u * u * (6.4 * u - 9.6)));
+        return -hinv * (-2.8 + u * u * (16. / 3. + u * u * (6.4 * u - 9.6)));
     } else {
-        return -hinv * (-3.2 + 0.066666666667 / u +
-                        u * u *
-                            (10.666666666667 +
-                             u * (-16.0 + u * (9.6 - 2.133333333333 * u))));
+        return -hinv *
+               (-3.2 + 2. / 30. / u +
+                u * u * (32. / 3. + u * (-16.0 + u * (9.6 - 32. / 15. * u))));
     }
 }
 
@@ -44,94 +42,102 @@ static inline double softened_inverse_r3(double r, double h) {
     if (u >= 1) {
         return 1.0 / (r * r * r);
     } else if (u < 0.5) {
-        return hinv * hinv * hinv *
-               (10.666666666667 + u * u * (32.0 * u - 38.4));
+        return hinv * hinv * hinv * (32. / 3. + u * u * (32.0 * u - 38.4));
     } else {
         return hinv * hinv * hinv *
-               (21.333333333333 - 48.0 * u + 38.4 * u * u -
-                10.666666666667 * u * u * u - 0.066666666667 / (u * u * u));
+               (64. / 3. - 48.0 * u + 38.4 * u * u - 32. / 3. * u * u * u -
+                2. / 30. / (u * u * u));
     }
 }
 
-// computes the force function for logh
+// This function wraps the distance calculation that would be otherwise repeated
+// in the below functions.
+// It takes all of the necessary working space variables as arguments,
+// so that they don't get created within the loop where this is called from,
+// which affects performance quite a bit.
+// After the compiler inlines this, the performance is the same as with repeated
+// code within the loops (used earlier in the implementation).
+static inline double separation_and_r2(const struct ketju_system *R, int i,
+                                       int j, double dr[restrict 3], int Nd,
+                                       int path[restrict Nd],
+                                       int sign[restrict Nd], int *restrict d) {
+    double r2 = 0;
+    for (int k = 0; k < 3; k++) {
+        dr[k] = 0;
+    }
+
+    const struct graph_vertex *const vertex = R->internal_state->mst->vertex;
+
+    if (abs(vertex[i].level - vertex[j].level) <= Nd &&
+        ketju_check_relative_proximity(j, i, Nd, R, d, path, sign)) {
+        for (int l = 0; l < *d; l++) {
+            const int s = sign[l];
+            const double *const rel_pos =
+                R->internal_state->mst->edge_rel_pos[path[l]];
+            for (int k = 0; k < 3; k++) {
+                dr[k] += s * rel_pos[k];
+            }
+        }
+    } else {
+        for (int k = 0; k < 3; k++) {
+            dr[k] = R->physical_state->pos[j][k] - R->physical_state->pos[i][k];
+        }
+    }
+    for (int k = 0; k < 3; k++) {
+        r2 += dr[k] * dr[k];
+    }
+    return r2;
+}
+
 static void compute_U(struct ketju_system *R) {
 
     tick(&R->perf->time_force);
 
-    struct ketju_system_internal_state *is = R->internal_state;
-    struct spanning_tree_coordinate_system *mst = is->mst;
-    struct ketju_system_physical_state *ps = R->physical_state;
+    struct ketju_system_internal_state *const is = R->internal_state;
+    struct spanning_tree_coordinate_system *const mst = is->mst;
+    struct ketju_system_physical_state *const ps = R->physical_state;
 
     is->U = 0;
     int istart = 0;
     int CumNumEdge, ThisBlock, jstart;
-    // TODO: we might want the option to parallelize this over all of the tasks
-    // instead of just the gbs group, since this function is mainly for
-    // computing the energy between steps.
     loop_scheduling_N2(mst->num_vertices, is->task_info->gbs_group_size,
                        is->task_info->gbs_group_rank, &istart, &jstart,
                        &ThisBlock, &CumNumEdge);
     int c = 0;
 
     const int Nd = R->options->max_tree_distance;
-    int d;
-    int path[Nd];
-    int sign[Nd];
-
     const double ss_soft = R->options->star_star_softening;
 
-    for (int i = istart; i < mst->num_vertices; i++) {
+    double dr[3];
+    int path[Nd];
+    int sign[Nd];
+    int d;
 
+    for (int i = istart; i < mst->num_vertices; i++) {
         double mi = ps->mass[i];
-        int Li = mst->vertex[i].level;
         if (i > istart) { jstart = i + 1; }
+
         for (int j = jstart; j < mst->num_vertices; j++) {
-            if (c >= ThisBlock) {
-                goto after_loops;
-            }
+            if (c >= ThisBlock) { goto after_loops; }
             if (R->options->no_star_star_gravity && i >= R->num_pn_particles &&
                 j >= R->num_pn_particles) {
                 continue;
             }
 
-            double mj = ps->mass[j];
-            int Lj = mst->vertex[j].level;
-            double r2 = 0;
-            bool proximity = false;
+            const double r2 =
+                separation_and_r2(R, i, j, dr, Nd, path, sign, &d);
 
-            if (abs(Li - Lj) < Nd) {
-                proximity =
-                    ketju_check_relative_proximity(j, i, Nd, R, &d, path, sign);
-            }
-
-            // Lifting this tree traversal code into its own (inline) function
-            // appeared to be slower, so keep it like this even though it is
-            // duplicated a couple of times.
-            if (proximity) {
-                for (int k = 0; k < 3; k++) {
-                    double dr = 0;
-                    for (int l = 0; l < d; l++) {
-                        int index = path[l];
-                        dr += sign[l] * mst->edge_rel_pos[index][k];
-                    }
-                    r2 += dr * dr;
-                }
-            } else {
-                for (int k = 0; k < 3; k++) {
-                    double dr = ps->pos[j][k] - ps->pos[i][k];
-                    r2 += dr * dr;
-                }
-            }
-            double soft = i < R->num_pn_particles || j < R->num_pn_particles
-                              ? 0.
-                              : ss_soft;
+            const double soft =
+                i < R->num_pn_particles || j < R->num_pn_particles ? 0.
+                                                                   : ss_soft;
             const double invr = softened_inverse_r(sqrt(r2), soft);
+            const double mj = ps->mass[j];
 
             is->U += mi * mj * invr;
             c++;
         }
     }
-    after_loops:
+after_loops:
     tock(&R->perf->time_force);
 
     tick(&R->perf->time_force_comm);
@@ -157,64 +163,41 @@ static void compute_U(struct ketju_system *R) {
 // The force loop is the most time consuming part of the integration, and any
 // extra logic in the loop leads to significant performance penalties (~10-20%).
 // So instead have a different function for each case.
-static inline void comp_U_acc_loop_standard(struct ketju_system *R) {
-    struct ketju_system_internal_state *is = R->internal_state;
-    struct spanning_tree_coordinate_system *mst = is->mst;
-    struct ketju_system_physical_state *ps = R->physical_state;
+static void comp_U_acc_loop_standard(struct ketju_system *R) {
+    struct ketju_system_internal_state *const is = R->internal_state;
+    struct spanning_tree_coordinate_system *const mst = is->mst;
+    struct ketju_system_physical_state *const ps = R->physical_state;
 
     const double G = R->constants->G;
 
-    int istop = mst->num_vertices, jstop = mst->num_vertices;
+    const int istop = mst->num_vertices;
+    const int jstop = mst->num_vertices;
     int ThisBlock, CumNumEdge, jstart, istart;
     loop_scheduling_N2(mst->num_vertices, is->task_info->gbs_group_size,
                        is->task_info->gbs_group_rank, &istart, &jstart,
                        &ThisBlock, &CumNumEdge);
     int c = 0;
     const int Nd = R->options->max_tree_distance;
-    int d;
-    int path[Nd];
-    int sign[Nd];
 
     double dr[3];
+    int path[Nd];
+    int sign[Nd];
+    int d;
 
     for (int i = istart; i < istop; i++) {
         const double mi = ps->mass[i];
-        const int Li = mst->vertex[i].level;
         if (i > istart) jstart = i + 1;
 
         for (int j = jstart; j < jstop; j++) {
-            if (c >= ThisBlock) {
-                return;
-            }
-            double r2 = 0;
-            const double mj = ps->mass[j];
-            const int Lj = mst->vertex[j].level;
+            if (c >= ThisBlock) { return; }
 
-            bool proximity = false;
-            if (abs(Li - Lj) <= Nd) {
-                proximity =
-                    ketju_check_relative_proximity(j, i, Nd, R, &d, path, sign);
-            }
-
-            if (proximity) {
-                for (int k = 0; k < 3; k++) {
-                    dr[k] = 0;
-                    for (int l = 0; l < d; l++) {
-                        dr[k] += sign[l] * mst->edge_rel_pos[path[l]][k];
-                    }
-                    r2 += dr[k] * dr[k];
-                }
-            } else {
-                for (int k = 0; k < 3; k++) {
-                    dr[k] = ps->pos[j][k] - ps->pos[i][k];
-                    r2 += dr[k] * dr[k];
-                }
-            }
-
+            const double r2 =
+                separation_and_r2(R, i, j, dr, Nd, path, sign, &d);
             const double invr = 1. / sqrt(r2);
-            is->U += G * mi * mj * invr;
-
             const double Ginvr3 = G * invr * invr * invr;
+            const double mj = ps->mass[j];
+
+            is->U += G * mi * mj * invr;
 
             for (int k = 0; k < 3; k++) {
                 double drGinvr3 = dr[k] * Ginvr3;
@@ -227,10 +210,9 @@ static inline void comp_U_acc_loop_standard(struct ketju_system *R) {
 }
 
 // Force without star-star interactions
-static inline void comp_U_acc_loop_no_star_star(struct ketju_system *R) {
-    struct ketju_system_internal_state *is = R->internal_state;
-    struct spanning_tree_coordinate_system *mst = is->mst;
-    struct ketju_system_physical_state *ps = R->physical_state;
+static void comp_U_acc_loop_no_star_star(struct ketju_system *R) {
+    struct ketju_system_internal_state *const is = R->internal_state;
+    struct ketju_system_physical_state *const ps = R->physical_state;
 
     const double G = R->constants->G;
 
@@ -256,51 +238,28 @@ static inline void comp_U_acc_loop_no_star_star(struct ketju_system *R) {
         jstart += part_per_task_remainder;
     }
 
-    int jstop =
+    const int jstop =
         jstart + part_per_task + (rank < part_per_task_remainder ? 1 : 0);
 
     const int Nd = R->options->max_tree_distance;
-    int d;
-    int path[Nd];
-    int sign[Nd];
 
     double dr[3];
+    int path[Nd];
+    int sign[Nd];
+    int d;
 
     for (int i = istart; i < istop; i++) {
         const double mi = ps->mass[i];
-        const int Li = mst->vertex[i].level;
 
         if (jstart <= i) jstart = i + 1; // avoid double counting interactions
         for (int j = jstart; j < jstop; j++) {
-            double r2 = 0;
-            const double mj = ps->mass[j];
-            const int Lj = mst->vertex[j].level;
-
-            bool proximity = false;
-            if (abs(Li - Lj) <= Nd) {
-                proximity =
-                    ketju_check_relative_proximity(j, i, Nd, R, &d, path, sign);
-            }
-
-            if (proximity) {
-                for (int k = 0; k < 3; k++) {
-                    dr[k] = 0;
-                    for (int l = 0; l < d; l++) {
-                        dr[k] += sign[l] * mst->edge_rel_pos[path[l]][k];
-                    }
-                    r2 += dr[k] * dr[k];
-                }
-            } else {
-                for (int k = 0; k < 3; k++) {
-                    dr[k] = ps->pos[j][k] - ps->pos[i][k];
-                    r2 += dr[k] * dr[k];
-                }
-            }
-
+            const double r2 =
+                separation_and_r2(R, i, j, dr, Nd, path, sign, &d);
             const double invr = 1. / sqrt(r2);
-            is->U += G * mi * mj * invr;
-
             const double Ginvr3 = G * invr * invr * invr;
+            const double mj = ps->mass[j];
+
+            is->U += G * mi * mj * invr;
 
             for (int k = 0; k < 3; k++) {
                 double drGinvr3 = dr[k] * Ginvr3;
@@ -312,12 +271,13 @@ static inline void comp_U_acc_loop_no_star_star(struct ketju_system *R) {
 }
 
 // Force with softened star-star interactions, doesn't include the pn-particles
-static inline void comp_U_acc_loop_softened_star_star(struct ketju_system *R) {
-    struct ketju_system_internal_state *is = R->internal_state;
-    struct spanning_tree_coordinate_system *mst = is->mst;
-    struct ketju_system_physical_state *ps = R->physical_state;
+static void comp_U_acc_loop_softened_star_star(struct ketju_system *R) {
+    struct ketju_system_internal_state *const is = R->internal_state;
+    struct spanning_tree_coordinate_system *const mst = is->mst;
+    struct ketju_system_physical_state *const ps = R->physical_state;
 
-    int istop = mst->num_vertices, jstop = mst->num_vertices;
+    const int istop = mst->num_vertices;
+    const int jstop = mst->num_vertices;
     int ThisBlock, CumNumEdge, jstart, istart;
     loop_scheduling_N2(mst->num_vertices - R->num_pn_particles,
                        is->task_info->gbs_group_size,
@@ -326,54 +286,31 @@ static inline void comp_U_acc_loop_softened_star_star(struct ketju_system *R) {
     istart += R->num_pn_particles;
     jstart += R->num_pn_particles;
     int c = 0;
-    const int Nd = R->options->max_tree_distance;
-    int d;
-    int path[Nd];
-    int sign[Nd];
 
-    double dr[3];
+    const int Nd = R->options->max_tree_distance;
     const double ss_soft = R->options->star_star_softening;
     const double G = R->constants->G;
 
+    double dr[3];
+    int path[Nd];
+    int sign[Nd];
+    int d;
+
     for (int i = istart; i < istop; i++) {
         const double mi = ps->mass[i];
-        const int Li = mst->vertex[i].level;
         if (i > istart) jstart = i + 1;
 
         for (int j = jstart; j < jstop; j++) {
             if (c >= ThisBlock) { return; }
-            double r2 = 0;
-            const double mj = ps->mass[j];
-            const int Lj = mst->vertex[j].level;
 
-            bool proximity = false;
-            if (abs(Li - Lj) <= Nd) {
-                proximity =
-                    ketju_check_relative_proximity(j, i, Nd, R, &d, path, sign);
-            }
-
-            if (proximity) {
-                for (int k = 0; k < 3; k++) {
-                    dr[k] = 0;
-                    for (int l = 0; l < d; l++) {
-                        dr[k] += sign[l] * mst->edge_rel_pos[path[l]][k];
-                    }
-                    r2 += dr[k] * dr[k];
-                }
-            } else {
-                for (int k = 0; k < 3; k++) {
-                    dr[k] = ps->pos[j][k] - ps->pos[i][k];
-                    r2 += dr[k] * dr[k];
-                }
-            }
-
+            const double r2 =
+                separation_and_r2(R, i, j, dr, Nd, path, sign, &d);
             const double r = sqrt(r2);
-
             const double invr = softened_inverse_r(r, ss_soft);
+            const double Ginvr3 = G * softened_inverse_r3(r, ss_soft);
+            const double mj = ps->mass[j];
 
             is->U += G * mi * mj * invr;
-
-            const double Ginvr3 = G * softened_inverse_r3(r, ss_soft);
 
             for (int k = 0; k < 3; k++) {
                 double drGinvr3 = dr[k] * Ginvr3;
@@ -390,8 +327,8 @@ static void compute_U_and_Newtonian_Acc(struct ketju_system *R) {
 
     tick(&R->perf->time_force);
 
-    struct ketju_system_internal_state *is = R->internal_state;
-    struct spanning_tree_coordinate_system *mst = is->mst;
+    struct ketju_system_internal_state *const is = R->internal_state;
+    struct spanning_tree_coordinate_system *const mst = is->mst;
 
     memset(is->acc, 0, sizeof(double[R->num_particles][3]));
     is->U = 0;
@@ -442,7 +379,7 @@ static void compute_U_and_Newtonian_Acc(struct ketju_system *R) {
 // TODO the following few functions could maybe go in mst.c, but maybe easier to
 // have as few externally visible symbols as possible
 static int get_root_index(const struct ketju_system *R) {
-    const struct spanning_tree_coordinate_system *mst = R->internal_state->mst;
+    const struct spanning_tree_coordinate_system *const mst = R->internal_state->mst;
 
     int v1, v2;
     get_v1_v2_fast(R, 0, &v1, &v2);
@@ -454,8 +391,8 @@ static void into_Cartesian_from_MST(struct ketju_system *R) {
 
     tick(&R->perf->time_coord);
 
-    const struct spanning_tree_coordinate_system *mst = R->internal_state->mst;
-    struct ketju_system_physical_state *ps = R->physical_state;
+    const struct spanning_tree_coordinate_system *const mst = R->internal_state->mst;
+    struct ketju_system_physical_state *const ps = R->physical_state;
 
     int first = get_root_index(R);
     for (int k = 0; k < 3; k++) {
@@ -485,8 +422,8 @@ static void into_Cartesian_from_MST(struct ketju_system *R) {
 }
 
 static void compute_T(struct ketju_system *R) {
-    struct ketju_system_internal_state *is = R->internal_state;
-    struct ketju_system_physical_state *ps = R->physical_state;
+    struct ketju_system_internal_state *const is = R->internal_state;
+    struct ketju_system_physical_state *const ps = R->physical_state;
     is->T = 0;
     // TODO: this might benefit from parallelization for large particle numbers
     for (int i = 0; i < R->num_particles; i++) {
@@ -503,8 +440,8 @@ static void update_pos(struct ketju_system *R) {
 
     tick(&R->perf->time_coord);
 
-    const struct spanning_tree_coordinate_system *mst = R->internal_state->mst;
-    struct ketju_system_physical_state *ps = R->physical_state;
+    const struct spanning_tree_coordinate_system *const mst = R->internal_state->mst;
+    struct ketju_system_physical_state *const ps = R->physical_state;
 
 
     int first = get_root_index(R);
@@ -538,7 +475,7 @@ static void update_vel(struct ketju_system *R,
                        enum velocity_type propagated_velocity) {
 
     tick(&R->perf->time_coord);
-    const struct spanning_tree_coordinate_system *mst = R->internal_state->mst;
+    const struct spanning_tree_coordinate_system *const mst = R->internal_state->mst;
 
     double(*vel_to_update)[3] = propagated_velocity == PHYSICAL
                                     ? R->physical_state->vel
@@ -579,9 +516,9 @@ static void update_vel(struct ketju_system *R,
 
 static void drift(double ds, struct ketju_system *R) {
 
-    struct ketju_system_internal_state *is = R->internal_state;
-    struct spanning_tree_coordinate_system *mst = is->mst;
-    struct ketju_system_physical_state *ps = R->physical_state;
+    struct ketju_system_internal_state *const is = R->internal_state;
+    struct spanning_tree_coordinate_system *const mst = is->mst;
+    struct ketju_system_physical_state *const ps = R->physical_state;
 
     compute_T(R);
      // T + B = U, but depends only on velocities
@@ -601,9 +538,9 @@ static void drift(double ds, struct ketju_system *R) {
 
 static void set_auxiliary_variables(struct ketju_system *R) {
 
-    struct ketju_system_internal_state *is = R->internal_state;
-    struct spanning_tree_coordinate_system *mst = is->mst;
-    struct ketju_system_physical_state *ps = R->physical_state;
+    struct ketju_system_internal_state *const is = R->internal_state;
+    struct spanning_tree_coordinate_system *const mst = is->mst;
+    struct ketju_system_physical_state *const ps = R->physical_state;
 
     memcpy(is->aux_vel, ps->vel, sizeof(double[R->num_particles][3]));
     memcpy(mst->edge_rel_aux_vel, mst->edge_rel_vel,
@@ -614,9 +551,9 @@ static void set_auxiliary_variables(struct ketju_system *R) {
 
 static void physical_kick(double dt, struct ketju_system *R) {
 
-    struct ketju_system_internal_state *is = R->internal_state;
-    struct spanning_tree_coordinate_system *mst = is->mst;
-    struct ketju_system_physical_state *ps = R->physical_state;
+    struct ketju_system_internal_state *const is = R->internal_state;
+    struct spanning_tree_coordinate_system *const mst = is->mst;
+    struct ketju_system_physical_state *const ps = R->physical_state;
 
     update_vel(R, AUXILIARY);
     ketju_compute_PN_acc(R, is->aux_vel, is->aux_spin);
@@ -651,9 +588,9 @@ static void physical_kick(double dt, struct ketju_system *R) {
 
 static void auxiliary_kick(double dt, struct ketju_system *R) {
 
-    struct ketju_system_internal_state *is = R->internal_state;
-    struct spanning_tree_coordinate_system *mst = is->mst;
-    struct ketju_system_physical_state *ps = R->physical_state;
+    struct ketju_system_internal_state *const is = R->internal_state;
+    struct spanning_tree_coordinate_system *const mst = is->mst;
+    struct ketju_system_physical_state *const ps = R->physical_state;
 
     update_vel(R, PHYSICAL);
     ketju_compute_PN_acc(R, ps->vel, ps->spin);
@@ -680,8 +617,8 @@ static void auxiliary_kick(double dt, struct ketju_system *R) {
 
 static void kick(double ds, struct ketju_system *R) {
 
-    struct ketju_system_internal_state *is = R->internal_state;
-    struct spanning_tree_coordinate_system *mst = is->mst;
+    struct ketju_system_internal_state *const is = R->internal_state;
+    struct spanning_tree_coordinate_system *const mst = is->mst;
 
     compute_U_and_Newtonian_Acc(R);
     double dt = ds / is->U;
@@ -708,7 +645,7 @@ static void kick(double ds, struct ketju_system *R) {
 
 static void compute_total_energy(struct ketju_system *R) {
 
-    struct ketju_system_internal_state *is = R->internal_state;
+    struct ketju_system_internal_state *const is = R->internal_state;
 
     compute_T(R);
     compute_U(R);
@@ -886,7 +823,7 @@ static void store_gbs_data(struct gbs_storage *gs, const struct ketju_system *R,
     const int k_ind = k - 1;
     data[k_ind][0] = R->physical_state->time;
     int offset = 1;
-    const struct spanning_tree_coordinate_system *mst = R->internal_state->mst;
+    const struct spanning_tree_coordinate_system *const mst = R->internal_state->mst;
     memcpy(&data[k_ind][offset], mst->root_pos, sizeof(double[3]));
     offset += 3;
     memcpy(&data[k_ind][offset], mst->root_vel, sizeof(double[3]));
@@ -1136,7 +1073,7 @@ static void update_system_from_gbs_result(struct ketju_system *R,
     double *data = ((double(*)[gs->num_vars])gs->data)[gs->num_rows - 1];
     R->physical_state->time = data[0];
     int offset = 1;
-    struct spanning_tree_coordinate_system *mst = R->internal_state->mst;
+    struct spanning_tree_coordinate_system *const mst = R->internal_state->mst;
     memcpy(mst->root_pos, &data[offset], sizeof(double[3]));
     offset += 3;
     memcpy(mst->root_vel, &data[offset], sizeof(double[3]));
@@ -1156,9 +1093,9 @@ static void update_system_from_gbs_result(struct ketju_system *R,
 // Estimates a safe initial timestep that is sufficiently small compared to the
 // smallest two-body timescale in the system.
 static double estimate_initial_timestep(struct ketju_system *R) {
-    struct ketju_system_internal_state *is = R->internal_state;
-    struct spanning_tree_coordinate_system *mst = is->mst;
-    struct ketju_system_physical_state *ps = R->physical_state;
+    struct ketju_system_internal_state *const is = R->internal_state;
+    struct spanning_tree_coordinate_system *const mst = is->mst;
+    struct ketju_system_physical_state *const ps = R->physical_state;
 
     int istart, jstart;
     int CumNumEdge, ThisBlock;
