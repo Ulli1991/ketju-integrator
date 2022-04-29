@@ -1,7 +1,7 @@
 #include <assert.h>
 #include <math.h>
-#include <string.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include "ketju_integrator/internal.h"
 #include "ketju_integrator/ketju_integrator.h"
@@ -11,7 +11,7 @@
 // purposes the input is also passed as a struct instead of reading from the
 // ketju_system fields directly
 struct bh_merger_input {
-    double G,c;
+    double G, c;
     double m1, m2, x1[3], x2[3], v1[3], v2[3], S1[3], S2[3];
 };
 
@@ -41,7 +41,7 @@ struct bh_merger_remnant_properties {
 // configuration.
 void ketju_calculate_bh_merger_remnant_properties(
     struct bh_merger_input *in, struct bh_merger_remnant_properties *out) {
-    
+
     const double G = in->G, c = in->c;
 
     const double m1 = in->m1, m2 = in->m2;
@@ -50,26 +50,25 @@ void ketju_calculate_bh_merger_remnant_properties(
     // relative position and velocity
     double rv[3], vv[3];
     for (int i = 0; i < 3; i++) {
-        rv[i]  = in->x1[i] - in->x2[i];
-        vv[i]  = in->v1[i] - in->v2[i];
+        rv[i] = in->x1[i] - in->x2[i];
+        vv[i] = in->v1[i] - in->v2[i];
     }
 
- 
     // orbital angular momentum (Newtonian) and corresponding unit vector
     double L[3], Lhat[3];
     vector_cross(rv, vv, L);
-    for (int i=0; i<3; ++i) {
+    for (int i = 0; i < 3; ++i) {
         L[i] *= m1 * m2 / m;
     }
 
     // Check that L is non-zero to handle the corner case of a head-on merger
-    // separately. This shouldn't be a common occurrence, but don't want it to 
+    // separately. This shouldn't be a common occurrence, but don't want it to
     // crash then anyway.
     if (L[0] == 0 && L[1] == 0 && L[2] == 0) {
         // In this case there won't be significant GW emission I guess,
         // so use Newtonian values
         out->m = m;
-        for (int i=0; i<3; ++i) {
+        for (int i = 0; i < 3; ++i) {
             out->vkick[i] = 0;
             out->S[i] = 0;
         }
@@ -93,8 +92,9 @@ void ketju_calculate_bh_merger_remnant_properties(
             m59[i] = n0[i] * cos(angle) + m0[i] * sin(angle);
         }
     }
-    
-    // we need direction of total angular momentum for the direction of remnant spin
+
+    // we need direction of total angular momentum for the direction of remnant
+    // spin
     double J[3], Jhat[3];
     for (int i = 0; i < 3; i++) {
         J[i] = in->S1[i] + in->S2[i] + L[i];
@@ -139,36 +139,36 @@ void ketju_calculate_bh_merger_remnant_properties(
 
     S0_tilde_para = vector_dot(S0_tilde, Lhat);
 
-
     // calculate the components of recoil velocity, in km/s
     // Eq. (37)
     const double v_para =
-        pow(4 * eta, 2) *
-        (vector_dot(Delta_tilde, n0) *
-             (3678. - 2475. * pow(delta_m, 2) + 4962. * S0_tilde_para +
-              7170. * pow(S0_tilde_para, 2) + 12050. * pow(S0_tilde_para, 3)) +
-         vector_dot(S0_tilde, m59) *
-             (Delta_tilde_para *
-                  (4315. - 1262. * pow(delta_m, 2) + 15970. * S0_tilde_para) -
-              2256. * delta_m - 2231. * delta_m * S0_tilde_para));
+        pow(4 * eta, 2)
+        * (vector_dot(Delta_tilde, n0)
+               * (3678. - 2475. * pow(delta_m, 2) + 4962. * S0_tilde_para
+                  + 7170. * pow(S0_tilde_para, 2)
+                  + 12050. * pow(S0_tilde_para, 3))
+           + vector_dot(S0_tilde, m59)
+                 * (Delta_tilde_para
+                        * (4315. - 1262. * pow(delta_m, 2)
+                           + 15970. * S0_tilde_para)
+                    - 2256. * delta_m - 2231. * delta_m * S0_tilde_para));
 
     // Eq. (39)
-    double v_ortho2 = pow(4*eta, 4) * (
-            2.106e5 * pow(Delta_tilde_para, 2)
-            + 4.967e5 * Delta_tilde_para * delta_m
-            - 2.116e5 * pow(Delta_tilde_para, 3) * delta_m
-            - 5.037e5 * pow(Delta_tilde_para, 2) * pow(delta_m, 2)
-            - 1.269e5 * Delta_tilde_para * pow(delta_m, 3)
-            - 3.384e5 * pow(Delta_tilde_para, 2) * S0_tilde_para
-            - 6.440e5 * pow(delta_m, 2)* S0_tilde_para
-            + 2.138e6 * pow(Delta_tilde_para, 2) * pow(S0_tilde_para, 2)
-            - 4.905e6 * Delta_tilde_para * delta_m * pow(S0_tilde_para, 2)
-            - 1.100e6 * pow(delta_m, 2) * pow(S0_tilde_para, 2)
-            - 1.024e7 * pow(Delta_tilde_para, 2) * pow(S0_tilde_para, 3))
-        + pow( 1.2e4 * eta * eta * delta_m * (1 - 0.93*eta), 2);
-    if (v_ortho2 < 0) {
-        v_ortho2 = 0;
-    }
+    double v_ortho2 =
+        pow(4 * eta, 4)
+            * (2.106e5 * pow(Delta_tilde_para, 2)
+               + 4.967e5 * Delta_tilde_para * delta_m
+               - 2.116e5 * pow(Delta_tilde_para, 3) * delta_m
+               - 5.037e5 * pow(Delta_tilde_para, 2) * pow(delta_m, 2)
+               - 1.269e5 * Delta_tilde_para * pow(delta_m, 3)
+               - 3.384e5 * pow(Delta_tilde_para, 2) * S0_tilde_para
+               - 6.440e5 * pow(delta_m, 2) * S0_tilde_para
+               + 2.138e6 * pow(Delta_tilde_para, 2) * pow(S0_tilde_para, 2)
+               - 4.905e6 * Delta_tilde_para * delta_m * pow(S0_tilde_para, 2)
+               - 1.100e6 * pow(delta_m, 2) * pow(S0_tilde_para, 2)
+               - 1.024e7 * pow(Delta_tilde_para, 2) * pow(S0_tilde_para, 3))
+        + pow(1.2e4 * eta * eta * delta_m * (1 - 0.93 * eta), 2);
+    if (v_ortho2 < 0) { v_ortho2 = 0; }
     const double v_ortho = sqrt(v_ortho2);
 
     const double km_per_s = c / 2.99792458e5;
@@ -184,11 +184,13 @@ void ketju_calculate_bh_merger_remnant_properties(
     // momentum evaluated at ISCO of Kerr metric, with spin = S_tilde_para.
     const double chi = S_tilde_para;
     const double sign_chi = chi == 0 ? 0 : (chi > 0 ? 1 : -1);
-    const double Z1 = 1 + pow(1 - chi * chi, 1. / 3) *
-                              (pow(1 + chi, 1. / 3) + pow(1 - chi, 1. / 3));
+    const double Z1 = 1
+                      + pow(1 - chi * chi, 1. / 3)
+                            * (pow(1 + chi, 1. / 3) + pow(1 - chi, 1. / 3));
     const double Z2 = sqrt(3 * chi * chi + Z1 * Z1);
     // also dimensionless / in units of system mass
-    const double r_isco = 3 + Z2 - sign_chi * sqrt((3 - Z1) * (3 + Z1 + 2 * Z2));
+    const double r_isco =
+        3 + Z2 - sign_chi * sqrt((3 - Z1) * (3 + Z1 + 2 * Z2));
     const double E_isco = sqrt(1 - 2. / (3 * r_isco));
     // Given after Eq. (35) in the corrected arXiv version
     const double L_isco = 2. / sqrt(3 * r_isco) * (3 * sqrt(r_isco) - 2 * chi);
@@ -224,34 +226,36 @@ void ketju_calculate_bh_merger_remnant_properties(
         const double E_HU =
             0.0025829 - 0.0773079 / (2 * S0_tilde_para - 1.693959);
         const double Ec_para =
-            pow(4 * eta, 2) *
-                (E_HU + k2a * delta_m * Delta_tilde_para +
-                 0.000743 * pow(Delta_tilde_para, 2) + k2d * pow(delta_m, 2) +
-                 k3a * delta_m * Delta_tilde_para * S_tilde_para +
-                 k3b * S_tilde_para * pow(Delta_tilde_para, 2) +
-                 k3d * pow(delta_m, 2) * S_tilde_para +
-                 k4a * delta_m * Delta_tilde_para * pow(S_tilde_para, 2) +
-                 k4b * delta_m * pow(Delta_tilde_para, 3) +
-                 0.000124 * pow(Delta_tilde_para, 4) +
-                 k4e * pow(Delta_tilde_para, 2) * pow(S_tilde_para, 2) +
-                 k4f * pow(delta_m, 4) +
-                 k4g * pow(delta_m, 3) * Delta_tilde_para) +
-            pow(delta_m, 6) * eta * (1 - E_isco);
+            pow(4 * eta, 2)
+                * (E_HU + k2a * delta_m * Delta_tilde_para
+                   + 0.000743 * pow(Delta_tilde_para, 2) + k2d * pow(delta_m, 2)
+                   + k3a * delta_m * Delta_tilde_para * S_tilde_para
+                   + k3b * S_tilde_para * pow(Delta_tilde_para, 2)
+                   + k3d * pow(delta_m, 2) * S_tilde_para
+                   + k4a * delta_m * Delta_tilde_para * pow(S_tilde_para, 2)
+                   + k4b * delta_m * pow(Delta_tilde_para, 3)
+                   + 0.000124 * pow(Delta_tilde_para, 4)
+                   + k4e * pow(Delta_tilde_para, 2) * pow(S_tilde_para, 2)
+                   + k4f * pow(delta_m, 4)
+                   + k4g * pow(delta_m, 3) * Delta_tilde_para)
+            + pow(delta_m, 6) * eta * (1 - E_isco);
 
         const double Ec =
-            Ec_para +
-            pow(4 * eta, 2) *
-                (pow(S_tilde_ortho, 2) *
-                     (e1 + e2 * S_tilde_para + e3 * pow(S_tilde_para, 2)) +
-                 pow(Delta_tilde_ortho, 2) * (eps1 + eps2 * S_tilde_para +
-                                              eps3 * pow(S_tilde_para, 2)) +
-                 pow(delta_m, 2) * pow(S_tilde_ortho, 2) *
-                     (E_A + S_tilde_para * E_B) +
-                 pow(delta_m, 2) * pow(Delta_tilde_ortho, 2) *
-                     (E_D + S_tilde_para * E_E) +
-                 E_F * delta_m * Delta_tilde_ortho * S_tilde_ortho +
-                 E_G * pow(Delta_tilde_para, 2) * pow(Delta_tilde_ortho, 2) +
-                 E_H * pow(Delta_tilde_para, 2) * pow(S_tilde_ortho, 2));
+            Ec_para
+            + pow(4 * eta, 2)
+                  * (pow(S_tilde_ortho, 2)
+                         * (e1 + e2 * S_tilde_para + e3 * pow(S_tilde_para, 2))
+                     + pow(Delta_tilde_ortho, 2)
+                           * (eps1 + eps2 * S_tilde_para
+                              + eps3 * pow(S_tilde_para, 2))
+                     + pow(delta_m, 2) * pow(S_tilde_ortho, 2)
+                           * (E_A + S_tilde_para * E_B)
+                     + pow(delta_m, 2) * pow(Delta_tilde_ortho, 2)
+                           * (E_D + S_tilde_para * E_E)
+                     + E_F * delta_m * Delta_tilde_ortho * S_tilde_ortho
+                     + E_G * pow(Delta_tilde_para, 2)
+                           * pow(Delta_tilde_ortho, 2)
+                     + E_H * pow(Delta_tilde_para, 2) * pow(S_tilde_ortho, 2));
 
         // take delta M = (M1 + M2 - M_remnant)/(M1 + M2) = Ec
         out->m = m * (1 - Ec);
@@ -297,40 +301,41 @@ void ketju_calculate_bh_merger_remnant_properties(
         const double zeta3 = 0.04;
 
         const double alpha_align =
-            pow(4 * eta, 2) *
-                (L0 + L1 * S_tilde_para + L2a * delta_m * Delta_tilde_para +
-                 L2b * pow(S_tilde_para, 2) + L2c * pow(Delta_tilde_para, 2) +
-                 L2d * pow(delta_m, 2) +
-                 L3a * Delta_tilde_para * S_tilde_para * delta_m +
-                 L3b * S_tilde_para * pow(Delta_tilde_para, 2) +
-                 L3c * pow(S_tilde_para, 3) +
-                 L3d * S_tilde_para * pow(delta_m, 2) +
-                 L4a * Delta_tilde_para * pow(S_tilde_para, 2) * delta_m +
-                 L4b * pow(Delta_tilde_para, 3) * delta_m +
-                 L4c * pow(Delta_tilde_para, 4) + L4d * pow(S_tilde_para, 4) +
-                 L4e * pow(Delta_tilde_para, 2) * pow(S_tilde_para, 2) +
-                 L4f * pow(delta_m, 4) +
-                 L4g * Delta_tilde_para * pow(delta_m, 3) +
-                 L4h * pow(Delta_tilde_para * delta_m, 2) +
-                 L4i * pow(S_tilde_para * delta_m, 2)) +
-            S_tilde_para * (1 + 8 * eta) * pow(delta_m, 4) +
-            eta * L_isco * pow(delta_m, 6);
+            pow(4 * eta, 2)
+                * (L0 + L1 * S_tilde_para + L2a * delta_m * Delta_tilde_para
+                   + L2b * pow(S_tilde_para, 2) + L2c * pow(Delta_tilde_para, 2)
+                   + L2d * pow(delta_m, 2)
+                   + L3a * Delta_tilde_para * S_tilde_para * delta_m
+                   + L3b * S_tilde_para * pow(Delta_tilde_para, 2)
+                   + L3c * pow(S_tilde_para, 3)
+                   + L3d * S_tilde_para * pow(delta_m, 2)
+                   + L4a * Delta_tilde_para * pow(S_tilde_para, 2) * delta_m
+                   + L4b * pow(Delta_tilde_para, 3) * delta_m
+                   + L4c * pow(Delta_tilde_para, 4) + L4d * pow(S_tilde_para, 4)
+                   + L4e * pow(Delta_tilde_para, 2) * pow(S_tilde_para, 2)
+                   + L4f * pow(delta_m, 4)
+                   + L4g * Delta_tilde_para * pow(delta_m, 3)
+                   + L4h * pow(Delta_tilde_para * delta_m, 2)
+                   + L4i * pow(S_tilde_para * delta_m, 2))
+            + S_tilde_para * (1 + 8 * eta) * pow(delta_m, 4)
+            + eta * L_isco * pow(delta_m, 6);
 
         double Ac =
-            pow(alpha_align, 2) +
-            pow(4 * eta, 2) *
-                (pow(S_tilde_ortho, 2) *
-                     (a1 + a2 * S_tilde_para + a3 * pow(S_tilde_para, 2)) +
-                 pow(Delta_tilde_ortho, 2) * (zeta1 + zeta2 * S_tilde_para +
-                                              zeta3 * pow(S_tilde_para, 2)) +
-                 pow(delta_m, 2) * pow(S_tilde_ortho, 2) *
-                     (A_A + A_B * S_tilde_para) +
-                 pow(delta_m, 2) * pow(Delta_tilde_ortho, 2) *
-                     (A_D + A_E * S_tilde_para) +
-                 A_F * delta_m * Delta_tilde_ortho * S_tilde_ortho +
-                 A_G * pow(Delta_tilde_para, 2) * pow(Delta_tilde_ortho, 2) +
-                 A_H * pow(Delta_tilde_para, 2) * pow(S_tilde_ortho, 2)
-                )
+            pow(alpha_align, 2)
+            + pow(4 * eta, 2)
+                  * (pow(S_tilde_ortho, 2)
+                         * (a1 + a2 * S_tilde_para + a3 * pow(S_tilde_para, 2))
+                     + pow(Delta_tilde_ortho, 2)
+                           * (zeta1 + zeta2 * S_tilde_para
+                              + zeta3 * pow(S_tilde_para, 2))
+                     + pow(delta_m, 2) * pow(S_tilde_ortho, 2)
+                           * (A_A + A_B * S_tilde_para)
+                     + pow(delta_m, 2) * pow(Delta_tilde_ortho, 2)
+                           * (A_D + A_E * S_tilde_para)
+                     + A_F * delta_m * Delta_tilde_ortho * S_tilde_ortho
+                     + A_G * pow(Delta_tilde_para, 2)
+                           * pow(Delta_tilde_ortho, 2)
+                     + A_H * pow(Delta_tilde_para, 2) * pow(S_tilde_ortho, 2))
             + pow(delta_m, 6) * (1 + 12 * eta) * pow(S_tilde_ortho, 2);
 
         // square of dimensionless spin magnitude now given by Ac. multiply in
@@ -376,9 +381,8 @@ static void merge_bhs(struct ketju_system *R, int i, int j) {
     // between the BHs), but velocity needs PN corrections.
     double xcom[3], vcom[3];
     for (int k = 0; k < 3; k++) {
-        xcom[k] =
-            (bh_input.m1 * bh_input.x1[k] + bh_input.m2 * bh_input.x2[k]) /
-            (bh_input.m1 + bh_input.m2);
+        xcom[k] = (bh_input.m1 * bh_input.x1[k] + bh_input.m2 * bh_input.x2[k])
+                  / (bh_input.m1 + bh_input.m2);
     }
     ketju_binary_PN_CoM_velocity(R, i, j, vcom);
 
@@ -393,7 +397,6 @@ static void merge_bhs(struct ketju_system *R, int i, int j) {
     }
     ps->mass[i] = res.m;
 
-
     // Store the info on the merger
     R->merger_infos =
         realloc(R->merger_infos,
@@ -403,10 +406,10 @@ static void merge_bhs(struct ketju_system *R, int i, int j) {
     info->m1 = bh_input.m1;
     info->m2 = bh_input.m2;
     info->m_remnant = res.m;
-    info->chi1 = vector_norm(bh_input.S1) /
-                 (bh_input.G / bh_input.c * bh_input.m1 * bh_input.m1);
-    info->chi2 = vector_norm(bh_input.S2) /
-                 (bh_input.G / bh_input.c * bh_input.m2 * bh_input.m2);
+    info->chi1 = vector_norm(bh_input.S1)
+                 / (bh_input.G / bh_input.c * bh_input.m1 * bh_input.m1);
+    info->chi2 = vector_norm(bh_input.S2)
+                 / (bh_input.G / bh_input.c * bh_input.m2 * bh_input.m2);
     info->chi_remnant =
         vector_norm(res.S) / (bh_input.G / bh_input.c * res.m * res.m);
     info->v_kick = vector_norm(res.vkick);
@@ -418,8 +421,8 @@ static void merge_bhs(struct ketju_system *R, int i, int j) {
         struct ketju_bh_merger_info *old_info = &R->merger_infos[k];
         if (old_info->extra_index1 == j) {
             old_info->extra_index1 = info->extra_index2;
-        } else if (old_info->extra_index1 > j &&
-                   old_info->extra_index1 < R->num_particles) {
+        } else if (old_info->extra_index1 > j
+                   && old_info->extra_index1 < R->num_particles) {
             old_info->extra_index1 -= 1;
         }
     }
@@ -472,10 +475,12 @@ int ketju_do_bh_mergers(struct ketju_system *R) {
             }
             // Simple condition: merge if particles within 6 times their
             // combined Schwarzschild radii.
-            double fac = R->options->bh_merger_distance_in_Rs * 2 *
-                         R->constants->G / (R->constants->c * R->constants->c);
-            if (sqrt(r2) < fac * (R->physical_state->mass[i] +
-                                  R->physical_state->mass[j])) {
+            double fac = R->options->bh_merger_distance_in_Rs * 2
+                         * R->constants->G
+                         / (R->constants->c * R->constants->c);
+            if (sqrt(r2) < fac
+                               * (R->physical_state->mass[i]
+                                  + R->physical_state->mass[j])) {
                 merge_bhs(R, i, j);
                 num_merged += 1;
             }

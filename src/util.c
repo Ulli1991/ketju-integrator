@@ -1,8 +1,7 @@
 #include <string.h>
 
-#include "ketju_integrator/ketju_integrator.h"
 #include "ketju_integrator/internal.h"
-
+#include "ketju_integrator/ketju_integrator.h"
 
 void ketju_compute_CoM(const struct ketju_system *R, double CoM_pos[3],
                        double CoM_vel[3]) {

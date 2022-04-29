@@ -3,17 +3,17 @@
 #ifndef KETJU_INTEGRATOR_INTERNAL_H
 #define KETJU_INTEGRATOR_INTERNAL_H
 
+#include <math.h>
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdio.h>
-#include <stdbool.h>
-#include <math.h>
 
 #include <mpi.h>
 
 #include "ketju_integrator.h"
 
 #ifndef M_PI
-    #define M_PI 3.14159265358979323846
+#define M_PI 3.14159265358979323846
 #endif
 
 // For compatibility with C++ programs
@@ -69,7 +69,7 @@ struct graph_vertex {
 
 struct spanning_tree_coordinate_system {
     int num_vertices;
-    int num_edges;    
+    int num_edges;
 
     struct graph_vertex *vertex;
 
@@ -79,7 +79,7 @@ struct spanning_tree_coordinate_system {
     // Absolute coordinates of the tree root.
     // These are integrated to allow for forces that do not conserve the CoM of
     // the system.
-    double root_pos[3]; 
+    double root_pos[3];
     double root_vel[3];
     double root_aux_vel[3];
     // Relative coordinates of the edges
@@ -101,7 +101,7 @@ struct task_info {
     int main_group_size;
     int main_group_rank;
     MPI_Comm main_comm;
-    
+
     // gbs task group = tasks participating in a given set of substep levels
     // i.e. force calculations done in this group
     // TODO maybe could be named as force_group, since mostly appears in force
@@ -113,7 +113,7 @@ struct task_info {
     MPI_Comm *gbs_data_comms;
 
     bool gbs_comms_initialized;
-    
+
     int global_rank; // <rank in MPI_COMM_WORLD
 };
 
@@ -132,13 +132,12 @@ struct ketju_system_internal_state {
 
     int gbs_k;
 
-    double (*aux_vel)[3]; 
-    double (*acc)[3]; // velocity independent acceleration
-    double (*acc_vd)[3]; // velocity dependent acceleration (for all particles at least for now)
-    double (*aux_spin)[3]; 
-    double (*spin_derivative)[3]; 
+    double (*aux_vel)[3];
+    double (*acc)[3];    // velocity independent acceleration
+    double (*acc_vd)[3]; // velocity dependent acceleration
+    double (*aux_spin)[3];
+    double (*spin_derivative)[3];
 };
-
 
 // Small helper functions.
 // Inline definitions allow using them in different
@@ -150,12 +149,8 @@ struct ketju_system_internal_state {
 //   tock(timer)
 // the value of *timer is not meaningful between the calls.
 //
-static inline void tick(double *timer) {
-    *timer -= MPI_Wtime();   
-}
-static inline void tock(double *timer) {
-    *timer += MPI_Wtime();   
-}
+static inline void tick(double *timer) { *timer -= MPI_Wtime(); }
+static inline void tock(double *timer) { *timer += MPI_Wtime(); }
 
 // for exiting on catastrophic errors
 // TODO most uses now could be replaced with error codes allowing potentially
@@ -202,7 +197,6 @@ static inline double norm_and_unit_vector(const double a[3], double res[3]) {
     return norm;
 }
 
-
 // Divide work for a i = (0..N-1), j = (i+1..N-1) loop between Nt tasks.
 // For the given task, computes the starting value for i (istart), the starting
 // value for j (jstart) for the loop with i==istart, the number of elements
@@ -211,8 +205,8 @@ static inline double norm_and_unit_vector(const double a[3], double res[3]) {
 // The loops for i,j go up to N (exclusive) until ThisBlock elements have been
 // processed.
 static inline void loop_scheduling_N2(int N, int Nt, int task, int *istart,
-                                      int *jstart, int *ThisBlock, int *CumNum
-                                      ) {
+                                      int *jstart, int *ThisBlock,
+                                      int *CumNum) {
     int Np = (N * (N - 1)) / 2;
     int block = (int)floor(Np / Nt);
     int limit = (block + 1) * Nt - Np;
@@ -226,8 +220,8 @@ static inline void loop_scheduling_N2(int N, int Nt, int task, int *istart,
     }
 
     double drow =
-        1.0 * N - 0.5 -
-        0.5 * sqrt((1.0 - 2.0 * N) * (1.0 - 2.0 * N) - 8.0 * ThisCumNum);
+        1.0 * N - 0.5
+        - 0.5 * sqrt((1.0 - 2.0 * N) * (1.0 - 2.0 * N) - 8.0 * ThisCumNum);
     int row = (int)floor(drow);
     int rowstart =
         (int)round(-0.5 * (1.0 * row + 1.0) * (row - 2.0 * N) - 1.0 * N);
@@ -252,15 +246,17 @@ void ketju_compute_PN_acc(struct ketju_system *, double (*vel_to_use)[3],
 
 // These functions are called through the helper below
 bool ketju_check_relative_proximity_general(int v1, int v2, const int Nd,
-                                    const struct ketju_system *R, int *d,
-                                    int path[/*Nd*/], int sign[/*Nd*/]);
+                                            const struct ketju_system *R,
+                                            int *d, int path[/*Nd*/],
+                                            int sign[/*Nd*/]);
 bool ketju_check_relative_proximity_ND_2(int v1, int v2,
-                                    const struct ketju_system *R, int *d,
-                                    int path[2], int sign[2]);
+                                         const struct ketju_system *R, int *d,
+                                         int path[2], int sign[2]);
 
 static inline bool ketju_check_relative_proximity(int v1, int v2, const int Nd,
-                                    const struct ketju_system *R, int *d,
-                                    int path[/*Nd*/], int sign[/*Nd*/]) {
+                                                  const struct ketju_system *R,
+                                                  int *d, int path[/*Nd*/],
+                                                  int sign[/*Nd*/]) {
 
 #ifndef NDEBUG
     const struct graph_vertex *vertex = R->internal_state->mst->vertex;

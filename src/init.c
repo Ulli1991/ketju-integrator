@@ -21,7 +21,7 @@ static void allocate_internal_state(struct ketju_system *R, int Ntask) {
     struct spanning_tree_coordinate_system *mst = R->internal_state->mst;
     mst->vertex = calloc(R->num_particles, sizeof(struct graph_vertex));
     mst->num_vertices = R->num_particles;
-    //TODO is num_edges actually used anywhere?
+    // TODO is num_edges actually used anywhere?
     mst->num_edges = 0; // is set when the tree is built
 
     // The division of edges between each task can be slightly uneven, but Ntask
@@ -34,12 +34,11 @@ static void allocate_internal_state(struct ketju_system *R, int Ntask) {
     mst->local_edge_subset = calloc(NumLocalEdge, sizeof(struct graph_edge));
     mst->edge_in_mst = calloc(mst->num_vertices - 1, sizeof(struct graph_edge));
 
-    mst->edge_rel_pos = calloc(1, sizeof(double[mst->num_vertices-1][3]));
-    mst->edge_rel_vel = calloc(1, sizeof(double[mst->num_vertices-1][3]));
-    mst->edge_rel_aux_vel = calloc(1, sizeof(double[mst->num_vertices-1][3]));
-    mst->edge_rel_acc = calloc(1, sizeof(double[mst->num_vertices-1][3]));
-    mst->edge_rel_acc_vd = calloc(1, sizeof(double[mst->num_vertices-1][3]));
-
+    mst->edge_rel_pos = calloc(1, sizeof(double[mst->num_vertices - 1][3]));
+    mst->edge_rel_vel = calloc(1, sizeof(double[mst->num_vertices - 1][3]));
+    mst->edge_rel_aux_vel = calloc(1, sizeof(double[mst->num_vertices - 1][3]));
+    mst->edge_rel_acc = calloc(1, sizeof(double[mst->num_vertices - 1][3]));
+    mst->edge_rel_acc_vd = calloc(1, sizeof(double[mst->num_vertices - 1][3]));
 
     R->internal_state->octree_data = calloc(1, sizeof(struct octree_data));
     R->internal_state->octree_data->indexlist = calloc(8, sizeof(int *));
@@ -173,7 +172,7 @@ void ketju_init_gbs_comms(struct ketju_system *R) {
     ti->gbs_group_index = 0; // The starting state is not calloc'd necessarily
     for (int i = 1; ti->main_group_rank > group_end_rank; ++i) {
         group_start_rank += gi->gbs_group_sizes[i - 1];
-        group_end_rank = group_start_rank + gi->gbs_group_sizes[i] -1 ;
+        group_end_rank = group_start_rank + gi->gbs_group_sizes[i] - 1;
         ti->gbs_group_index = i;
     }
 

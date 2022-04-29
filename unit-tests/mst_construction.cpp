@@ -35,8 +35,8 @@ static bool connected_to_root(struct ketju_system *R, int i) {
 }
 
 class ConstructionTest
-: public testing::TestWithParam<std::tuple<enum ketju_mst_algorithm, int>> {
-    public:
+    : public testing::TestWithParam<std::tuple<enum ketju_mst_algorithm, int>> {
+  public:
     static std::mt19937 gen;
 };
 std::mt19937 ConstructionTest::gen(0x5eed); // Define and init the static member
@@ -87,16 +87,15 @@ INSTANTIATE_TEST_SUITE_P(
         auto N = std::get<1>(info.param);
         std::stringstream ss;
         switch (algo) {
-            case KETJU_MST_PRIM:
-                ss << "Prim_";
-                break;
-            case KETJU_MST_DIVIDE_AND_CONQUER_PRIM:
-                ss << "DnC_";
-                break;
-            default:
-                ss << "Unknown_algo_";
+        case KETJU_MST_PRIM:
+            ss << "Prim_";
+            break;
+        case KETJU_MST_DIVIDE_AND_CONQUER_PRIM:
+            ss << "DnC_";
+            break;
+        default:
+            ss << "Unknown_algo_";
         }
         ss << N << "_particles";
         return ss.str();
     });
-

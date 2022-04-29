@@ -71,7 +71,7 @@ int main(int argc, char *argv[]) {
     // TODO read param file
     R.options->gbs_relative_tolerance = 1e-9;
     R.options->mst_algorithm = KETJU_MST_PRIM;
-    //R.options->mst_algorithm = KETJU_MST_DIVIDE_AND_CONQUER_PRIM;
+    // R.options->mst_algorithm = KETJU_MST_DIVIDE_AND_CONQUER_PRIM;
     R.options->max_tree_distance = 2;
     R.options->PN_flags = KETJU_PN_ALL;
 
@@ -91,37 +91,31 @@ int main(int argc, char *argv[]) {
             "successful_steps: %d\n"
             "failed_steps: %d\n"
             "total_work: %g\n"
-            "relative_energy_error: %e\n"
-            ,
-            R.perf->time_force,
-            R.perf->time_force/R.perf->time_total*100,
+            "relative_energy_error: %e\n",
+            R.perf->time_force, R.perf->time_force / R.perf->time_total * 100,
             R.perf->time_force_comm,
-            R.perf->time_force_comm/R.perf->time_total*100,
-            R.perf->time_coord,
-            R.perf->time_coord/R.perf->time_total*100,
-            R.perf->time_mst,
-            R.perf->time_mst/R.perf->time_total*100,
+            R.perf->time_force_comm / R.perf->time_total * 100,
+            R.perf->time_coord, R.perf->time_coord / R.perf->time_total * 100,
+            R.perf->time_mst, R.perf->time_mst / R.perf->time_total * 100,
             R.perf->time_gbscomm,
-            R.perf->time_gbscomm/R.perf->time_total*100,
+            R.perf->time_gbscomm / R.perf->time_total * 100,
             R.perf->time_gbsextr,
-            R.perf->time_gbsextr/R.perf->time_total*100,
-            R.perf->time_total, R.perf->successful_steps, R.perf->failed_steps,
-            R.perf->total_work,
+            R.perf->time_gbsextr / R.perf->time_total * 100, R.perf->time_total,
+            R.perf->successful_steps, R.perf->failed_steps, R.perf->total_work,
             R.perf->relative_energy_error);
 
         printf("Physical time %e\n", R.physical_state->time);
         int n = R.num_particles > 10 ? 10 : R.num_particles;
         for (int i = 0; i < n; ++i) {
-            printf(
-                "Particle %d\n"
-                " pos = [%e, %e, %e]\n"
-                " vel = [%e, %e, %e]\n",
-                i, R.physical_state->pos[i][0] + CoM_pos[0],
-                R.physical_state->pos[i][1] + CoM_pos[1],
-                R.physical_state->pos[i][2] + CoM_pos[2],
-                R.physical_state->vel[i][0] + CoM_vel[0],
-                R.physical_state->vel[i][1] + CoM_vel[1],
-                R.physical_state->vel[i][2] + CoM_vel[2]);
+            printf("Particle %d\n"
+                   " pos = [%e, %e, %e]\n"
+                   " vel = [%e, %e, %e]\n",
+                   i, R.physical_state->pos[i][0] + CoM_pos[0],
+                   R.physical_state->pos[i][1] + CoM_pos[1],
+                   R.physical_state->pos[i][2] + CoM_pos[2],
+                   R.physical_state->vel[i][0] + CoM_vel[0],
+                   R.physical_state->vel[i][1] + CoM_vel[1],
+                   R.physical_state->vel[i][2] + CoM_vel[2]);
         }
     }
 

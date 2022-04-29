@@ -92,27 +92,26 @@ bool ketju_debug_read_integrator_state(struct ketju_system *R,
     count = fread(&R->num_pn_particles, sizeof(R->num_pn_particles), 1, f);
     success = success && count == 1;
 
-    if (comm == MPI_COMM_NULL) {
-        comm = MPI_COMM_SELF;    
-    }
+    if (comm == MPI_COMM_NULL) { comm = MPI_COMM_SELF; }
 
     ketju_create_system(R, R->num_pn_particles,
                         R->num_particles - R->num_pn_particles, comm);
 
     // physical state
-    count = fread(&R->physical_state->time, sizeof(R->physical_state->time), 1, f);
+    count =
+        fread(&R->physical_state->time, sizeof(R->physical_state->time), 1, f);
     success = success && count == 1;
     count = fread(R->physical_state->mass, sizeof(*R->physical_state->mass),
-          R->num_particles, f);
+                  R->num_particles, f);
     success = success && count == R->num_particles;
     count = fread(R->physical_state->pos, sizeof(*R->physical_state->pos),
-          R->num_particles, f);
+                  R->num_particles, f);
     success = success && count == R->num_particles;
     count = fread(R->physical_state->vel, sizeof(*R->physical_state->vel),
-          R->num_particles, f);
+                  R->num_particles, f);
     success = success && count == R->num_particles;
     count = fread(R->physical_state->spin, sizeof(*R->physical_state->spin),
-          R->num_pn_particles, f);
+                  R->num_pn_particles, f);
     success = success && count == R->num_pn_particles;
 
     // internal state
@@ -124,29 +123,30 @@ bool ketju_debug_read_integrator_state(struct ketju_system *R,
     success = success && count == 1;
     count = fread(&is->mst->num_edges, sizeof(is->mst->num_edges), 1, f);
     success = success && count == 1;
-    count = fread(is->mst->vertex, sizeof(*is->mst->vertex), is->mst->num_vertices, f);
+    count = fread(is->mst->vertex, sizeof(*is->mst->vertex),
+                  is->mst->num_vertices, f);
     success = success && count == is->mst->num_vertices;
 
     // local_edge_* are used only during tree build, don't read them
 
     count = fread(is->mst->edge_in_mst, sizeof(*is->mst->edge_in_mst),
-          is->mst->num_vertices - 1, f);
-    success = success && count == is->mst->num_vertices-1;
+                  is->mst->num_vertices - 1, f);
+    success = success && count == is->mst->num_vertices - 1;
     count = fread(is->mst->edge_rel_pos, sizeof(*is->mst->edge_rel_pos),
-          is->mst->num_vertices - 1, f);
-    success = success && count == is->mst->num_vertices-1;
+                  is->mst->num_vertices - 1, f);
+    success = success && count == is->mst->num_vertices - 1;
     count = fread(is->mst->edge_rel_vel, sizeof(*is->mst->edge_rel_vel),
-          is->mst->num_vertices - 1, f);
-    success = success && count == is->mst->num_vertices-1;
+                  is->mst->num_vertices - 1, f);
+    success = success && count == is->mst->num_vertices - 1;
     count = fread(is->mst->edge_rel_aux_vel, sizeof(*is->mst->edge_rel_aux_vel),
-          is->mst->num_vertices - 1, f);
-    success = success && count == is->mst->num_vertices-1;
+                  is->mst->num_vertices - 1, f);
+    success = success && count == is->mst->num_vertices - 1;
     count = fread(is->mst->edge_rel_acc, sizeof(*is->mst->edge_rel_acc),
-          is->mst->num_vertices - 1, f);
-    success = success && count == is->mst->num_vertices-1;
+                  is->mst->num_vertices - 1, f);
+    success = success && count == is->mst->num_vertices - 1;
     count = fread(is->mst->edge_rel_acc_vd, sizeof(*is->mst->edge_rel_acc_vd),
-          is->mst->num_vertices - 1, f);
-    success = success && count == is->mst->num_vertices-1;
+                  is->mst->num_vertices - 1, f);
+    success = success && count == is->mst->num_vertices - 1;
 
     count = fread(&is->U, sizeof is->U, 1, f);
     success = success && count == 1;

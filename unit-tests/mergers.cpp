@@ -1,7 +1,7 @@
+#include <cmath>
 #include <gtest/gtest.h>
 #include <mpi.h>
 #include <random>
-#include <cmath>
 
 #include "ketju_integrator/ketju_integrator.h"
 
@@ -80,7 +80,6 @@ TEST(Integration_with_mergers, merger_from_orbit) {
     ASSERT_EQ(R.num_pn_particles, 1);
     ASSERT_NEAR(R.physical_state->time, tend,
                 tend * R.options->output_time_relative_tolerance);
-
 
     // No point in checking exact value which is determined by the GR fits,
     // just check that the result is sensible.
@@ -217,7 +216,6 @@ TEST(Instant_mergers, multiple_merger_with_extra_data2) {
     R.physical_state->mass[0] = 1;
     R.physical_state->pos[0][0] = 4;
 
-
     // Set position so that on first step IDs 2 and 3 merge,
     // then the remaining pair on the next step
     R.physical_state->mass[1] = 0.9;
@@ -259,7 +257,6 @@ TEST(Instant_mergers, multiple_merger_with_extra_data2) {
     ketju_free_system(&R);
 }
 
-
 TEST(Instant_mergers, multiple_merger_with_extra_data3) {
 
     struct ketju_system R;
@@ -275,11 +272,10 @@ TEST(Instant_mergers, multiple_merger_with_extra_data3) {
     R.physical_state->mass[0] = 1;
     R.physical_state->pos[0][0] = 10;
 
-
     // Set position so that on first step IDs 3 and 4 merge,
     // then 1 and 2 on the next step
     R.physical_state->mass[1] = 0.9;
-    R.physical_state->pos[1][0] = 10+(12+1e-12)*1.9;
+    R.physical_state->pos[1][0] = 10 + (12 + 1e-12) * 1.9;
 
     R.physical_state->mass[2] = 1;
     R.physical_state->pos[2][0] = -100;

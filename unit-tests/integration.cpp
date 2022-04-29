@@ -1,7 +1,7 @@
+#include <cmath>
 #include <gtest/gtest.h>
 #include <mpi.h>
 #include <random>
-#include <cmath>
 
 #include "ketju_integrator/ketju_integrator.h"
 
@@ -9,7 +9,7 @@
 // computed using gbs tolerance = 1e-14 and output time tolerance = 1e-12.
 
 TEST(Integration_versus_old_integrator, binary_system_full_pn_no_spin) {
-    
+
     struct ketju_system R;
     ketju_create_system(&R, 2, 0, MPI_COMM_WORLD);
 
@@ -26,14 +26,14 @@ TEST(Integration_versus_old_integrator, binary_system_full_pn_no_spin) {
     R.physical_state->pos[1][0] = -40;
     R.physical_state->vel[1][1] = -.085;
     R.physical_state->spin[1][1] = 1;
-    
+
     R.options->gbs_relative_tolerance = 1e-12;
     R.options->output_time_relative_tolerance = 1e-12;
 
     const double tend = 1e6;
 
     ketju_run_integrator(&R, tend);
-    
+
     const double reltol =
         10 * R.options->gbs_relative_tolerance * R.perf->successful_steps;
 
@@ -65,7 +65,7 @@ TEST(Integration_versus_old_integrator, binary_system_full_pn_no_spin) {
 }
 
 TEST(Integration_versus_old_integrator, binary_system_no_pn) {
-    
+
     struct ketju_system R;
     ketju_create_system(&R, 2, 0, MPI_COMM_WORLD);
 
@@ -82,14 +82,14 @@ TEST(Integration_versus_old_integrator, binary_system_no_pn) {
     R.physical_state->pos[1][0] = -40;
     R.physical_state->vel[1][1] = -.085;
     R.physical_state->spin[1][1] = 1;
-    
+
     R.options->gbs_relative_tolerance = 1e-12;
     R.options->output_time_relative_tolerance = 1e-12;
 
     const double tend = 1e6;
 
     ketju_run_integrator(&R, tend);
-    
+
     const double reltol =
         20 * R.options->gbs_relative_tolerance * R.perf->successful_steps;
 
@@ -179,11 +179,9 @@ TEST(Integration_threebody_terms,
         for (int i = 0; i < 3; ++i) {
             // The expected values are in natural units
             EXPECT_NEAR(R2.physical_state->pos[p][i],
-                        R.physical_state->pos[p][i],
-                        std::abs(40 * reltol));
+                        R.physical_state->pos[p][i], std::abs(40 * reltol));
             EXPECT_NEAR(R2.physical_state->vel[p][i],
-                        R.physical_state->vel[p][i],
-                        std::abs(0.085 * reltol));
+                        R.physical_state->vel[p][i], std::abs(0.085 * reltol));
         }
     }
     ketju_free_system(&R);
@@ -192,15 +190,14 @@ TEST(Integration_threebody_terms,
 
 // The full PN case with different unit systems to check that the units
 // don't matter
-TEST(Integration_units,
-     binary_system_full_pn_spin_generic_units) {
+TEST(Integration_units, binary_system_full_pn_spin_generic_units) {
 
     struct ketju_system R;
     ketju_create_system(&R, 2, 0, MPI_COMM_WORLD);
     struct ketju_system R2;
     ketju_create_system(&R2, 2, 0, MPI_COMM_WORLD);
 
-    unsigned int pn_flags =  KETJU_PN_ALL; 
+    unsigned int pn_flags = KETJU_PN_ALL;
 
     R.constants->c = 1;
     R.constants->G = 1;
@@ -249,11 +246,11 @@ TEST(Integration_units,
     tend = 1e6 * unit_time;
 
     ketju_run_integrator(&R2, tend);
-    
+
     const double reltol = 200 * R.perf->successful_steps * 1e-12;
 
     ASSERT_NEAR(R.physical_state->time, R2.physical_state->time / unit_time,
-                1e-12*1e6);
+                1e-12 * 1e6);
 
     ASSERT_EQ(R.num_particles, 2);
 
@@ -274,4 +271,3 @@ TEST(Integration_units,
     ketju_free_system(&R);
     ketju_free_system(&R2);
 }
-

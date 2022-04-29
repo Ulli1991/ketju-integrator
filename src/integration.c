@@ -14,7 +14,6 @@
 // This is needed only in this file
 enum velocity_type { PHYSICAL, AUXILIARY };
 
-
 // Gadget softening kernels
 static inline double softened_inverse_r(double r, double h) {
     if (h <= 0) return 1. / r;
@@ -27,9 +26,10 @@ static inline double softened_inverse_r(double r, double h) {
     } else if (u < 0.5) {
         return -hinv * (-2.8 + u * u * (16. / 3. + u * u * (6.4 * u - 9.6)));
     } else {
-        return -hinv *
-               (-3.2 + 2. / 30. / u +
-                u * u * (32. / 3. + u * (-16.0 + u * (9.6 - 32. / 15. * u))));
+        return -hinv
+               * (-3.2 + 2. / 30. / u
+                  + u * u
+                        * (32. / 3. + u * (-16.0 + u * (9.6 - 32. / 15. * u))));
     }
 }
 
@@ -44,9 +44,9 @@ static inline double softened_inverse_r3(double r, double h) {
     } else if (u < 0.5) {
         return hinv * hinv * hinv * (32. / 3. + u * u * (32.0 * u - 38.4));
     } else {
-        return hinv * hinv * hinv *
-               (64. / 3. - 48.0 * u + 38.4 * u * u - 32. / 3. * u * u * u -
-                2. / 30. / (u * u * u));
+        return hinv * hinv * hinv
+               * (64. / 3. - 48.0 * u + 38.4 * u * u - 32. / 3. * u * u * u
+                  - 2. / 30. / (u * u * u));
     }
 }
 
@@ -68,8 +68,8 @@ static inline double separation_and_r2(const struct ketju_system *R, int i,
 
     const struct graph_vertex *const vertex = R->internal_state->mst->vertex;
 
-    if (abs(vertex[i].level - vertex[j].level) <= Nd &&
-        ketju_check_relative_proximity(j, i, Nd, R, d, path, sign)) {
+    if (abs(vertex[i].level - vertex[j].level) <= Nd
+        && ketju_check_relative_proximity(j, i, Nd, R, d, path, sign)) {
         for (int l = 0; l < *d; l++) {
             const int s = sign[l];
             const double *const rel_pos =
@@ -119,8 +119,8 @@ static void compute_U(struct ketju_system *R) {
 
         for (int j = jstart; j < mst->num_vertices; j++) {
             if (c >= ThisBlock) { goto after_loops; }
-            if (R->options->no_star_star_gravity && i >= R->num_pn_particles &&
-                j >= R->num_pn_particles) {
+            if (R->options->no_star_star_gravity && i >= R->num_pn_particles
+                && j >= R->num_pn_particles) {
                 continue;
             }
 
@@ -379,7 +379,8 @@ static void compute_U_and_Newtonian_Acc(struct ketju_system *R) {
 // TODO the following few functions could maybe go in mst.c, but maybe easier to
 // have as few externally visible symbols as possible
 static int get_root_index(const struct ketju_system *R) {
-    const struct spanning_tree_coordinate_system *const mst = R->internal_state->mst;
+    const struct spanning_tree_coordinate_system *const mst =
+        R->internal_state->mst;
 
     int v1, v2;
     get_v1_v2_fast(R, 0, &v1, &v2);
@@ -391,7 +392,8 @@ static void into_Cartesian_from_MST(struct ketju_system *R) {
 
     tick(&R->perf->time_coord);
 
-    const struct spanning_tree_coordinate_system *const mst = R->internal_state->mst;
+    const struct spanning_tree_coordinate_system *const mst =
+        R->internal_state->mst;
     struct ketju_system_physical_state *const ps = R->physical_state;
 
     int first = get_root_index(R);
@@ -440,9 +442,9 @@ static void update_pos(struct ketju_system *R) {
 
     tick(&R->perf->time_coord);
 
-    const struct spanning_tree_coordinate_system *const mst = R->internal_state->mst;
+    const struct spanning_tree_coordinate_system *const mst =
+        R->internal_state->mst;
     struct ketju_system_physical_state *const ps = R->physical_state;
-
 
     int first = get_root_index(R);
     for (int k = 0; k < 3; k++) {
@@ -475,7 +477,8 @@ static void update_vel(struct ketju_system *R,
                        enum velocity_type propagated_velocity) {
 
     tick(&R->perf->time_coord);
-    const struct spanning_tree_coordinate_system *const mst = R->internal_state->mst;
+    const struct spanning_tree_coordinate_system *const mst =
+        R->internal_state->mst;
 
     double(*vel_to_update)[3] = propagated_velocity == PHYSICAL
                                     ? R->physical_state->vel
@@ -521,7 +524,7 @@ static void drift(double ds, struct ketju_system *R) {
     struct ketju_system_physical_state *const ps = R->physical_state;
 
     compute_T(R);
-     // T + B = U, but depends only on velocities
+    // T + B = U, but depends only on velocities
     double dt = ds / (is->T + is->B);
     ps->time += dt;
 
@@ -544,7 +547,7 @@ static void set_auxiliary_variables(struct ketju_system *R) {
 
     memcpy(is->aux_vel, ps->vel, sizeof(double[R->num_particles][3]));
     memcpy(mst->edge_rel_aux_vel, mst->edge_rel_vel,
-           sizeof(double[mst->num_vertices-1][3]));
+           sizeof(double[mst->num_vertices - 1][3]));
     memcpy(mst->root_aux_vel, mst->root_vel, sizeof(double[3]));
     memcpy(is->aux_spin, ps->spin, sizeof(double[R->num_pn_particles][3]));
 }
@@ -575,8 +578,7 @@ static void physical_kick(double dt, struct ketju_system *R) {
 
     int root = get_root_index(R);
     for (int k = 0; k < 3; k++) {
-        mst->root_vel[k] +=
-            dt * (is->acc[root][k] + is->acc_vd[root][k]);
+        mst->root_vel[k] += dt * (is->acc[root][k] + is->acc_vd[root][k]);
     }
 
     for (int i = 0; i < R->num_pn_particles; ++i) {
@@ -604,8 +606,7 @@ static void auxiliary_kick(double dt, struct ketju_system *R) {
 
     int root = get_root_index(R);
     for (int k = 0; k < 3; k++) {
-        mst->root_aux_vel[k] +=
-            dt * (is->acc[root][k] + is->acc_vd[root][k]);
+        mst->root_aux_vel[k] += dt * (is->acc[root][k] + is->acc_vd[root][k]);
     }
 
     for (int i = 0; i < R->num_pn_particles; ++i) {
@@ -676,21 +677,19 @@ static int gbs_total_cost(int k) {
     static bool inited = false;
     if (!inited) {
         int sum = 1;
-        for (int i = 1; i <= 16; ++i){
+        for (int i = 1; i <= 16; ++i) {
             sum = sum + num_gbs_substeps(i);
             values[i - 1] = sum;
         }
         inited = true;
     }
 
-    if (k < 1) { return 0;}
-    if (k <= 16) {
-        return values[k - 1];
-    }
+    if (k < 1) { return 0; }
+    if (k <= 16) { return values[k - 1]; }
 
     // Handle the unlikely larger values
     int sum = values[15];
-    for (int i = 17; i <= k; ++i){
+    for (int i = 17; i <= k; ++i) {
         sum = sum + num_gbs_substeps(i);
     }
     return sum;
@@ -747,8 +746,8 @@ static void allocate_state_backup(struct state_backup *sb, int num_particles,
     sb->pos = malloc(sizeof(double[num_particles][3]));
     sb->vel = malloc(sizeof(double[num_particles][3]));
     sb->spin = malloc(sizeof(double[num_pn_particles][3]));
-    sb->edge_rel_pos = malloc(sizeof(double[num_particles-1][3]));
-    sb->edge_rel_vel = malloc(sizeof(double[num_particles-1][3]));
+    sb->edge_rel_pos = malloc(sizeof(double[num_particles - 1][3]));
+    sb->edge_rel_vel = malloc(sizeof(double[num_particles - 1][3]));
 }
 
 static void store_state_backup(struct state_backup *sb,
@@ -764,7 +763,8 @@ static void store_state_backup(struct state_backup *sb,
     const int num_particles = R->num_particles;
     memcpy(sb->pos, R->physical_state->pos, sizeof(double[num_particles][3]));
     memcpy(sb->vel, R->physical_state->vel, sizeof(double[num_particles][3]));
-    memcpy(sb->spin, R->physical_state->spin, sizeof(double[R->num_pn_particles][3]));
+    memcpy(sb->spin, R->physical_state->spin,
+           sizeof(double[R->num_pn_particles][3]));
     memcpy(sb->edge_rel_pos, R->internal_state->mst->edge_rel_pos,
            sizeof(double[num_particles - 1][3]));
     memcpy(sb->edge_rel_vel, R->internal_state->mst->edge_rel_vel,
@@ -784,11 +784,12 @@ static void restore_state_backup(struct state_backup *sb,
     const int num_particles = R->num_particles;
     memcpy(R->physical_state->pos, sb->pos, sizeof(double[num_particles][3]));
     memcpy(R->physical_state->vel, sb->vel, sizeof(double[num_particles][3]));
-    memcpy(R->physical_state->spin, sb->spin, sizeof(double[R->num_pn_particles][3]));
+    memcpy(R->physical_state->spin, sb->spin,
+           sizeof(double[R->num_pn_particles][3]));
     memcpy(R->internal_state->mst->edge_rel_pos, sb->edge_rel_pos,
-           sizeof(double[num_particles-1][3]));
+           sizeof(double[num_particles - 1][3]));
     memcpy(R->internal_state->mst->edge_rel_vel, sb->edge_rel_vel,
-           sizeof(double[num_particles-1][3]));
+           sizeof(double[num_particles - 1][3]));
 }
 
 static void free_state_backup(struct state_backup *sb) {
@@ -807,9 +808,9 @@ struct gbs_storage {
 
 static void allocate_gbs_storage(struct gbs_storage *gs, int num_particles,
                                  int num_pn_particles, int k) {
-    gs->num_vars = (1 /*time*/ + 3 /*root_pos*/ + 3 /*root_vel*/ +
-                    (num_particles - 1) * (3 /*edge_pos*/ + 3 /*edge_vel*/) +
-                    num_pn_particles * (3 /*spin*/));
+    gs->num_vars = (1 /*time*/ + 3 /*root_pos*/ + 3 /*root_vel*/
+                    + (num_particles - 1) * (3 /*edge_pos*/ + 3 /*edge_vel*/)
+                    + num_pn_particles * (3 /*spin*/));
     gs->num_rows = k + 1; // row for extrapolation result also
     gs->data = calloc(1, sizeof(double[gs->num_rows][gs->num_vars]));
 }
@@ -823,16 +824,17 @@ static void store_gbs_data(struct gbs_storage *gs, const struct ketju_system *R,
     const int k_ind = k - 1;
     data[k_ind][0] = R->physical_state->time;
     int offset = 1;
-    const struct spanning_tree_coordinate_system *const mst = R->internal_state->mst;
+    const struct spanning_tree_coordinate_system *const mst =
+        R->internal_state->mst;
     memcpy(&data[k_ind][offset], mst->root_pos, sizeof(double[3]));
     offset += 3;
     memcpy(&data[k_ind][offset], mst->root_vel, sizeof(double[3]));
     offset += 3;
-    const size_t edge_vec_size = sizeof(double[mst->num_vertices-1][3]);
+    const size_t edge_vec_size = sizeof(double[mst->num_vertices - 1][3]);
     memcpy(&data[k_ind][offset], mst->edge_rel_pos, edge_vec_size);
-    offset += 3*(mst->num_vertices-1);
+    offset += 3 * (mst->num_vertices - 1);
     memcpy(&data[k_ind][offset], mst->edge_rel_vel, edge_vec_size);
-    offset += 3*(mst->num_vertices-1);
+    offset += 3 * (mst->num_vertices - 1);
     memcpy(&data[k_ind][offset], R->physical_state->spin,
            sizeof(double[R->num_pn_particles][3]));
 }
@@ -840,8 +842,7 @@ static void store_gbs_data(struct gbs_storage *gs, const struct ketju_system *R,
 // Make the non-blocking receiving calls for the rows of data that need to be
 // received. Called for all tasks
 static void post_gbs_receives(MPI_Request *requests, int *request_index,
-                              struct gbs_storage *gs,
-                              int *gbs_rows_for_groups,
+                              struct gbs_storage *gs, int *gbs_rows_for_groups,
                               const struct ketju_system *R) {
     tick(&R->perf->time_gbscomm);
 
@@ -929,10 +930,10 @@ void init_gbs_extrapolation_indices(struct gbs_extrapolation_indices *inds,
     // figure out which variables each task handles
     const int vars_per_task = num_vars / num_tasks;
     const int remainder = num_vars % num_tasks;
-    
+
     for (int i = 0; i < num_tasks; ++i) {
-        inds->start_inds[i] = i > 0 ? 
-                    inds->start_inds[i - 1] + inds->var_counts[i - 1] : 0;
+        inds->start_inds[i] =
+            i > 0 ? inds->start_inds[i - 1] + inds->var_counts[i - 1] : 0;
         inds->var_counts[i] = vars_per_task;
         // handle the remainder on the last (remainder) tasks, one extra var
         // each
@@ -951,8 +952,8 @@ void free_gbs_extrapolation_inds(struct gbs_extrapolation_indices *inds) {
 // and new_k and Hstep_new_k (only out) for the values at the new proposed k.
 // Whether the k is actually changed is decided in the main loop.
 static bool gbs_extrapolate(struct gbs_storage *gs,
-                            struct gbs_extrapolation_indices *ei,
-                            double *Hstep, int *new_k, double *Hstep_new_k,
+                            struct gbs_extrapolation_indices *ei, double *Hstep,
+                            int *new_k, double *Hstep_new_k,
                             const struct ketju_system *R) {
     tick(&R->perf->time_gbsextr);
 
@@ -976,13 +977,12 @@ static bool gbs_extrapolate(struct gbs_storage *gs,
         for (int j = 0; j < k; ++j) {
             y[j] = data[j][i];
         }
-        yscal = fabs(y[k-1]) + abs_tol;
+        yscal = fabs(y[k - 1]) + abs_tol;
 
-        if (i == 0) {
-            yscal += R->options->output_time_absolute_tolerance;
-        }
+        if (i == 0) { yscal += R->options->output_time_absolute_tolerance; }
 
-        extrapolate_single_variable(y, yscal, k, &result, &error, &error_lower_order);
+        extrapolate_single_variable(y, yscal, k, &result, &error,
+                                    &error_lower_order);
 
         // Explicit nan/inf handling in case they are produced.
         // The code after this can then assume finite values.
@@ -995,9 +995,7 @@ static bool gbs_extrapolate(struct gbs_storage *gs,
         }
 
         data[k][i] = result;
-        if (error > max_error[0]) {
-            max_error[0] = error;
-        }
+        if (error > max_error[0]) { max_error[0] = error; }
         if (error_lower_order > max_error[1]) {
             max_error[1] = error_lower_order;
         }
@@ -1010,12 +1008,13 @@ static bool gbs_extrapolate(struct gbs_storage *gs,
                   R->internal_state->task_info->main_comm);
 
     const double scaled_err = max_error[0] / R->options->gbs_relative_tolerance;
-    const double scaled_err_lower = max_error[1] / R->options->gbs_relative_tolerance;
+    const double scaled_err_lower =
+        max_error[1] / R->options->gbs_relative_tolerance;
     const bool converged = max_error[0] < R->options->gbs_relative_tolerance;
     if (converged) {
         // success, communicate data and set new timestep
-        MPI_Allgatherv(MPI_IN_PLACE, 0, MPI_DATATYPE_NULL,
-                       data[k], ei->var_counts, ei->start_inds, MPI_DOUBLE,
+        MPI_Allgatherv(MPI_IN_PLACE, 0, MPI_DATATYPE_NULL, data[k],
+                       ei->var_counts, ei->start_inds, MPI_DOUBLE,
                        R->internal_state->task_info->main_comm);
 
         // Should we change the integration order?
@@ -1024,7 +1023,7 @@ static bool gbs_extrapolate(struct gbs_storage *gs,
         // k-1 or k+1 due to the parallelization strategy.
         // Odd k values cause slightly uneven workload balance for the
         // parallelization, but changing the order 2 at a time would likely
-        // also lead to extra work in some cases, so it's not clear which is 
+        // also lead to extra work in some cases, so it's not clear which is
         // better in general. Doing the standard change by one for now.
         double H_k = *Hstep * gbs_new_stepsize_fac(scaled_err, k);
         double H_km1 = *Hstep * gbs_new_stepsize_fac(scaled_err_lower, k - 1);
@@ -1033,11 +1032,11 @@ static bool gbs_extrapolate(struct gbs_storage *gs,
         double W_k = A_k / H_k;
         double W_km1 = A_km1 / H_km1;
         double Hnext = H_k;
-        
+
         // Do division instead of W_km1 * 0.9 to handle negative stepsizes
         // The k is kept in the range 4,kmax since very low orders are poor
         // for parallelization.
-        if (W_k / W_km1 < 0.9  && k + 1 <= R->options->gbs_kmax) {
+        if (W_k / W_km1 < 0.9 && k + 1 <= R->options->gbs_kmax) {
             *new_k = k + 1;
             Hnext = (H_k * gbs_total_cost(k + 1)) / A_k;
         } else if (W_km1 / W_k < 0.9 && k > 4) {
@@ -1078,17 +1077,16 @@ static void update_system_from_gbs_result(struct ketju_system *R,
     offset += 3;
     memcpy(mst->root_vel, &data[offset], sizeof(double[3]));
     offset += 3;
-    const size_t edge_vec_size = sizeof(double[mst->num_vertices-1][3]);
+    const size_t edge_vec_size = sizeof(double[mst->num_vertices - 1][3]);
     memcpy(mst->edge_rel_pos, &data[offset], edge_vec_size);
-    offset += 3*(mst->num_vertices-1);
+    offset += 3 * (mst->num_vertices - 1);
     memcpy(mst->edge_rel_vel, &data[offset], edge_vec_size);
-    offset += 3*(mst->num_vertices-1);
+    offset += 3 * (mst->num_vertices - 1);
     memcpy(R->physical_state->spin, &data[offset],
            sizeof(double[R->num_pn_particles][3]));
 
     into_Cartesian_from_MST(R);
 }
-
 
 // Estimates a safe initial timestep that is sufficiently small compared to the
 // smallest two-body timescale in the system.
@@ -1119,8 +1117,8 @@ static double estimate_initial_timestep(struct ketju_system *R) {
         if (i > istart) { jstart = i + 1; }
         for (int j = jstart; j < mst->num_vertices; j++) {
             if (c >= ThisBlock) { goto after_loops; }
-            if (R->options->no_star_star_gravity && i >= R->num_pn_particles &&
-                j >= R->num_pn_particles) {
+            if (R->options->no_star_star_gravity && i >= R->num_pn_particles
+                && j >= R->num_pn_particles) {
                 continue;
             }
 
@@ -1162,8 +1160,7 @@ static double estimate_initial_timestep(struct ketju_system *R) {
 
             // Estimate the square of the approximate two-body time scale from a
             // combination of free propagation and keplerian timescales.
-            double t2 =
-                1. / (invr * (invr * v2 + R->constants->G * (mi + mj)));
+            double t2 = 1. / (invr * (invr * v2 + R->constants->G * (mi + mj)));
             t2min = fmin(t2min, t2);
 
             c++;
@@ -1193,15 +1190,16 @@ static void trivial_propagation(struct ketju_system *R, double time_interval) {
 static double step_total_work(const struct ketju_system *R) {
     double substeps = gbs_total_cost(R->internal_state->gbs_k);
     double interactions_per_step =
-            .5 * R->num_particles * (R->options->no_star_star_gravity ?
-                                     R->num_pn_particles : R->num_particles - 1)
-                // PN terms are more expensive than other force terms, but
-                // that's hard to quantify so just use the number of
-                // interactions here as well.
-                + ((double)R->num_pn_particles * (R->num_pn_particles - 1)
-                   * (R->options->PN_flags & KETJU_PN_THREEBODY ?
-                      R->num_pn_particles - 2 : 1)
-                  );
+        .5 * R->num_particles
+            * (R->options->no_star_star_gravity ? R->num_pn_particles
+                                                : R->num_particles - 1)
+        // PN terms are more expensive than other force terms, but
+        // that's hard to quantify so just use the number of
+        // interactions here as well.
+        + ((double)R->num_pn_particles * (R->num_pn_particles - 1)
+           * (R->options->PN_flags & KETJU_PN_THREEBODY
+                  ? R->num_pn_particles - 2
+                  : 1));
     return substeps * interactions_per_step;
 }
 
@@ -1218,7 +1216,6 @@ void ketju_run_integrator(struct ketju_system *R, double time_interval) {
 
     tick(&R->perf->time_total);
 
-
     // Init GBS stuff
     R->internal_state->gbs_k =
         R->options->gbs_kmax >= 4 ? 4 : R->options->gbs_kmax;
@@ -1229,16 +1226,16 @@ void ketju_run_integrator(struct ketju_system *R, double time_interval) {
                          [R->internal_state->gbs_k]));
     get_gbs_rows_for_groups(R, gbs_rows_for_groups);
     int *gbs_rows_for_this_group =
-        &gbs_rows_for_groups[R->internal_state->task_info->gbs_group_index *
-                             R->internal_state->gbs_k];
+        &gbs_rows_for_groups[R->internal_state->task_info->gbs_group_index
+                             * R->internal_state->gbs_k];
 
     struct gbs_storage gbs_storage;
     allocate_gbs_storage(&gbs_storage, R->num_particles, R->num_pn_particles,
                          R->internal_state->gbs_k);
     struct gbs_extrapolation_indices gbs_indices;
-    init_gbs_extrapolation_indices(&gbs_indices,
-                                   R->internal_state->task_info->main_group_size,
-                                   gbs_storage.num_vars);
+    init_gbs_extrapolation_indices(
+        &gbs_indices, R->internal_state->task_info->main_group_size,
+        gbs_storage.num_vars);
 
     // Other init stuff
 
@@ -1247,19 +1244,17 @@ void ketju_run_integrator(struct ketju_system *R, double time_interval) {
 
     compute_total_energy(R);
 
-    double dt = copysign(1, time_interval) *
-                fmin(estimate_initial_timestep(R), fabs(time_interval) / 10);
+    double dt = copysign(1, time_interval)
+                * fmin(estimate_initial_timestep(R), fabs(time_interval) / 10);
     double Hstep = dt * R->internal_state->U;
-     // set the start point to 0 for better accuracy when the t_start is large
+    // set the start point to 0 for better accuracy when the t_start is large
     const double t_start = R->physical_state->time;
     R->physical_state->time = 0;
     const double initial_B = R->internal_state->B;
 
-
     struct state_backup old_state;
     allocate_state_backup(&old_state, R->num_particles, R->num_pn_particles);
     store_state_backup(&old_state, R);
-
 
     bool finished = false;
     do {
@@ -1272,8 +1267,8 @@ void ketju_run_integrator(struct ketju_system *R, double time_interval) {
                 if (R->num_particles < 2) {
                     // Particle motion becomes trivial.
                     // Need to only propagate the CoM
-                    trivial_propagation(R, time_interval -
-                                               R->physical_state->time);
+                    trivial_propagation(R, time_interval
+                                               - R->physical_state->time);
                     break;
                 }
                 ketju_build_mst(R);
@@ -1282,9 +1277,9 @@ void ketju_run_integrator(struct ketju_system *R, double time_interval) {
                 store_state_backup(&old_state, R);
                 gbs_storage.num_vars -= num_merged * 9; // pos, vel, spin
                 free_gbs_extrapolation_inds(&gbs_indices);
-                init_gbs_extrapolation_indices(&gbs_indices,
-                                   R->internal_state->task_info->main_group_size,
-                                   gbs_storage.num_vars);
+                init_gbs_extrapolation_indices(
+                    &gbs_indices, R->internal_state->task_info->main_group_size,
+                    gbs_storage.num_vars);
             }
         }
         // Run the gbs substeps, communicating results in the background.
@@ -1304,7 +1299,7 @@ void ketju_run_integrator(struct ketju_system *R, double time_interval) {
             post_gbs_send(requests, &request_index, &gbs_storage, R, row);
         }
         finish_gbs_comm(requests, request_index, R);
-        
+
         int new_k;
         double Hstep_new_k;
         bool converged = gbs_extrapolate(&gbs_storage, &gbs_indices, &Hstep,
@@ -1318,19 +1313,18 @@ void ketju_run_integrator(struct ketju_system *R, double time_interval) {
             steps_since_reconstruction += 1;
 
             double remaining_time = time_interval - R->physical_state->time;
-            if (fabs(remaining_time / time_interval) <
-                    R->options->output_time_relative_tolerance ||
-                fabs(remaining_time) <
-                    R->options->output_time_absolute_tolerance) {
+            if (fabs(remaining_time / time_interval)
+                    < R->options->output_time_relative_tolerance
+                || fabs(remaining_time)
+                       < R->options->output_time_absolute_tolerance) {
                 finished = true;
             } else {
                 bool change_order = false;
                 // Check that we're not overstepping or already past the end
                 // and alter timestep if required.
                 // Should work also for negative time intervals
-                if (fabs(remaining_time) < fabs(Hstep / R->internal_state->U) ||
-                    time_interval * remaining_time < 0
-                    ) {
+                if (fabs(remaining_time) < fabs(Hstep / R->internal_state->U)
+                    || time_interval * remaining_time < 0) {
 
                     Hstep = R->internal_state->U * remaining_time;
 
@@ -1344,10 +1338,9 @@ void ketju_run_integrator(struct ketju_system *R, double time_interval) {
                             Hstep = copysign(Hstep_new_k, Hstep);
                         }
                     }
-                } else if (new_k != k &&
-                           fabs(remaining_time)
-                           > fabs(Hstep_new_k / R->internal_state->U)
-                          ) {
+                } else if (new_k != k
+                           && fabs(remaining_time)
+                                  > fabs(Hstep_new_k / R->internal_state->U)) {
                     // Change order only if it doesn't result in overstepping,
                     // otherwise the work/step calculation doesn't give the
                     // correct result.
@@ -1368,8 +1361,8 @@ void ketju_run_integrator(struct ketju_system *R, double time_interval) {
                     get_gbs_rows_for_groups(R, gbs_rows_for_groups);
                     gbs_rows_for_this_group =
                         &gbs_rows_for_groups[R->internal_state->task_info
-                                                 ->gbs_group_index *
-                                             R->internal_state->gbs_k];
+                                                 ->gbs_group_index
+                                             * R->internal_state->gbs_k];
 
                     free_gbs_storage(&gbs_storage);
                     allocate_gbs_storage(&gbs_storage, R->num_particles,
@@ -1378,14 +1371,13 @@ void ketju_run_integrator(struct ketju_system *R, double time_interval) {
                     // extrapolation indices not changed here
                 }
 
-                if (steps_since_reconstruction >=
-                    R->options->steps_between_mst_reconstruction) {
+                if (steps_since_reconstruction
+                    >= R->options->steps_between_mst_reconstruction) {
                     ketju_build_mst(R);
                     steps_since_reconstruction = 0;
                 }
 
                 store_state_backup(&old_state, R);
-
             }
         } else {
             restore_state_backup(&old_state, R);
@@ -1394,9 +1386,9 @@ void ketju_run_integrator(struct ketju_system *R, double time_interval) {
             R->perf->failed_steps += 1;
         }
 
-        if (R->options->max_step_count > 0 &&
-            R->perf->failed_steps + R->perf->successful_steps >
-                R->options->max_step_count) {
+        if (R->options->max_step_count > 0
+            && R->perf->failed_steps + R->perf->successful_steps
+                   > R->options->max_step_count) {
             if (R->internal_state->task_info->main_group_rank == 0) {
                 ketju_debug_dump_integrator_state(
                     R, "ketju_integrator_max_steps_state_dump.bin");
@@ -1408,7 +1400,6 @@ void ketju_run_integrator(struct ketju_system *R, double time_interval) {
 
     // Restore the initial physical time offset
     R->physical_state->time += t_start;
-
 
     // free temp storage
     free_state_backup(&old_state);

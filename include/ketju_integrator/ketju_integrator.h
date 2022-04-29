@@ -4,8 +4,8 @@
 #ifndef KETJU_INTEGRATOR_H
 #define KETJU_INTEGRATOR_H
 
-#include <stdbool.h>
 #include <mpi.h>
+#include <stdbool.h>
 
 // For compatibility with C++ programs
 #ifdef __cplusplus
@@ -25,8 +25,8 @@ enum ketju_PN_flags {
     KETJU_PN_2_5_ACC = 1 << 3,
     KETJU_PN_3_0_ACC = 1 << 4,
     KETJU_PN_3_5_ACC = 1 << 5,
-    KETJU_PN_CONSERVATIVE = KETJU_PN_1_0_ACC | KETJU_PN_2_0_ACC |
-                            KETJU_PN_3_0_ACC | KETJU_PN_THREEBODY,
+    KETJU_PN_CONSERVATIVE = KETJU_PN_1_0_ACC | KETJU_PN_2_0_ACC
+                            | KETJU_PN_3_0_ACC | KETJU_PN_THREEBODY,
     KETJU_PN_DYNAMIC_ALL =
         0xFF, // all the spin independent terms, is this a good name?
 
@@ -58,7 +58,7 @@ struct ketju_integration_options {
     int steps_between_mst_reconstruction;
     int max_tree_distance;
     //< Maximum separation in the tree structure before using CoM coordinate
-    //distances
+    // distances
     int max_step_count;
     //< Maximum number of attempted (successful or not) steps before abandoning
     //  the integration and dumping state.
@@ -74,8 +74,8 @@ struct ketju_integration_options {
     bool enable_bh_mergers;
     //< Check for mergers between BHs (pn particles).
     double bh_merger_distance_in_Rs;
-    //< If BH mergers are enabled, the particles are merged when they come within
-    // this factor * 2G/c^2 * (m1 + m2).
+    //< If BH mergers are enabled, the particles are merged when they come
+    // within (this factor) * 2G/c^2 * (m1 + m2).
     // The PN forces break down below about 5, and for suppressing PN CoM
     // oscillations values of ~>10 are recommended.
     bool enable_bh_merger_kicks;
@@ -111,13 +111,12 @@ struct ketju_natural_constants {
 static const struct ketju_natural_constants ketju_default_natural_constants = {
     .G = 43007.1, .c = 299792.0};
 
-
 struct ketju_system_physical_state {
     double time;
     double *mass;
     double (*pos)[3];
     double (*vel)[3];
-    double (*spin)[3]; //spin only for pn particles
+    double (*spin)[3]; // spin only for pn particles
 };
 
 // The physical state of the system.
@@ -151,16 +150,16 @@ struct ketju_performance_counters {
 };
 
 struct ketju_bh_merger_info {
-    double t_merger; // time of the merger
-    double m1, m2, m_remnant; // masses
+    double t_merger;                // time of the merger
+    double m1, m2, m_remnant;       // masses
     double chi1, chi2, chi_remnant; // dimensionless spin magnitudes
-    double v_kick; // magnitude of kick velocity
+    double v_kick;                  // magnitude of kick velocity
     int extra_index1,
         extra_index2; // Indices of the components in particle_extra_data
 };
 
 struct ketju_system {
-    int num_particles; //< Total number of particles
+    int num_particles;    //< Total number of particles
     int num_pn_particles; //< Number of PN enabled particles
 
     struct ketju_system_physical_state *physical_state;
@@ -168,19 +167,19 @@ struct ketju_system {
     // TODO looking like we're not going to use the pointer nature for making
     // copies, maybe make into a direct member?
 
-    struct ketju_system_internal_state *internal_state; 
+    struct ketju_system_internal_state *internal_state;
     //< Internal state (implementation detail)
 
     // TODO is it better to have this stuff (which doesn't need to be copied
     // into temp variables) as direct members to avoid extra pointer derefs, or
     // as pointers for consistency with the above and perhaps some cache
     // behaviour benefits?
-    struct ketju_performance_counters *perf; 
+    struct ketju_performance_counters *perf;
     struct ketju_integration_options *options;
 
     struct ketju_natural_constants *constants;
     //< Values of natural constants which define the unit system
-    
+
     void *particle_extra_data;
     //< Optional extra data (e.g. IDs) associated with the particles, which is
     // reordered in case of mergers so that the removed particle data are found
@@ -200,9 +199,12 @@ void ketju_create_system(struct ketju_system *R, int num_pn_particles,
 void ketju_free_system(struct ketju_system *R);
 
 // Compute the centre of mass of the system
-void ketju_compute_CoM(const struct ketju_system *R, double CoM_pos[3], double CoM_vel[3]);
-// Shift the coordinate origin of the system to the CoM, outputs the original values
-void ketju_into_CoM_frame(struct ketju_system *R, double CoM_pos[3], double CoM_vel[3]);
+void ketju_compute_CoM(const struct ketju_system *R, double CoM_pos[3],
+                       double CoM_vel[3]);
+// Shift the coordinate origin of the system to the CoM, outputs the original
+// values
+void ketju_into_CoM_frame(struct ketju_system *R, double CoM_pos[3],
+                          double CoM_vel[3]);
 // Runs the integrator for a given time interval.
 // The time interval can be negative for backwards-in-time integration.
 void ketju_run_integrator(struct ketju_system *R, double time_interval);
@@ -212,8 +214,6 @@ void ketju_debug_dump_integrator_state(const struct ketju_system *R,
                                        const char *fname);
 bool ketju_debug_read_integrator_state(struct ketju_system *R,
                                        const char *fname, MPI_Comm comm);
-
-
 
 #ifdef __cplusplus
 }
