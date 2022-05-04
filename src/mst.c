@@ -68,8 +68,8 @@ bool ketju_check_relative_proximity_ND_2(int v1, int v2,
 
 bool ketju_check_relative_proximity_general(int v1, int v2, const int Nd,
                                             const struct ketju_system *R,
-                                            int *d, int path[Nd],
-                                            int sign[Nd]) {
+                                            int *d, int path[/*Nd*/],
+                                            int sign[/*Nd*/]) {
 
     const struct graph_vertex *vertex = R->internal_state->mst->vertex;
 
