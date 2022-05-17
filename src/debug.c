@@ -38,24 +38,22 @@ void ketju_debug_dump_integrator_state(const struct ketju_system *R,
     // Can't load group/task info since that's process specific, so don't bother
     // writing them
 
-    fwrite(&is->mst->num_vertices, sizeof(is->mst->num_vertices), 1, f);
-    fwrite(&is->mst->num_edges, sizeof(is->mst->num_edges), 1, f);
-    fwrite(is->mst->vertex, sizeof(*is->mst->vertex), is->mst->num_vertices, f);
+    fwrite(is->mst->vertex, sizeof(*is->mst->vertex), R->num_particles, f);
 
     // local_edge_* are used only during tree build, don't write them
 
     fwrite(is->mst->edge_in_mst, sizeof(*is->mst->edge_in_mst),
-           is->mst->num_vertices - 1, f);
+           R->num_particles - 1, f);
     fwrite(is->mst->edge_rel_pos, sizeof(*is->mst->edge_rel_pos),
-           is->mst->num_vertices - 1, f);
+           R->num_particles - 1, f);
     fwrite(is->mst->edge_rel_vel, sizeof(*is->mst->edge_rel_vel),
-           is->mst->num_vertices - 1, f);
+           R->num_particles - 1, f);
     fwrite(is->mst->edge_rel_aux_vel, sizeof(*is->mst->edge_rel_aux_vel),
-           is->mst->num_vertices - 1, f);
+           R->num_particles - 1, f);
     fwrite(is->mst->edge_rel_acc, sizeof(*is->mst->edge_rel_acc),
-           is->mst->num_vertices - 1, f);
+           R->num_particles - 1, f);
     fwrite(is->mst->edge_rel_acc_vd, sizeof *is->mst->edge_rel_acc_vd,
-           is->mst->num_vertices - 1, f);
+           R->num_particles - 1, f);
 
     fwrite(&is->U, sizeof is->U, 1, f);
     fwrite(&is->T, sizeof is->T, 1, f);
@@ -119,34 +117,30 @@ bool ketju_debug_read_integrator_state(struct ketju_system *R,
     // Can't load group/task info since that's process specific, so don't bother
     // writing them
 
-    count = fread(&is->mst->num_vertices, sizeof(is->mst->num_vertices), 1, f);
-    success = success && count == 1;
-    count = fread(&is->mst->num_edges, sizeof(is->mst->num_edges), 1, f);
-    success = success && count == 1;
-    count = fread(is->mst->vertex, sizeof(*is->mst->vertex),
-                  is->mst->num_vertices, f);
-    success = success && count == is->mst->num_vertices;
+    count =
+        fread(is->mst->vertex, sizeof(*is->mst->vertex), R->num_particles, f);
+    success = success && count == R->num_particles;
 
     // local_edge_* are used only during tree build, don't read them
 
     count = fread(is->mst->edge_in_mst, sizeof(*is->mst->edge_in_mst),
-                  is->mst->num_vertices - 1, f);
-    success = success && count == is->mst->num_vertices - 1;
+                  R->num_particles - 1, f);
+    success = success && count == R->num_particles - 1;
     count = fread(is->mst->edge_rel_pos, sizeof(*is->mst->edge_rel_pos),
-                  is->mst->num_vertices - 1, f);
-    success = success && count == is->mst->num_vertices - 1;
+                  R->num_particles - 1, f);
+    success = success && count == R->num_particles - 1;
     count = fread(is->mst->edge_rel_vel, sizeof(*is->mst->edge_rel_vel),
-                  is->mst->num_vertices - 1, f);
-    success = success && count == is->mst->num_vertices - 1;
+                  R->num_particles - 1, f);
+    success = success && count == R->num_particles - 1;
     count = fread(is->mst->edge_rel_aux_vel, sizeof(*is->mst->edge_rel_aux_vel),
-                  is->mst->num_vertices - 1, f);
-    success = success && count == is->mst->num_vertices - 1;
+                  R->num_particles - 1, f);
+    success = success && count == R->num_particles - 1;
     count = fread(is->mst->edge_rel_acc, sizeof(*is->mst->edge_rel_acc),
-                  is->mst->num_vertices - 1, f);
-    success = success && count == is->mst->num_vertices - 1;
+                  R->num_particles - 1, f);
+    success = success && count == R->num_particles - 1;
     count = fread(is->mst->edge_rel_acc_vd, sizeof(*is->mst->edge_rel_acc_vd),
-                  is->mst->num_vertices - 1, f);
-    success = success && count == is->mst->num_vertices - 1;
+                  R->num_particles - 1, f);
+    success = success && count == R->num_particles - 1;
 
     count = fread(&is->U, sizeof is->U, 1, f);
     success = success && count == 1;

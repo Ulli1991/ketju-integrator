@@ -11,6 +11,37 @@
 #include "ketju_integrator/internal.h"
 #include "ketju_integrator/ketju_integrator.h"
 
+//////////////////////////////////////////////////////////
+// Path finding between particles in a constructed tree //
+//////////////////////////////////////////////////////////
+// These functions are intended to be called through the dispatcher function
+// defined in internal.h.
+
+// Special cases for small Nd = max_tree_distance
+bool ketju_check_relative_proximity_ND_1(int v1, int v2,
+                                         const struct ketju_system *R, int *d,
+                                         int path[1], int sign[1]) {
+
+    const struct graph_vertex *vertex = R->internal_state->mst->vertex;
+
+    int diff = abs(vertex[v1].level - vertex[v2].level);
+
+    if (diff == 1) {
+        if (vertex[v2].parent == v1) {
+            *d = 1;
+            sign[0] = -1;
+            path[0] = vertex[v2].edgetoparent;
+            return true;
+        } else if (vertex[v1].parent == v2) {
+            *d = 1;
+            sign[0] = +1;
+            path[0] = vertex[v1].edgetoparent;
+            return true;
+        }
+    }
+    return false;
+}
+
 bool ketju_check_relative_proximity_ND_2(int v1, int v2,
                                          const struct ketju_system *R, int *d,
                                          int path[2], int sign[2]) {
@@ -31,7 +62,6 @@ bool ketju_check_relative_proximity_ND_2(int v1, int v2,
             path[0] = vertex[v1].edgetoparent;
             return true;
         }
-        return false;
     } else if (diff == 2) {
         // Need to check that there actually is a valid parent before checking
         // the parents parent.
@@ -51,9 +81,9 @@ bool ketju_check_relative_proximity_ND_2(int v1, int v2,
             path[1] = vertex[vertex[v1].parent].edgetoparent;
             return 1;
         }
-        return false;
-    } else { // diff == 0
+    } else {
         if (vertex[v1].parent == vertex[v2].parent) {
+            // only possible in diff == 0 case
             *d = 2;
             sign[0] = -1;
             sign[1] = +1;
@@ -61,11 +91,11 @@ bool ketju_check_relative_proximity_ND_2(int v1, int v2,
             path[1] = vertex[v1].edgetoparent;
             return true;
         }
-        return false;
     }
     return false;
 }
 
+// general case
 bool ketju_check_relative_proximity_general(int v1, int v2, const int Nd,
                                             const struct ketju_system *R,
                                             int *d, int path[/*Nd*/],
@@ -127,7 +157,12 @@ bool ketju_check_relative_proximity_general(int v1, int v2, const int Nd,
     return false;
 }
 
-static void get_v1_v2(int N, int target, int *v1, int *v2) {
+/////////////////////////////////////////////////////////////////////
+// Minimum spanning tree (MST) construction using Prim's algorithm //
+/////////////////////////////////////////////////////////////////////
+
+// get the vertices belonging to an edge in Prim's algorithm
+static void get_v1_v2(int N, int edge, int *v1, int *v2) {
 
     int final_element_on_row = 0;
     int elements_on_this_row;
@@ -139,9 +174,9 @@ static void get_v1_v2(int N, int target, int *v1, int *v2) {
             elements_on_this_row = N - 1 - row;
         }
         final_element_on_row += elements_on_this_row;
-        if (target <= final_element_on_row) {
+        if (edge <= final_element_on_row) {
             *v1 = row;
-            int diff = final_element_on_row - target;
+            int diff = final_element_on_row - edge;
             *v2 = N - 1 - diff;
             break;
         }
@@ -198,7 +233,7 @@ static int edge_search_for_prim(struct ketju_system *R, int num_local_edges) {
     return wi.index;
 }
 
-static void PrimMST(struct ketju_system *R) {
+static void construct_MST_Prim(struct ketju_system *R) {
 
     const struct ketju_system_physical_state *ps = R->physical_state;
     const struct task_info *ti = R->internal_state->task_info;
@@ -208,15 +243,15 @@ static void PrimMST(struct ketju_system *R) {
 
     // Construct the edges handled by this task
     int block_size, cum_num_edge, istart, jstart;
-    loop_scheduling_N2(mst->num_vertices, ti->main_group_size,
+    loop_scheduling_N2(R->num_particles, ti->main_group_size,
                        ti->main_group_rank, &istart, &jstart, &block_size,
                        &cum_num_edge);
 
     int num_local_edges = 0;
-    for (int i = istart; i < mst->num_vertices; i++) {
+    for (int i = istart; i < R->num_particles; i++) {
 
         if (i > istart) { jstart = i + 1; }
-        for (int j = jstart; j < mst->num_vertices; j++) {
+        for (int j = jstart; j < R->num_particles; j++) {
             if (num_local_edges >= block_size) {
                 // If there are more tasks than edges, ThisBlock may be 0
                 goto after_edge_construction; // exit both loops
@@ -242,7 +277,7 @@ after_edge_construction:
     qsort(mst->local_edge, num_local_edges, sizeof(struct graph_edge), cmp);
 
     // Setup vertices
-    for (int i = 0; i < mst->num_vertices; i++) {
+    for (int i = 0; i < R->num_particles; i++) {
         mst->vertex[i].id = i;
         mst->vertex[i].degree = 0;
         mst->vertex[i].edgetoparent = -1;
@@ -275,11 +310,11 @@ after_edge_construction:
     }
 
     // Construct the MST
-    for (int c = 0; c < mst->num_vertices - 1; ++c) {
+    for (int c = 0; c < R->num_particles - 1; ++c) {
         int next_edge = edge_search_for_prim(R, num_local_edges);
 
         int v1 = -1, v2 = -1;
-        get_v1_v2(mst->num_vertices, next_edge, &v1, &v2);
+        get_v1_v2(R->num_particles, next_edge, &v1, &v2);
 
         mst->edge_in_mst[c].vertex1 = v1;
         mst->edge_in_mst[c].vertex2 = v2;
@@ -308,10 +343,12 @@ after_edge_construction:
             }
         }
     }
-    // now all the mst edges are constructed
-    mst->num_edges = mst->num_vertices - 1;
     tock(&R->perf->time_mst);
 }
+
+/////////////////////////////////////////////////////////////////////////
+// Approximate MST consruction using oct-tree based spatial partioning //
+/////////////////////////////////////////////////////////////////////////
 
 static double get_rmax(struct ketju_system *R) {
     double rmax2 = 0;
@@ -415,33 +452,33 @@ static void get_triplet_from_octant(int octant, int *triplet) {
     return;
 }
 
-static void list_octree_level(struct octree_node *Node, int *LeafSizes,
-                              int **LeafParticles, int *Nleafs) {
+static void list_octree_level(struct octree_node *Node, int *leaf_sizes,
+                              int **leaf_particles, int *Nleafs) {
 
     if (Node->is_leaf) {
-        LeafSizes[*Nleafs] = Node->Npart;
-        LeafParticles[*Nleafs] = calloc(Node->Npart, sizeof(int));
+        leaf_sizes[*Nleafs] = Node->Npart;
+        leaf_particles[*Nleafs] = calloc(Node->Npart, sizeof(int));
         for (int i = 0; i < Node->Npart; i++) {
-            LeafParticles[*Nleafs][i] = Node->object_list[i];
+            leaf_particles[*Nleafs][i] = Node->object_list[i];
         }
         (*Nleafs)++;
     } else {
         for (int oct = 0; oct < 8; oct++) {
             if (Node->children[oct]) {
-                list_octree_level(Node->children[oct], LeafSizes, LeafParticles,
-                                  Nleafs);
+                list_octree_level(Node->children[oct], leaf_sizes,
+                                  leaf_particles, Nleafs);
             }
         }
     }
 }
 
-static void GetNumberOfLeafs(struct octree_node *Node, int *Nleaf) {
+static void get_number_of_leafs(struct octree_node *Node, int *Nleaf) {
     if (Node->is_leaf) {
         (*Nleaf)++;
     } else {
         for (int oct = 0; oct < 8; oct++) {
             if (Node->children[oct]) {
-                GetNumberOfLeafs(Node->children[oct], Nleaf);
+                get_number_of_leafs(Node->children[oct], Nleaf);
             }
         }
     }
@@ -470,7 +507,7 @@ static void allocate_new_octree_node(struct octree_node *Node, int oct,
 }
 
 static void octree(struct ketju_system *R, struct octree_node *Node,
-                   int MaxLeafSize, int *label) {
+                   int max_leaf_size, int *label) {
 
     struct octree_data *octd = R->internal_state->octree_data;
 
@@ -524,8 +561,8 @@ static void octree(struct ketju_system *R, struct octree_node *Node,
 
     for (int oct = 0; oct < 8; oct++) {
         if (Node->children[oct]) {
-            if (Node->children[oct]->Npart > MaxLeafSize) {
-                octree(R, Node->children[oct], MaxLeafSize, label);
+            if (Node->children[oct]->Npart > max_leaf_size) {
+                octree(R, Node->children[oct], max_leaf_size, label);
             } else {
                 Node->children[oct]->is_leaf = 1;
             }
@@ -533,7 +570,7 @@ static void octree(struct ketju_system *R, struct octree_node *Node,
     }
 }
 
-static void spatialpartition(struct ketju_system *R, int MaxLeafSize) {
+static void spatialpartition(struct ketju_system *R, int max_leaf_size) {
 
     struct octree_data *octd = R->internal_state->octree_data;
 
@@ -556,7 +593,7 @@ static void spatialpartition(struct ketju_system *R, int MaxLeafSize) {
     }
 
     int label = 1;
-    octree(R, octd->root_node, MaxLeafSize, &label);
+    octree(R, octd->root_node, max_leaf_size, &label);
 }
 
 static int get_longest(double w[3], int id[3]) {
@@ -589,66 +626,67 @@ static int get_edge(int Nleafs, int va, int vb) {
     return index;
 }
 
-static void SolveMetaMST(struct ketju_system *R, int Nleafs, int *Npart,
-                         int **Particles, int *NumEdge) {
+static void solve_meta_MST(struct ketju_system *R, int Nleafs, int *Npart,
+                           int **particle_indices, int *num_edge) {
 
     const struct task_info *ti = R->internal_state->task_info;
     const struct ketju_system_physical_state *ps = R->physical_state;
     struct spanning_tree_coordinate_system *mst = R->internal_state->mst;
     struct octree_data *octd = R->internal_state->octree_data;
 
-    int Nedge = Nleafs * (Nleafs - 1) / 2;
-    struct weight_index_2 *W = calloc(Nedge, sizeof(struct weight_index_2));
-    int *InMst = calloc(Nleafs, sizeof(int));
+    int num_all_edges = Nleafs * (Nleafs - 1) / 2;
+    struct weight_index_2 *W =
+        calloc(num_all_edges, sizeof(struct weight_index_2));
+    int *in_MST = calloc(Nleafs, sizeof(int));
 
-    int CumNumEdge = 0, istart = 0;
+    int cum_num_edge = 0, istart = 0;
     int ThisBlock, jstart;
     loop_scheduling_N2(Nleafs, ti->main_group_size, ti->main_group_rank,
-                       &istart, &jstart, &ThisBlock, &CumNumEdge);
+                       &istart, &jstart, &ThisBlock, &cum_num_edge);
 
     struct octree_node *Node_i, *Node_j;
     int counter = 0, ind1 = -1, ind2 = -1;
 
-    int *ind1s = calloc(Nedge, sizeof(int));
-    int *ind2s = calloc(Nedge, sizeof(int));
-    double *weights = calloc(Nedge, sizeof(double));
+    int *ind1s = calloc(num_all_edges, sizeof(int));
+    int *ind2s = calloc(num_all_edges, sizeof(int));
+    double *weights = calloc(num_all_edges, sizeof(double));
 
     for (int i = istart; i < Nleafs; i++) {
 
-        Node_i = octd->particle_in_node[Particles[i][0]];
+        Node_i = octd->particle_in_node[particle_indices[i][0]];
 
         if (i > istart) { jstart = i + 1; }
         for (int j = jstart; j < Nleafs; j++) {
 
             if (counter >= ThisBlock) { goto after_loops; }
 
-            Node_j = octd->particle_in_node[Particles[j][0]];
+            Node_j = octd->particle_in_node[particle_indices[j][0]];
 
             double r2 = 0;
             for (int k = 0; k < 3; k++) {
                 double ds = Node_i->center[k] - Node_j->center[k];
                 r2 = ds * ds;
             }
-            double NodeSeparation = sqrt(r2);
-            double NodeSize =
+            const double node_separation = sqrt(r2);
+            const double node_size =
                 1.01 * sqrt(2)
                 * (Node_i->half_size + Node_j->half_size); // with safety buffer
 
-            if (NodeSeparation <= NodeSize) {
+            if (node_separation <= node_size) {
 
-                double MinWeight = DBL_MAX;
+                double min_weight = DBL_MAX;
                 for (int q = 0; q < Npart[i]; q++) {
                     for (int p = 0; p < Npart[j]; p++) {
                         double r2 = 0;
-                        int i1 = Particles[i][q];
-                        int i2 = Particles[j][p];
+                        int i1 = particle_indices[i][q];
+                        int i2 = particle_indices[j][p];
                         for (int k = 0; k < 3; k++) {
                             double ds = ps->pos[i1][k] - ps->pos[i2][k];
                             r2 += ds * ds;
                         }
                         double r = sqrt(r2);
-                        if (r < MinWeight) {
-                            MinWeight = r;
+                        if (r < min_weight) {
+                            min_weight = r;
                             ind1 = i1;
                             ind2 = i2;
                         }
@@ -657,31 +695,31 @@ static void SolveMetaMST(struct ketju_system *R, int Nleafs, int *Npart,
 
             } else {
 
-                double MinWeight = DBL_MAX;
+                double min_weight = DBL_MAX;
                 for (int q = 0; q < Npart[i]; q++) {
-                    int i1 = Particles[i][q];
+                    int i1 = particle_indices[i][q];
                     double r2 = 0;
                     for (int k = 0; k < 3; k++) {
                         double ds = ps->pos[i1][k] - Node_j->center[k];
                         r2 += ds * ds;
                     }
                     double r = sqrt(r2);
-                    if (r < MinWeight) {
-                        MinWeight = r;
+                    if (r < min_weight) {
+                        min_weight = r;
                         ind1 = i1;
                     }
                 }
-                MinWeight = DBL_MAX;
+                min_weight = DBL_MAX;
                 for (int p = 0; p < Npart[j]; p++) {
-                    int i2 = Particles[j][p];
+                    int i2 = particle_indices[j][p];
                     double r2 = 0;
                     for (int k = 0; k < 3; k++) {
                         double ds = ps->pos[i2][k] - Node_i->center[k];
                         r2 += ds * ds;
                     }
                     double r = sqrt(r2);
-                    if (r < MinWeight) {
-                        MinWeight = r;
+                    if (r < min_weight) {
+                        min_weight = r;
                         ind2 = i2;
                     }
                 }
@@ -694,20 +732,30 @@ static void SolveMetaMST(struct ketju_system *R, int Nleafs, int *Npart,
             }
             double r = sqrt(r2);
 
-            weights[CumNumEdge + counter] = r;
-            ind1s[CumNumEdge + counter] = ind1;
-            ind2s[CumNumEdge + counter] = ind2;
+            weights[cum_num_edge + counter] = r;
+            ind1s[cum_num_edge + counter] = ind1;
+            ind2s[cum_num_edge + counter] = ind2;
             counter++;
         }
     }
-after_loops:
+after_loops:;
+    int *recvcounts = calloc(ti->main_group_size, sizeof(int));
+    int *displs = calloc(ti->main_group_size, sizeof(int));
+    for (int i = 0; i < ti->main_group_size; ++i) {
+        int dummy, dummy2;
+        loop_scheduling_N2(Nleafs, ti->main_group_size, i, &dummy, &dummy2,
+                           &recvcounts[i], &displs[i]);
+    }
 
-    // TODO: this is probably just gathering non-zero data, can it be replaced
-    // with a gather call?
-    MPI_Allreduce(MPI_IN_PLACE, ind1s, Nedge, MPI_INT, MPI_SUM, ti->main_comm);
-    MPI_Allreduce(MPI_IN_PLACE, ind2s, Nedge, MPI_INT, MPI_SUM, ti->main_comm);
-    MPI_Allreduce(MPI_IN_PLACE, weights, Nedge, MPI_DOUBLE, MPI_SUM,
-                  ti->main_comm);
+    MPI_Allgatherv(MPI_IN_PLACE, 0, MPI_DATATYPE_NULL, ind1s, recvcounts,
+                   displs, MPI_INT, ti->main_comm);
+    MPI_Allgatherv(MPI_IN_PLACE, 0, MPI_DATATYPE_NULL, ind2s, recvcounts,
+                   displs, MPI_INT, ti->main_comm);
+    MPI_Allgatherv(MPI_IN_PLACE, 0, MPI_DATATYPE_NULL, weights, recvcounts,
+                   displs, MPI_DOUBLE, ti->main_comm);
+
+    free(recvcounts);
+    free(displs);
 
     counter = 0;
     for (int i = 0; i < Nleafs; i++) {
@@ -728,14 +776,14 @@ after_loops:
     // Filter out edges that clearly aren't part of the final tree, these get
     // the corresponding entry in the flag table set
     istart = 0;
-    int istop = Nedge;
+    int istop = num_all_edges;
 
-    int block = (int)floor(Nedge / ti->main_group_size);
+    int block = (int)floor(num_all_edges / ti->main_group_size);
     istart = ti->main_group_rank * block;
     istop = (ti->main_group_rank + 1) * block;
-    if (ti->main_group_rank == ti->main_group_size - 1) istop = Nedge;
+    if (ti->main_group_rank == ti->main_group_size - 1) istop = num_all_edges;
 
-    bool *flag = calloc(Nedge, sizeof(bool));
+    bool *flag = calloc(num_all_edges, sizeof(bool));
 
     int Noff = 0;
     double w[3];
@@ -768,20 +816,20 @@ after_loops:
         }
     }
 
-    MPI_Allreduce(MPI_IN_PLACE, flag, Nedge, MPI_C_BOOL, MPI_LOR,
+    MPI_Allreduce(MPI_IN_PLACE, flag, num_all_edges, MPI_C_BOOL, MPI_LOR,
                   ti->main_comm);
 
     // How many are filtered
-    for (int e1 = 0; e1 < Nedge; e1++) {
+    for (int e1 = 0; e1 < num_all_edges; e1++) {
         if (flag[e1]) Noff++;
     }
 
     // Collect the remaining edges
     struct weight_index_2 *Wfilter =
-        calloc(Nedge - Noff, sizeof(struct weight_index_2));
+        calloc(num_all_edges - Noff, sizeof(struct weight_index_2));
 
     counter = 0;
-    for (int e1 = 0; e1 < Nedge; e1++) {
+    for (int e1 = 0; e1 < num_all_edges; e1++) {
         if (flag[e1] == 0) {
             Wfilter[counter].weight = W[e1].weight;
             Wfilter[counter].id1 = W[e1].id1;
@@ -792,22 +840,23 @@ after_loops:
         }
     }
 
-    Nedge -= Noff;
+    num_all_edges -= Noff;
     free(W);
     free(flag);
 
-    qsort(Wfilter, Nedge, sizeof(struct weight_index_2), cmp_weight_index2);
+    qsort(Wfilter, num_all_edges, sizeof(struct weight_index_2),
+          cmp_weight_index2);
 
-    InMst[0] = 1;
+    in_MST[0] = 1;
 
     int remaining = Nleafs - 1;
     istart = 0;
-    istop = Nedge;
+    istop = num_all_edges;
 
-    block = (int)floor(Nedge / ti->main_group_size);
+    block = (int)floor(num_all_edges / ti->main_group_size);
     istart = ti->main_group_rank * block;
     istop = (ti->main_group_rank + 1) * block;
-    if (ti->main_group_rank == ti->main_group_size - 1) istop = Nedge;
+    if (ti->main_group_rank == ti->main_group_size - 1) istop = num_all_edges;
 
     do {
         struct weight_index wi;
@@ -817,7 +866,7 @@ after_loops:
         for (int i = istart; i < istop; i++) {
             int i1 = Wfilter[i].index1;
             int i2 = Wfilter[i].index2;
-            if (InMst[i1] != InMst[i2]) {
+            if (in_MST[i1] != in_MST[i2]) {
                 wi.index = i;
                 wi.weight = Wfilter[i].weight;
                 break;
@@ -827,31 +876,32 @@ after_loops:
         MPI_Allreduce(MPI_IN_PLACE, &wi, 1, MPI_DOUBLE_INT, MPI_MINLOC,
                       ti->main_comm);
 
-        InMst[Wfilter[wi.index].index1] = 1;
-        InMst[Wfilter[wi.index].index2] = 1;
+        in_MST[Wfilter[wi.index].index1] = 1;
+        in_MST[Wfilter[wi.index].index2] = 1;
 
-        mst->edge_in_mst[*NumEdge].vertex1 = Wfilter[wi.index].id1;
-        mst->edge_in_mst[*NumEdge].vertex2 = Wfilter[wi.index].id2;
-        mst->edge_in_mst[*NumEdge].weight = Wfilter[wi.index].weight;
-        (*NumEdge)++;
+        mst->edge_in_mst[*num_edge].vertex1 = Wfilter[wi.index].id1;
+        mst->edge_in_mst[*num_edge].vertex2 = Wfilter[wi.index].id2;
+        mst->edge_in_mst[*num_edge].weight = Wfilter[wi.index].weight;
+        (*num_edge)++;
 
         remaining--;
     } while (remaining > 0);
 
     free(Wfilter);
-    free(InMst);
+    free(in_MST);
 }
 
-static void SolveSubMST(struct ketju_system *R, int Npart, int *Particles,
-                        int *NumEdge) {
+static void solve_sub_MST(struct ketju_system *R, int Npart, int *Particles,
+                          int *num_edge) {
     if (Npart == 1) return;
 
     const struct ketju_system_physical_state *ps = R->physical_state;
     struct spanning_tree_coordinate_system *mst = R->internal_state->mst;
 
-    int Nedge = Npart * (Npart - 1) / 2;
-    struct weight_index_2 *W = calloc(Nedge, sizeof(struct weight_index_2));
-    int *InMst = calloc(Npart, sizeof(int));
+    int num_all_edges = Npart * (Npart - 1) / 2;
+    struct weight_index_2 *W =
+        calloc(num_all_edges, sizeof(struct weight_index_2));
+    int *in_MST = calloc(Npart, sizeof(int));
 
     int counter = 0;
     for (int i = 0; i < Npart; i++) {
@@ -873,28 +923,28 @@ static void SolveSubMST(struct ketju_system *R, int Npart, int *Particles,
         }
     }
 
-    qsort(W, Nedge, sizeof(struct weight_index_2), cmp_weight_index2);
+    qsort(W, num_all_edges, sizeof(struct weight_index_2), cmp_weight_index2);
 
-    InMst[0] = 1;
+    in_MST[0] = 1;
 
     int remaining = Npart - 1;
 
     do {
 
-        for (int i = 0; i < Nedge; i++) {
+        for (int i = 0; i < num_all_edges; i++) {
             int i1 = W[i].index1;
             int i2 = W[i].index2;
-            if (InMst[i1] != InMst[i2]) {
-                if (InMst[i1] == 1) {
-                    InMst[i2] = 1;
+            if (in_MST[i1] != in_MST[i2]) {
+                if (in_MST[i1] == 1) {
+                    in_MST[i2] = 1;
                 } else {
-                    InMst[i1] = 1;
+                    in_MST[i1] = 1;
                 }
 
-                mst->edge_in_mst[*NumEdge].vertex1 = W[i].id1;
-                mst->edge_in_mst[*NumEdge].vertex2 = W[i].id2;
-                mst->edge_in_mst[*NumEdge].weight = W[i].weight;
-                (*NumEdge)++;
+                mst->edge_in_mst[*num_edge].vertex1 = W[i].id1;
+                mst->edge_in_mst[*num_edge].vertex2 = W[i].id2;
+                mst->edge_in_mst[*num_edge].weight = W[i].weight;
+                (*num_edge)++;
                 break;
             }
         }
@@ -903,10 +953,10 @@ static void SolveSubMST(struct ketju_system *R, int Npart, int *Particles,
     } while (remaining > 0);
 
     free(W);
-    free(InMst);
+    free(in_MST);
 }
 
-static void SwapEdge(struct ketju_system *R, int i, int j) {
+static void swap_edge(struct ketju_system *R, int i, int j) {
     struct spanning_tree_coordinate_system *mst = R->internal_state->mst;
 
     int v1 = mst->edge_in_mst[i].vertex1;
@@ -922,7 +972,7 @@ static void SwapEdge(struct ketju_system *R, int i, int j) {
     mst->edge_in_mst[j].weight = w;
 }
 
-static void CombineAllMST(struct ketju_system *R, int NumEdge) {
+static void combine_all_MST(struct ketju_system *R, int num_edge) {
 
     const struct ketju_system_physical_state *ps = R->physical_state;
     struct spanning_tree_coordinate_system *mst = R->internal_state->mst;
@@ -932,7 +982,7 @@ static void CombineAllMST(struct ketju_system *R, int NumEdge) {
     double CoM_pos[3], CoM_vel[3];
     ketju_compute_CoM(R, CoM_pos, CoM_vel);
 
-    for (int i = 0; i < mst->num_vertices; i++) {
+    for (int i = 0; i < R->num_particles; i++) {
         double r2 = 0;
         for (int k = 0; k < 3; k++) {
             double ds = ps->pos[i][k] - CoM_pos[k];
@@ -952,7 +1002,7 @@ static void CombineAllMST(struct ketju_system *R, int NumEdge) {
         mst->root_vel[k] = ps->vel[root][k];
     }
 
-    int istop = NumEdge;
+    int istop = num_edge;
 
     do {
 
@@ -988,19 +1038,19 @@ static void CombineAllMST(struct ketju_system *R, int NumEdge) {
             mst->edge_rel_vel[counter][k] = ps->vel[new][k] - ps->vel[old][k];
         }
 
-        SwapEdge(R, counter, wi.index);
+        swap_edge(R, counter, wi.index);
         counter++;
 
-    } while (counter < NumEdge);
+    } while (counter < num_edge);
 }
 
-static void DivideAndConquerPrim(struct ketju_system *R) {
+static void construct_MST_divide_and_conquer_Prim(struct ketju_system *R) {
 
     tick(&R->perf->time_mst);
     struct spanning_tree_coordinate_system *mst = R->internal_state->mst;
     struct octree_data *octd = R->internal_state->octree_data;
 
-    for (int i = 0; i < mst->num_vertices; i++) {
+    for (int i = 0; i < R->num_particles; i++) {
         mst->vertex[i].id = i;
         mst->vertex[i].degree = 0;
         mst->vertex[i].edgetoparent = -1;
@@ -1010,58 +1060,57 @@ static void DivideAndConquerPrim(struct ketju_system *R) {
     }
 
     int Nleafs = 0;
-    int MaxLeafSize = (int)floor(3 * sqrt(mst->num_vertices));
+    int max_leaf_size = (int)floor(3 * sqrt(R->num_particles));
 
     tick(&R->perf->tprim1);
-    spatialpartition(&R[0], MaxLeafSize);
+    spatialpartition(&R[0], max_leaf_size);
 
-    GetNumberOfLeafs(octd->root_node, &Nleafs);
-    int *LeafSizes = calloc(Nleafs, sizeof(int));
-    int **LeafParticles = calloc(Nleafs, sizeof(int *));
+    get_number_of_leafs(octd->root_node, &Nleafs);
+    int *leaf_sizes = calloc(Nleafs, sizeof(int));
+    int **leaf_particles = calloc(Nleafs, sizeof(int *));
 
     tock(&R->perf->tprim1);
 
     tick(&R->perf->tprim2);
     Nleafs = 0;
-    list_octree_level(octd->root_node, LeafSizes, LeafParticles, &Nleafs);
+    list_octree_level(octd->root_node, leaf_sizes, leaf_particles, &Nleafs);
 
     tock(&R->perf->tprim2);
 
     tick(&R->perf->tprim3);
-    int NumEdge = 0;
+    int num_edge = 0;
     for (int i = 0; i < Nleafs; i++) {
-        SolveSubMST(R, LeafSizes[i], LeafParticles[i], &NumEdge);
+        solve_sub_MST(R, leaf_sizes[i], leaf_particles[i], &num_edge);
     }
     tock(&R->perf->tprim3);
 
     tick(&R->perf->tprim4);
-    SolveMetaMST(R, Nleafs, LeafSizes, LeafParticles, &NumEdge);
+    solve_meta_MST(R, Nleafs, leaf_sizes, leaf_particles, &num_edge);
     tock(&R->perf->tprim4);
 
     tick(&R->perf->tprim5);
-    CombineAllMST(R, NumEdge);
+    combine_all_MST(R, num_edge);
     tock(&R->perf->tprim5);
 
     free_octree(octd->root_node);
     for (int i = 0; i < Nleafs; i++) {
-        free(LeafParticles[i]);
+        free(leaf_particles[i]);
     }
-    free(LeafParticles);
-    free(LeafSizes);
-
-    // now all the mst edges are constructed
-    mst->num_edges = mst->num_vertices - 1;
+    free(leaf_particles);
+    free(leaf_sizes);
 
     tock(&R->perf->time_mst);
 }
 
-void ketju_build_mst(struct ketju_system *R) {
+// main construction function
+
+void ketju_construct_MST(struct ketju_system *R) {
     // Use the basic prim method for small systems always, since divide and
-    // conquer is broken for small enough systems.
+    // conquer is not useful for small systems.
     if (R->options->mst_algorithm == KETJU_MST_PRIM || R->num_particles < 10) {
-        PrimMST(R);
+        construct_MST_Prim(R);
     } else if (R->options->mst_algorithm == KETJU_MST_DIVIDE_AND_CONQUER_PRIM) {
-        DivideAndConquerPrim(R);
+        construct_MST_divide_and_conquer_Prim(R);
     } else {
         char msg[100];
         sprintf(msg, "Invalid mst_algorithm value %d!",

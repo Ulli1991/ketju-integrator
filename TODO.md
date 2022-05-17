@@ -39,9 +39,6 @@ Features
 
 Style
 -----
-% Clean up the internal implementation naming etc. Some parts of the code need
-  more drastic reorganization as well
-  - Mainly divide and conquer code left to do.
 
 + Make all internal functions static/inline to avoid polluting the namespace,
   make sure all other symbols have the ketju prefix

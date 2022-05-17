@@ -14,6 +14,10 @@
 // This is needed only in this file
 enum velocity_type { PHYSICAL, AUXILIARY };
 
+/////////////////////////////////////////
+// Acceleration and energy calculation //
+/////////////////////////////////////////
+
 // Gadget softening kernels
 static inline double softened_inverse_r(double r, double h) {
     if (h <= 0) return 1. / r;
@@ -94,13 +98,12 @@ static void compute_U(struct ketju_system *R) {
     tick(&R->perf->time_force);
 
     struct ketju_system_internal_state *const is = R->internal_state;
-    struct spanning_tree_coordinate_system *const mst = is->mst;
     struct ketju_system_physical_state *const ps = R->physical_state;
 
     is->U = 0;
     int istart = 0;
     int CumNumEdge, ThisBlock, jstart;
-    loop_scheduling_N2(mst->num_vertices, is->task_info->gbs_group_size,
+    loop_scheduling_N2(R->num_particles, is->task_info->gbs_group_size,
                        is->task_info->gbs_group_rank, &istart, &jstart,
                        &ThisBlock, &CumNumEdge);
     int c = 0;
@@ -113,11 +116,11 @@ static void compute_U(struct ketju_system *R) {
     int sign[Nd];
     int d;
 
-    for (int i = istart; i < mst->num_vertices; i++) {
+    for (int i = istart; i < R->num_particles; i++) {
         double mi = ps->mass[i];
         if (i > istart) { jstart = i + 1; }
 
-        for (int j = jstart; j < mst->num_vertices; j++) {
+        for (int j = jstart; j < R->num_particles; j++) {
             if (c >= ThisBlock) { goto after_loops; }
             if (R->options->no_star_star_gravity && i >= R->num_pn_particles
                 && j >= R->num_pn_particles) {
@@ -165,15 +168,14 @@ after_loops:
 // So instead have a different function for each case.
 static void comp_U_acc_loop_standard(struct ketju_system *R) {
     struct ketju_system_internal_state *const is = R->internal_state;
-    struct spanning_tree_coordinate_system *const mst = is->mst;
     struct ketju_system_physical_state *const ps = R->physical_state;
 
     const double G = R->constants->G;
 
-    const int istop = mst->num_vertices;
-    const int jstop = mst->num_vertices;
+    const int istop = R->num_particles;
+    const int jstop = R->num_particles;
     int ThisBlock, CumNumEdge, jstart, istart;
-    loop_scheduling_N2(mst->num_vertices, is->task_info->gbs_group_size,
+    loop_scheduling_N2(R->num_particles, is->task_info->gbs_group_size,
                        is->task_info->gbs_group_rank, &istart, &jstart,
                        &ThisBlock, &CumNumEdge);
     int c = 0;
@@ -273,13 +275,12 @@ static void comp_U_acc_loop_no_star_star(struct ketju_system *R) {
 // Force with softened star-star interactions, doesn't include the pn-particles
 static void comp_U_acc_loop_softened_star_star(struct ketju_system *R) {
     struct ketju_system_internal_state *const is = R->internal_state;
-    struct spanning_tree_coordinate_system *const mst = is->mst;
     struct ketju_system_physical_state *const ps = R->physical_state;
 
-    const int istop = mst->num_vertices;
-    const int jstop = mst->num_vertices;
+    const int istop = R->num_particles;
+    const int jstop = R->num_particles;
     int ThisBlock, CumNumEdge, jstart, istart;
-    loop_scheduling_N2(mst->num_vertices - R->num_pn_particles,
+    loop_scheduling_N2(R->num_particles - R->num_pn_particles,
                        is->task_info->gbs_group_size,
                        is->task_info->gbs_group_rank, &istart, &jstart,
                        &ThisBlock, &CumNumEdge);
@@ -356,7 +357,7 @@ static void compute_U_and_Newtonian_Acc(struct ketju_system *R) {
 
     tick(&R->perf->time_force);
     int hi, lo;
-    for (int i = 0; i < mst->num_vertices - 1; i++) {
+    for (int i = 0; i < R->num_particles - 1; i++) {
 
         int v1, v2;
         get_v1_v2_fast(R, i, &v1, &v2);
@@ -375,6 +376,25 @@ static void compute_U_and_Newtonian_Acc(struct ketju_system *R) {
 
     tock(&R->perf->time_force);
 }
+
+static void compute_T(struct ketju_system *R) {
+    struct ketju_system_internal_state *const is = R->internal_state;
+    struct ketju_system_physical_state *const ps = R->physical_state;
+    is->T = 0;
+    // TODO: this might benefit from parallelization for large particle numbers
+    for (int i = 0; i < R->num_particles; i++) {
+        double dv, v2 = 0;
+        for (int k = 0; k < 3; k++) {
+            dv = ps->vel[i][k];
+            v2 += dv * dv;
+        }
+        is->T += 0.5 * ps->mass[i] * v2;
+    }
+}
+
+//////////////////////////////
+// Some MST related helpers //
+//////////////////////////////
 
 // TODO the following few functions could maybe go in mst.c, but maybe easier to
 // have as few externally visible symbols as possible
@@ -401,7 +421,7 @@ static void into_Cartesian_from_MST(struct ketju_system *R) {
         ps->pos[first][k] = mst->root_pos[k];
         ps->vel[first][k] = mst->root_vel[k];
     }
-    for (int i = 0; i < mst->num_vertices - 1; i++) {
+    for (int i = 0; i < R->num_particles - 1; i++) {
 
         int v1, v2;
         get_v1_v2_fast(R, i, &v1, &v2);
@@ -423,21 +443,6 @@ static void into_Cartesian_from_MST(struct ketju_system *R) {
     tock(&R->perf->time_coord);
 }
 
-static void compute_T(struct ketju_system *R) {
-    struct ketju_system_internal_state *const is = R->internal_state;
-    struct ketju_system_physical_state *const ps = R->physical_state;
-    is->T = 0;
-    // TODO: this might benefit from parallelization for large particle numbers
-    for (int i = 0; i < R->num_particles; i++) {
-        double dv, v2 = 0;
-        for (int k = 0; k < 3; k++) {
-            dv = ps->vel[i][k];
-            v2 += dv * dv;
-        }
-        is->T += 0.5 * ps->mass[i] * v2;
-    }
-}
-
 static void update_pos(struct ketju_system *R) {
 
     tick(&R->perf->time_coord);
@@ -450,7 +455,7 @@ static void update_pos(struct ketju_system *R) {
     for (int k = 0; k < 3; k++) {
         ps->pos[first][k] = mst->root_pos[k];
     }
-    for (int i = 0; i < mst->num_vertices - 1; i++) {
+    for (int i = 0; i < R->num_particles - 1; i++) {
 
         int v1, v2;
         get_v1_v2_fast(R, i, &v1, &v2);
@@ -490,7 +495,7 @@ static void update_vel(struct ketju_system *R,
                                       ? mst->root_vel[k]
                                       : mst->root_aux_vel[k];
     }
-    for (int i = 0; i < mst->num_vertices - 1; i++) {
+    for (int i = 0; i < R->num_particles - 1; i++) {
 
         int v1, v2;
         get_v1_v2_fast(R, i, &v1, &v2);
@@ -517,6 +522,10 @@ static void update_vel(struct ketju_system *R,
     tock(&R->perf->time_coord);
 }
 
+//////////////////////////
+// Leapfrog integration //
+//////////////////////////
+
 static void drift(double ds, struct ketju_system *R) {
 
     struct ketju_system_internal_state *const is = R->internal_state;
@@ -528,7 +537,7 @@ static void drift(double ds, struct ketju_system *R) {
     double dt = ds / (is->T + is->B);
     ps->time += dt;
 
-    for (int i = 0; i < mst->num_vertices - 1; i++) {
+    for (int i = 0; i < R->num_particles - 1; i++) {
         for (int k = 0; k < 3; k++) {
             mst->edge_rel_pos[i][k] += dt * mst->edge_rel_vel[i][k];
         }
@@ -547,7 +556,7 @@ static void set_auxiliary_variables(struct ketju_system *R) {
 
     memcpy(is->aux_vel, ps->vel, sizeof(double[R->num_particles][3]));
     memcpy(mst->edge_rel_aux_vel, mst->edge_rel_vel,
-           sizeof(double[mst->num_vertices - 1][3]));
+           sizeof(double[R->num_particles - 1][3]));
     memcpy(mst->root_aux_vel, mst->root_vel, sizeof(double[3]));
     memcpy(is->aux_spin, ps->spin, sizeof(double[R->num_pn_particles][3]));
 }
@@ -569,7 +578,7 @@ static void physical_kick(double dt, struct ketju_system *R) {
     }
     is->B -= dB * dt;
 
-    for (int i = 0; i < mst->num_vertices - 1; i++) {
+    for (int i = 0; i < R->num_particles - 1; i++) {
         for (int k = 0; k < 3; k++) {
             mst->edge_rel_vel[i][k] +=
                 dt * (mst->edge_rel_acc[i][k] + mst->edge_rel_acc_vd[i][k]);
@@ -597,7 +606,7 @@ static void auxiliary_kick(double dt, struct ketju_system *R) {
     update_vel(R, PHYSICAL);
     ketju_compute_PN_acc(R, ps->vel, ps->spin);
 
-    for (int i = 0; i < mst->num_vertices - 1; i++) {
+    for (int i = 0; i < R->num_particles - 1; i++) {
         for (int k = 0; k < 3; k++) {
             mst->edge_rel_aux_vel[i][k] +=
                 dt * (mst->edge_rel_acc[i][k] + mst->edge_rel_acc_vd[i][k]);
@@ -627,7 +636,7 @@ static void kick(double ds, struct ketju_system *R) {
     if (!R->options->PN_flags) {
         // no velocity dependent forces (only PN for now), just the newtonian
         // part needed
-        for (int i = 0; i < mst->num_vertices - 1; i++) {
+        for (int i = 0; i < R->num_particles - 1; i++) {
             for (int k = 0; k < 3; k++) {
                 mst->edge_rel_vel[i][k] += dt * mst->edge_rel_acc[i][k];
             }
@@ -668,6 +677,10 @@ static void mst_leapfrog(struct ketju_system *R, double Hstep,
     kick(h, R);
     drift(h / 2, R);
 }
+
+/////////////////////////////
+// GBS style extrapolation //
+/////////////////////////////
 
 static int num_gbs_substeps(int row) { return 2 * row; }
 // sum of the number of function evalutations for a given number of rows k
@@ -830,11 +843,11 @@ static void store_gbs_data(struct gbs_storage *gs, const struct ketju_system *R,
     offset += 3;
     memcpy(&data[k_ind][offset], mst->root_vel, sizeof(double[3]));
     offset += 3;
-    const size_t edge_vec_size = sizeof(double[mst->num_vertices - 1][3]);
+    const size_t edge_vec_size = sizeof(double[R->num_particles - 1][3]);
     memcpy(&data[k_ind][offset], mst->edge_rel_pos, edge_vec_size);
-    offset += 3 * (mst->num_vertices - 1);
+    offset += 3 * (R->num_particles - 1);
     memcpy(&data[k_ind][offset], mst->edge_rel_vel, edge_vec_size);
-    offset += 3 * (mst->num_vertices - 1);
+    offset += 3 * (R->num_particles - 1);
     memcpy(&data[k_ind][offset], R->physical_state->spin,
            sizeof(double[R->num_pn_particles][3]));
 }
@@ -1077,16 +1090,20 @@ static void update_system_from_gbs_result(struct ketju_system *R,
     offset += 3;
     memcpy(mst->root_vel, &data[offset], sizeof(double[3]));
     offset += 3;
-    const size_t edge_vec_size = sizeof(double[mst->num_vertices - 1][3]);
+    const size_t edge_vec_size = sizeof(double[R->num_particles - 1][3]);
     memcpy(mst->edge_rel_pos, &data[offset], edge_vec_size);
-    offset += 3 * (mst->num_vertices - 1);
+    offset += 3 * (R->num_particles - 1);
     memcpy(mst->edge_rel_vel, &data[offset], edge_vec_size);
-    offset += 3 * (mst->num_vertices - 1);
+    offset += 3 * (R->num_particles - 1);
     memcpy(R->physical_state->spin, &data[offset],
            sizeof(double[R->num_pn_particles][3]));
 
     into_Cartesian_from_MST(R);
 }
+
+///////////////////////////////////////
+// Main integration loop and helpers //
+///////////////////////////////////////
 
 // Estimates a safe initial timestep that is sufficiently small compared to the
 // smallest two-body timescale in the system.
@@ -1097,7 +1114,7 @@ static double estimate_initial_timestep(struct ketju_system *R) {
 
     int istart, jstart;
     int CumNumEdge, ThisBlock;
-    loop_scheduling_N2(mst->num_vertices, is->task_info->main_group_size,
+    loop_scheduling_N2(R->num_particles, is->task_info->main_group_size,
                        is->task_info->main_group_rank, &istart, &jstart,
                        &ThisBlock, &CumNumEdge);
 
@@ -1110,12 +1127,12 @@ static double estimate_initial_timestep(struct ketju_system *R) {
     double t2min = DBL_MAX;
 
     int c = 0;
-    for (int i = istart; i < mst->num_vertices; i++) {
+    for (int i = istart; i < R->num_particles; i++) {
 
         double mi = ps->mass[i];
         int Li = mst->vertex[i].level;
         if (i > istart) { jstart = i + 1; }
-        for (int j = jstart; j < mst->num_vertices; j++) {
+        for (int j = jstart; j < R->num_particles; j++) {
             if (c >= ThisBlock) { goto after_loops; }
             if (R->options->no_star_star_gravity && i >= R->num_pn_particles
                 && j >= R->num_pn_particles) {
@@ -1239,7 +1256,7 @@ void ketju_run_integrator(struct ketju_system *R, double time_interval) {
 
     // Other init stuff
 
-    ketju_build_mst(R);
+    ketju_construct_MST(R);
     int steps_since_reconstruction = 0;
 
     compute_total_energy(R);
@@ -1271,7 +1288,7 @@ void ketju_run_integrator(struct ketju_system *R, double time_interval) {
                                                - R->physical_state->time);
                     break;
                 }
-                ketju_build_mst(R);
+                ketju_construct_MST(R);
                 steps_since_reconstruction = 0;
                 compute_total_energy(R);
                 store_state_backup(&old_state, R);
@@ -1373,7 +1390,7 @@ void ketju_run_integrator(struct ketju_system *R, double time_interval) {
 
                 if (steps_since_reconstruction
                     >= R->options->steps_between_mst_reconstruction) {
-                    ketju_build_mst(R);
+                    ketju_construct_MST(R);
                     steps_since_reconstruction = 0;
                 }
 

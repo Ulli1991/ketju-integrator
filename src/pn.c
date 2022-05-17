@@ -507,7 +507,7 @@ void ketju_compute_PN_acc(struct ketju_system *R, double (*vel_to_use)[3],
     // Then the chained PN accelerations
     struct spanning_tree_coordinate_system *mst = R->internal_state->mst;
     int hi, lo;
-    for (int i = 0; i < mst->num_edges; ++i) {
+    for (int i = 0; i < R->num_particles - 1; ++i) {
         int v1, v2;
         get_v1_v2_fast(R, i, &v1, &v2);
         if (mst->vertex[v1].level > mst->vertex[v2].level) {

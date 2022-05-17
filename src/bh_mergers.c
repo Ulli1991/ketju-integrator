@@ -457,9 +457,6 @@ static void merge_bhs(struct ketju_system *R, int i, int j) {
 
     R->num_particles -= 1;
     R->num_pn_particles -= 1;
-    // The mst is rebuilt after all the mergers are done, only need to change
-    // the size for now.
-    R->internal_state->mst->num_vertices -= 1;
 }
 
 int ketju_do_bh_mergers(struct ketju_system *R) {

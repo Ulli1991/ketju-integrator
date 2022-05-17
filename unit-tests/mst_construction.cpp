@@ -46,7 +46,7 @@ TEST_P(ConstructionTest, random_stars) {
     auto [algo, N] = GetParam();
     init_random_positions(&R, N, gen);
     R.options->mst_algorithm = KETJU_MST_PRIM;
-    ketju_build_mst(&R);
+    ketju_construct_MST(&R);
 
     auto *mst = R.internal_state->mst;
     int root_count = 0;

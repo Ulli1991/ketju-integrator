@@ -68,13 +68,10 @@ struct graph_vertex {
 };
 
 struct spanning_tree_coordinate_system {
-    int num_vertices;
-    int num_edges;
+    // There are num_particles vertices and num_particles - 1 edges
 
     struct graph_vertex *vertex;
-
-    // TODO check if some of these can be removed
-    struct graph_edge *local_edge, *local_edge_subset, *edge_in_mst;
+    struct graph_edge *local_edge, *edge_in_mst;
 
     // Absolute coordinates of the tree root.
     // These are integrated to allow for forces that do not conserve the CoM of
@@ -239,7 +236,7 @@ int ketju_do_bh_mergers(struct ketju_system *R);
 void ketju_init_gbs_comms(struct ketju_system *R);
 void ketju_free_gbs_comms(struct ketju_system *R);
 
-void ketju_build_mst(struct ketju_system *R);
+void ketju_construct_MST(struct ketju_system *R);
 
 void ketju_compute_PN_acc(struct ketju_system *, double (*vel_to_use)[3],
                           double (*spin_to_use)[3]);
@@ -252,6 +249,9 @@ bool ketju_check_relative_proximity_general(int v1, int v2, const int Nd,
 bool ketju_check_relative_proximity_ND_2(int v1, int v2,
                                          const struct ketju_system *R, int *d,
                                          int path[2], int sign[2]);
+bool ketju_check_relative_proximity_ND_1(int v1, int v2,
+                                         const struct ketju_system *R, int *d,
+                                         int path[1], int sign[1]);
 
 static inline bool ketju_check_relative_proximity(int v1, int v2, const int Nd,
                                                   const struct ketju_system *R,
@@ -272,9 +272,13 @@ static inline bool ketju_check_relative_proximity(int v1, int v2, const int Nd,
     }
 #endif
 
-    if (Nd == 2) {
-        // Use the specialized version for this common case
-        // TODO: measure if this actually helps.
+    // Use the specialized versions for this common values
+    switch (Nd) {
+    case 0:
+        return false;
+    case 1:
+        return ketju_check_relative_proximity_ND_1(v1, v2, R, d, path, sign);
+    case 2:
         return ketju_check_relative_proximity_ND_2(v1, v2, R, d, path, sign);
     }
 
