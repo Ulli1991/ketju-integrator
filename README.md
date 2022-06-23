@@ -2,6 +2,10 @@
 
 A highly parallel regularized N-body integrator library.
 
+The interface to the integrator is defined in  
+`include/ketju_integrator/ketju_integrator.h`  
+see the comments there for detailed explanations.
+
 ## Building
 Depending on whether you want to build the included unit tests 
 (recommended for developing the code), you will either first need to run
@@ -25,17 +29,21 @@ either directly or using e.g. `ccmake`, but doing this is not typically required
 After configuration, the library, a python shim and the standalone driver 
 program can be built by running `make` in the build directory.
 The standalone `nbody` program is found under `bin/`.
-*TODO: improve and document usage of `nbody`.*
+See the [`nbody` README](nbody/README.md) for details on using it.
 
 ## Usage in other codes
 
 The public interface of the library is included in the file 
 `include/ketju_integrator/ketju_integrator.h`,
-so `#include <ketju_integrator/ketju_integrator.h>` and add
-`-I/path/to/include/` to your compiler flags.
-To link the library, add `-L/path/to/lib -lketju-integrator` to your linker
-flags.
-*TODO: usage in cmake projects*
+so in your C or C++ code add  
+`#include <ketju_integrator/ketju_integrator.h>`  
+and add  
+`-I/path/to/include/`  
+to your compiler flags.  
+To link the library, add  
+`-L/path/to/lib -lketju-integrator`  
+to your linker flags.
+
 
 ## Python bindings
 

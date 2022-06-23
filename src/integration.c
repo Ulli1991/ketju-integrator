@@ -95,7 +95,7 @@ static inline double separation_and_r2(const struct ketju_system *R, int i,
 
 static void compute_U(struct ketju_system *R) {
 
-    tick(&R->perf->time_force);
+    timer_start(&R->perf->time_force);
 
     struct ketju_system_internal_state *const is = R->internal_state;
     struct ketju_system_physical_state *const ps = R->physical_state;
@@ -141,14 +141,14 @@ static void compute_U(struct ketju_system *R) {
         }
     }
 after_loops:
-    tock(&R->perf->time_force);
+    timer_stop(&R->perf->time_force);
 
-    tick(&R->perf->time_force_comm);
+    timer_start(&R->perf->time_force_comm);
     if (is->task_info->gbs_group_size > 1) {
         MPI_Allreduce(MPI_IN_PLACE, &is->U, 1, MPI_DOUBLE, MPI_SUM,
                       is->task_info->gbs_comm);
     }
-    tock(&R->perf->time_force_comm);
+    timer_stop(&R->perf->time_force_comm);
 
     if (!isfinite(is->U)) {
         if (R->internal_state->task_info->main_group_rank == 0) {
@@ -326,7 +326,7 @@ static void comp_U_acc_loop_softened_star_star(struct ketju_system *R) {
 // computes the force function and newtonian acceleration
 static void compute_U_and_Newtonian_Acc(struct ketju_system *R) {
 
-    tick(&R->perf->time_force);
+    timer_start(&R->perf->time_force);
 
     struct ketju_system_internal_state *const is = R->internal_state;
     struct spanning_tree_coordinate_system *const mst = is->mst;
@@ -344,18 +344,18 @@ static void compute_U_and_Newtonian_Acc(struct ketju_system *R) {
         comp_U_acc_loop_standard(R);
     }
 
-    tock(&R->perf->time_force);
+    timer_stop(&R->perf->time_force);
 
-    tick(&R->perf->time_force_comm);
+    timer_start(&R->perf->time_force_comm);
     if (is->task_info->gbs_group_size > 1) {
         MPI_Allreduce(MPI_IN_PLACE, is->acc, 3 * R->num_particles, MPI_DOUBLE,
                       MPI_SUM, is->task_info->gbs_comm);
         MPI_Allreduce(MPI_IN_PLACE, &is->U, 1, MPI_DOUBLE, MPI_SUM,
                       is->task_info->gbs_comm);
     }
-    tock(&R->perf->time_force_comm);
+    timer_stop(&R->perf->time_force_comm);
 
-    tick(&R->perf->time_force);
+    timer_start(&R->perf->time_force);
     int hi, lo;
     for (int i = 0; i < R->num_particles - 1; i++) {
 
@@ -374,7 +374,7 @@ static void compute_U_and_Newtonian_Acc(struct ketju_system *R) {
         }
     }
 
-    tock(&R->perf->time_force);
+    timer_stop(&R->perf->time_force);
 }
 
 static void compute_T(struct ketju_system *R) {
@@ -396,8 +396,9 @@ static void compute_T(struct ketju_system *R) {
 // Some MST related helpers //
 //////////////////////////////
 
-// TODO the following few functions could maybe go in mst.c, but maybe easier to
-// have as few externally visible symbols as possible
+// The following few functions could maybe go in mst.c, having them here reduces
+// the number of externally visible symbols, and should allow for better
+// inlining.
 static int get_root_index(const struct ketju_system *R) {
     const struct spanning_tree_coordinate_system *const mst =
         R->internal_state->mst;
@@ -410,7 +411,7 @@ static int get_root_index(const struct ketju_system *R) {
 
 static void into_Cartesian_from_MST(struct ketju_system *R) {
 
-    tick(&R->perf->time_coord);
+    timer_start(&R->perf->time_coord);
 
     const struct spanning_tree_coordinate_system *const mst =
         R->internal_state->mst;
@@ -440,12 +441,12 @@ static void into_Cartesian_from_MST(struct ketju_system *R) {
         }
     }
 
-    tock(&R->perf->time_coord);
+    timer_stop(&R->perf->time_coord);
 }
 
 static void update_pos(struct ketju_system *R) {
 
-    tick(&R->perf->time_coord);
+    timer_start(&R->perf->time_coord);
 
     const struct spanning_tree_coordinate_system *const mst =
         R->internal_state->mst;
@@ -473,7 +474,7 @@ static void update_pos(struct ketju_system *R) {
         }
     }
 
-    tock(&R->perf->time_coord);
+    timer_stop(&R->perf->time_coord);
 }
 
 // TODO this and the above update_pos are very similar to
@@ -481,7 +482,7 @@ static void update_pos(struct ketju_system *R) {
 static void update_vel(struct ketju_system *R,
                        enum velocity_type propagated_velocity) {
 
-    tick(&R->perf->time_coord);
+    timer_start(&R->perf->time_coord);
     const struct spanning_tree_coordinate_system *const mst =
         R->internal_state->mst;
 
@@ -519,7 +520,7 @@ static void update_vel(struct ketju_system *R,
         }
     }
 
-    tock(&R->perf->time_coord);
+    timer_stop(&R->perf->time_coord);
 }
 
 //////////////////////////
@@ -857,7 +858,7 @@ static void store_gbs_data(struct gbs_storage *gs, const struct ketju_system *R,
 static void post_gbs_receives(MPI_Request *requests, int *request_index,
                               struct gbs_storage *gs, int *gbs_rows_for_groups,
                               const struct ketju_system *R) {
-    tick(&R->perf->time_gbscomm);
+    timer_start(&R->perf->time_gbscomm);
 
     const struct task_info *ti = R->internal_state->task_info;
     const int k = R->internal_state->gbs_k;
@@ -873,7 +874,7 @@ static void post_gbs_receives(MPI_Request *requests, int *request_index,
                        ti->gbs_data_comms[i], &requests[(*request_index)++]);
         }
     }
-    tock(&R->perf->time_gbscomm);
+    timer_stop(&R->perf->time_gbscomm);
 }
 
 // Make the non-blocking send call for a row of data corresponding to the given
@@ -888,21 +889,21 @@ static void post_gbs_send(MPI_Request *requests, int *request_index,
     const int i = ti->gbs_group_index;
     if (ti->gbs_data_comms[i] == MPI_COMM_NULL) return;
 
-    tick(&R->perf->time_gbscomm);
+    timer_start(&R->perf->time_gbscomm);
     int data_row = k - 1;
     MPI_Ibcast(data[data_row], gs->num_vars, MPI_DOUBLE, 0,
                ti->gbs_data_comms[i], &requests[(*request_index)++]);
-    tock(&R->perf->time_gbscomm);
+    timer_stop(&R->perf->time_gbscomm);
 }
 
 // Wait for the communications to finish
 static void finish_gbs_comm(MPI_Request *requests, int request_index,
                             const struct ketju_system *R) {
-    tick(&R->perf->time_gbscomm);
+    timer_start(&R->perf->time_gbscomm);
     if (request_index > 0) {
         MPI_Waitall(request_index, requests, MPI_STATUSES_IGNORE);
     }
-    tock(&R->perf->time_gbscomm);
+    timer_stop(&R->perf->time_gbscomm);
 }
 
 static double get_n_double(int i) { return (2.0 * (i + 1.0)); }
@@ -968,7 +969,7 @@ static bool gbs_extrapolate(struct gbs_storage *gs,
                             struct gbs_extrapolation_indices *ei, double *Hstep,
                             int *new_k, double *Hstep_new_k,
                             const struct ketju_system *R) {
-    tick(&R->perf->time_gbsextr);
+    timer_start(&R->perf->time_gbsextr);
 
     const int rank = R->internal_state->task_info->main_group_rank;
     int start_ind = ei->start_inds[rank];
@@ -983,8 +984,7 @@ static bool gbs_extrapolate(struct gbs_storage *gs,
     double result;
     double(*data)[gs->num_vars] = (double(*)[gs->num_vars])gs->data;
 
-    // TODO make configurable
-    const double abs_tol = 1e-100;
+    const double abs_tol = R->options->gbs_absolute_tolerance;
 
     for (int i = start_ind; i < end_ind; ++i) {
         for (int j = 0; j < k; ++j) {
@@ -1013,9 +1013,9 @@ static bool gbs_extrapolate(struct gbs_storage *gs,
             max_error[1] = error_lower_order;
         }
     }
-    tock(&R->perf->time_gbsextr);
+    timer_stop(&R->perf->time_gbsextr);
 
-    tick(&R->perf->time_gbscomm);
+    timer_start(&R->perf->time_gbscomm);
     // check convergence across all task
     MPI_Allreduce(MPI_IN_PLACE, &max_error, 2, MPI_DOUBLE, MPI_MAX,
                   R->internal_state->task_info->main_comm);
@@ -1075,7 +1075,7 @@ static bool gbs_extrapolate(struct gbs_storage *gs,
         *Hstep_new_k = *Hstep;
     }
 
-    tock(&R->perf->time_gbscomm);
+    timer_stop(&R->perf->time_gbscomm);
 
     return converged;
 }
@@ -1225,13 +1225,13 @@ void ketju_run_integrator(struct ketju_system *R, double time_interval) {
 
     // special case for when no actual integration is needed
     if (R->num_particles < 2) {
-        tick(&R->perf->time_total);
+        timer_start(&R->perf->time_total);
         trivial_propagation(R, time_interval);
-        tock(&R->perf->time_total);
+        timer_stop(&R->perf->time_total);
         return;
     }
 
-    tick(&R->perf->time_total);
+    timer_start(&R->perf->time_total);
 
     // Init GBS stuff
     R->internal_state->gbs_k =
@@ -1430,5 +1430,5 @@ void ketju_run_integrator(struct ketju_system *R, double time_interval) {
     R->perf->relative_energy_error =
         (R->internal_state->B - initial_B) / initial_B;
 
-    tock(&R->perf->time_total);
+    timer_stop(&R->perf->time_total);
 }

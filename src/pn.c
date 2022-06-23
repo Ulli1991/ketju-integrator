@@ -492,7 +492,7 @@ static void compute_PN_acc_single(struct ketju_system *R, int i,
 void ketju_compute_PN_acc(struct ketju_system *R, double (*vel_to_use)[3],
                           double (*spin_to_use)[3]) {
     if (!R->options->PN_flags) return;
-    tick(&R->perf->time_force);
+    timer_start(&R->perf->time_force);
 
     double(*acc_pn)[3] = R->internal_state->acc_vd;
     memset(acc_pn, 0, sizeof(double[R->num_particles][3]));
@@ -521,7 +521,7 @@ void ketju_compute_PN_acc(struct ketju_system *R, double (*vel_to_use)[3],
             mst->edge_rel_acc_vd[i][k] = acc_pn[hi][k] - acc_pn[lo][k];
         }
     }
-    tock(&R->perf->time_force);
+    timer_stop(&R->perf->time_force);
 }
 
 // PN CoM calculations, needed for merger remnants.

@@ -101,8 +101,6 @@ struct task_info {
 
     // gbs task group = tasks participating in a given set of substep levels
     // i.e. force calculations done in this group
-    // TODO maybe could be named as force_group, since mostly appears in force
-    // calculations
     int gbs_group_size;
     int gbs_group_rank;
     int gbs_group_index; //< which of the gbs groups this task belongs in
@@ -141,13 +139,13 @@ struct ketju_system_internal_state {
 // compilation units without introducing extra public symbols.
 
 // timer functions for basic profiling, used as
-//   tick(timer)
+//   timer_start(timer)
 //   ... code ...
-//   tock(timer)
+//   timer_stop(timer)
 // the value of *timer is not meaningful between the calls.
 //
-static inline void tick(double *timer) { *timer -= MPI_Wtime(); }
-static inline void tock(double *timer) { *timer += MPI_Wtime(); }
+static inline void timer_start(double *timer) { *timer -= MPI_Wtime(); }
+static inline void timer_stop(double *timer) { *timer += MPI_Wtime(); }
 
 // for exiting on catastrophic errors
 // TODO most uses now could be replaced with error codes allowing potentially
@@ -260,7 +258,7 @@ static inline bool ketju_check_relative_proximity(int v1, int v2, const int Nd,
 
 #ifndef NDEBUG
     const struct graph_vertex *vertex = R->internal_state->mst->vertex;
-    // Debugging stuff for some tree construction bug that may still be present
+    // Debugging stuff for any possible remaining tree construction bugs
     if (vertex[v1].level == 0 && vertex[v2].level == 0) {
         char buf[100];
         sprintf(buf,

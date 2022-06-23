@@ -10,7 +10,7 @@ Correctness
   for small particle/task counts
     ? Maybe fixed now?
     + force using standard prim in the small particle count case
-    - Standard prim might be good enough for ~500-1000 particles
+    + Standard prim seems to be good enough for ~500-1000 particles
     ? should be fixed properly (if still broken),
       apparently can break down even with larger systems.
 
@@ -32,10 +32,6 @@ Optimization
 Features
 --------
 
-+ BH mergers
-    + Basic merging conserving momentum, mass
-    + GR effects on mass loss, resulting spin, kicks
-        ? are the current fits good enough
 
 Style
 -----

@@ -207,7 +207,7 @@ static int cmp(const void *a, const void *b) {
 
 static int edge_search_for_prim(struct ketju_system *R, int num_local_edges) {
 
-    tick(&R->perf->tprim3);
+    timer_start(&R->perf->tprim3);
     const struct spanning_tree_coordinate_system *mst = R->internal_state->mst;
     struct weight_index wi;
 
@@ -222,13 +222,13 @@ static int edge_search_for_prim(struct ketju_system *R, int num_local_edges) {
         }
     }
 
-    tock(&R->perf->tprim3);
-    tick(&R->perf->tprim4);
+    timer_stop(&R->perf->tprim3);
+    timer_start(&R->perf->tprim4);
 
     MPI_Allreduce(MPI_IN_PLACE, &wi, 1, MPI_DOUBLE_INT, MPI_MINLOC,
                   R->internal_state->task_info->main_comm);
 
-    tock(&R->perf->tprim4);
+    timer_stop(&R->perf->tprim4);
 
     return wi.index;
 }
@@ -239,7 +239,7 @@ static void construct_MST_Prim(struct ketju_system *R) {
     const struct task_info *ti = R->internal_state->task_info;
     struct spanning_tree_coordinate_system *mst = R->internal_state->mst;
 
-    tick(&R->perf->time_mst);
+    timer_start(&R->perf->time_mst);
 
     // Construct the edges handled by this task
     int block_size, cum_num_edge, istart, jstart;
@@ -343,7 +343,7 @@ after_edge_construction:
             }
         }
     }
-    tock(&R->perf->time_mst);
+    timer_stop(&R->perf->time_mst);
 }
 
 /////////////////////////////////////////////////////////////////////////
@@ -1046,7 +1046,7 @@ static void combine_all_MST(struct ketju_system *R, int num_edge) {
 
 static void construct_MST_divide_and_conquer_Prim(struct ketju_system *R) {
 
-    tick(&R->perf->time_mst);
+    timer_start(&R->perf->time_mst);
     struct spanning_tree_coordinate_system *mst = R->internal_state->mst;
     struct octree_data *octd = R->internal_state->octree_data;
 
@@ -1062,35 +1062,32 @@ static void construct_MST_divide_and_conquer_Prim(struct ketju_system *R) {
     int Nleafs = 0;
     int max_leaf_size = (int)floor(3 * sqrt(R->num_particles));
 
-    tick(&R->perf->tprim1);
+    timer_start(&R->perf->tprim1);
     spatialpartition(&R[0], max_leaf_size);
-
     get_number_of_leafs(octd->root_node, &Nleafs);
     int *leaf_sizes = calloc(Nleafs, sizeof(int));
     int **leaf_particles = calloc(Nleafs, sizeof(int *));
+    timer_stop(&R->perf->tprim1);
 
-    tock(&R->perf->tprim1);
-
-    tick(&R->perf->tprim2);
+    timer_start(&R->perf->tprim2);
     Nleafs = 0;
     list_octree_level(octd->root_node, leaf_sizes, leaf_particles, &Nleafs);
+    timer_stop(&R->perf->tprim2);
 
-    tock(&R->perf->tprim2);
-
-    tick(&R->perf->tprim3);
+    timer_start(&R->perf->tprim3);
     int num_edge = 0;
     for (int i = 0; i < Nleafs; i++) {
         solve_sub_MST(R, leaf_sizes[i], leaf_particles[i], &num_edge);
     }
-    tock(&R->perf->tprim3);
+    timer_stop(&R->perf->tprim3);
 
-    tick(&R->perf->tprim4);
+    timer_start(&R->perf->tprim4);
     solve_meta_MST(R, Nleafs, leaf_sizes, leaf_particles, &num_edge);
-    tock(&R->perf->tprim4);
+    timer_stop(&R->perf->tprim4);
 
-    tick(&R->perf->tprim5);
+    timer_start(&R->perf->tprim5);
     combine_all_MST(R, num_edge);
-    tock(&R->perf->tprim5);
+    timer_stop(&R->perf->tprim5);
 
     free_octree(octd->root_node);
     for (int i = 0; i < Nleafs; i++) {
@@ -1099,7 +1096,7 @@ static void construct_MST_divide_and_conquer_Prim(struct ketju_system *R) {
     free(leaf_particles);
     free(leaf_sizes);
 
-    tock(&R->perf->time_mst);
+    timer_stop(&R->perf->time_mst);
 }
 
 // main construction function

@@ -13,10 +13,13 @@ extern "C" {
 #endif
 
 // Types and enums
+
 // Using bitflags for the PN terms allows more fine-grained control of the used
 // terms (e.g. only PN2.5 radiation reaction or only conservative terms).
-// XXX: this could end up being too complicated, but should be fairly easy to
-// use especially if all commonly used combinations are pre-defined.
+// Combine flags with the bitwise or operator |, remove flags from the predefined
+// sets using bitwise and with negation,
+// e.g. KETJU_PN_CONSERVATIVE & ~KETJU_PN_THREEBODY
+// for conservative terms without three-body cross-terms.
 enum ketju_PN_flags {
     KETJU_PN_NONE = 0,
     KETJU_PN_1_0_ACC = 1 << 0,
@@ -27,8 +30,10 @@ enum ketju_PN_flags {
     KETJU_PN_3_5_ACC = 1 << 5,
     KETJU_PN_CONSERVATIVE = KETJU_PN_1_0_ACC | KETJU_PN_2_0_ACC
                             | KETJU_PN_3_0_ACC | KETJU_PN_THREEBODY,
+    // All the spin independent terms.
+    // Name might not be the best, but should do.
     KETJU_PN_DYNAMIC_ALL =
-        0xFF, // all the spin independent terms, is this a good name?
+        KETJU_PN_CONSERVATIVE | KETJU_PN_2_5_ACC | KETJU_PN_3_5_ACC,
 
     KETJU_PN_1_5_SPIN_ACC = 1 << 8,
     KETJU_PN_2_0_SPIN_ACC = 1 << 9,
@@ -40,25 +45,48 @@ enum ketju_PN_flags {
 
 enum ketju_mst_algorithm {
     KETJU_MST_PRIM,
+    //< Exact MST construction using Prim's algorithm, the default mode suitable
+    //for most systems.
     KETJU_MST_DIVIDE_AND_CONQUER_PRIM,
+    //< Approximate MST construction by splitting the domain into smaller pieces
+    // and then combining the sub-trees.
+    // May be faster for very large systems.
 };
 
 struct ketju_integration_options {
     int gbs_kmax; //< Maximum k (number of rows) the integrator can use
 
     double gbs_relative_tolerance;
+    //< Relative error tolerance per step.
+    // This is the main option for controlling the integrator accuracy, with
+    // values 1e-7 - 1e-12 working well depending on the problem.
+    // Larger values may lead to unacceptable errors in orbits, while smaller
+    // can lead to the integrator stalling as floating point errors prevent
+    // reaching the desired accuracy, particularly when close to
+    // the double precision epsilon at ~1e-16.
+    double gbs_absolute_tolerance;
+    //< Minimum absolute size of error per step.
+    // Can be used to prevent the integrator doing excess work when a variable
+    // is near zero, where the relative tolerance condition can result in
+    // unnecessarily short timesteps.
 
     double output_time_relative_tolerance;
-    //< Maximum size of relative error in time iteration
+    //< Maximum size of relative error in iteration to requested integration end
+    // time
     double output_time_absolute_tolerance;
-    //< Minimum absolute size of error in time iteration
+    //< Minimum absolute size of error in time iteration.
 
-    unsigned int PN_flags; //< Bitflags for enabling different PN terms
+    unsigned int PN_flags;
+    //< Bitflags for enabling different PN terms, using the values defined in
+    // enum ketju_PN_flags.
 
     int steps_between_mst_reconstruction;
+    //< How often to reconstruct the tree coordinates.
+    // Constructing the tree is fairly costly, and often the possible accuracy
+    // improvements are not big enough to justify doing this that often.
     int max_tree_distance;
     //< Maximum separation in the tree structure before using CoM coordinate
-    // distances
+    // distances.
     int max_step_count;
     //< Maximum number of attempted (successful or not) steps before abandoning
     //  the integration and dumping state.
@@ -89,6 +117,7 @@ static const struct ketju_integration_options
     ketju_default_integration_options = {
         .gbs_kmax = 16,
         .gbs_relative_tolerance = 1e-9,
+        .gbs_absolute_tolerance = 1e-100,
         .output_time_relative_tolerance = 1e-6,
         .output_time_absolute_tolerance = 1e-300,
         .PN_flags = KETJU_PN_ALL,
@@ -107,17 +136,9 @@ struct ketju_natural_constants {
     double G;
     double c;
 };
-// Gadget default values for now
+// Gadget-3 default values for now
 static const struct ketju_natural_constants ketju_default_natural_constants = {
     .G = 43007.1, .c = 299792.0};
-
-struct ketju_system_physical_state {
-    double time;
-    double *mass;
-    double (*pos)[3];
-    double (*vel)[3];
-    double (*spin)[3]; // spin only for pn particles
-};
 
 // The physical state of the system.
 // The coordinate system is arbitrary, but it is numerically favorable to have
@@ -129,6 +150,14 @@ struct ketju_system_physical_state {
 // Galilei-invariant, so for general systems mixing these particle types there
 // is no real 'correct' way to choose the coordinates. The differences caused by
 // these effects are very small for reasonable choices of rest frame.
+struct ketju_system_physical_state {
+    double time;
+    double *mass;
+    double (*pos)[3];
+    double (*vel)[3];
+    double (*spin)[3]; // spin only for pn particles
+};
+
 struct ketju_performance_counters {
     double time_force;
     double time_force_comm;
@@ -138,7 +167,7 @@ struct ketju_performance_counters {
     double time_gbsextr;
     double time_total;
 
-    // TODO: check what these actually mean
+    // Sub-timers for DnC Prim, time included in time_mst also.
     double tprim1, tprim2, tprim3, tprim4, tprim5;
 
     int successful_steps;
@@ -162,18 +191,16 @@ struct ketju_system {
     int num_particles;    //< Total number of particles
     int num_pn_particles; //< Number of PN enabled particles
 
+    // The struct members apart from internal_state could also be direct members
+    // instead of pointers, but the performance implications aren't likely that
+    // big either way so this is mostly a stylistic choice.
+
     struct ketju_system_physical_state *physical_state;
-    //< Physical state of the system (as a pointer for making temporary copies)
-    // TODO looking like we're not going to use the pointer nature for making
-    // copies, maybe make into a direct member?
+    //< Physical state of the system
 
     struct ketju_system_internal_state *internal_state;
     //< Internal state (implementation detail)
 
-    // TODO is it better to have this stuff (which doesn't need to be copied
-    // into temp variables) as direct members to avoid extra pointer derefs, or
-    // as pointers for consistency with the above and perhaps some cache
-    // behaviour benefits?
     struct ketju_performance_counters *perf;
     struct ketju_integration_options *options;
 
@@ -194,11 +221,26 @@ struct ketju_system {
 };
 
 // Function prototypes
+
+// Allocate and set default options and physical constants.
+// Parameters:
+//  R: pointer to an unitialized ketju_system struct,
+//     which this function initializes.
+//  num_pn_particles, num_other_particles: counts of PN enabled particles (BHs)
+//     and purely Newtonian particles (stars) to allocate space for in
+//     physical_state.
+//  comm: An MPI communicator from which the integrator communicators are
+//        created.
+// All tasks in the specified comm must call this function with the same
+// particle counts, then set the physical_state, options, and constants contents
+// to the same values, and finally call ketju_run_integrator with the same
+// arguments.
 void ketju_create_system(struct ketju_system *R, int num_pn_particles,
                          int num_other_particles, MPI_Comm comm);
+// Free the allocated system storage
 void ketju_free_system(struct ketju_system *R);
 
-// Compute the centre of mass of the system
+// Compute the centre of mass of the system, puts results in CoM_pos and CoM_vel
 void ketju_compute_CoM(const struct ketju_system *R, double CoM_pos[3],
                        double CoM_vel[3]);
 // Shift the coordinate origin of the system to the CoM, outputs the original
