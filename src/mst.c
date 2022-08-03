@@ -253,7 +253,8 @@ static void construct_MST_Prim(struct ketju_system *R) {
         if (i > istart) { jstart = i + 1; }
         for (int j = jstart; j < R->num_particles; j++) {
             if (num_local_edges >= block_size) {
-                // If there are more tasks than edges, ThisBlock may be 0
+                // We've processed all edges for this task.
+                // If there are more tasks than edges, block_size may also be 0.
                 goto after_edge_construction; // exit both loops
             }
             double w = 0;

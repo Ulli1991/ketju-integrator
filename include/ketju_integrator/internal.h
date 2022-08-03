@@ -195,34 +195,33 @@ static inline double norm_and_unit_vector(const double a[3], double res[3]) {
 // Divide work for a i = (0..N-1), j = (i+1..N-1) loop between Nt tasks.
 // For the given task, computes the starting value for i (istart), the starting
 // value for j (jstart) for the loop with i==istart, the number of elements
-// handled by the given task (ThisBlock) and the number of elements before the
-// block handled by this task (CumNum).
+// handled by the given task (block_size) and the number of elements before the
+// block handled by this task (cum_num).
 // The loops for i,j go up to N (exclusive) until ThisBlock elements have been
 // processed.
 static inline void loop_scheduling_N2(int N, int Nt, int task, int *istart,
-                                      int *jstart, int *ThisBlock,
-                                      int *CumNum) {
+                                      int *jstart, int *block_size,
+                                      int *cum_num) {
     int Np = (N * (N - 1)) / 2;
     int block = (int)floor(Np / Nt);
     int limit = (block + 1) * Nt - Np;
-    int ThisCumNum;
+    int cumN;
     if (task < limit) {
-        ThisCumNum = task * block;
-        *ThisBlock = block;
+        cumN = task * block;
+        *block_size = block;
     } else {
-        ThisCumNum = limit * block + (task - limit) * (block + 1);
-        *ThisBlock = block + 1;
+        cumN = limit * block + (task - limit) * (block + 1);
+        *block_size = block + 1;
     }
 
-    double drow =
-        1.0 * N - 0.5
-        - 0.5 * sqrt((1.0 - 2.0 * N) * (1.0 - 2.0 * N) - 8.0 * ThisCumNum);
+    double drow = 1.0 * N - 0.5
+                  - 0.5 * sqrt((1.0 - 2.0 * N) * (1.0 - 2.0 * N) - 8.0 * cumN);
     int row = (int)floor(drow);
     int rowstart =
         (int)round(-0.5 * (1.0 * row + 1.0) * (row - 2.0 * N) - 1.0 * N);
     *istart = row;
-    *jstart = ThisCumNum - rowstart + row + 1;
-    *CumNum = ThisCumNum;
+    *jstart = cumN - rowstart + row + 1;
+    *cum_num = cumN;
 }
 
 // declarations of internal functions used between compilation units

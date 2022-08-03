@@ -42,8 +42,6 @@ Style
 Other
 -----
 
-- Improve the standalone integrator
-
 + Python bindings
     + Mostly work
     - Could be easier to use, but maybe simple is good enough

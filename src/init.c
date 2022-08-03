@@ -21,13 +21,12 @@ static void allocate_internal_state(struct ketju_system *R, int Ntask) {
     struct spanning_tree_coordinate_system *mst = R->internal_state->mst;
     mst->vertex = calloc(R->num_particles, sizeof(struct graph_vertex));
 
-    // The division of edges between each task can be slightly uneven, but Ntask
-    // edges worth of extra space should guarantee enough space always.
-    // TODO: would like to have exact counts to really ensure correctness.
-    int NumLocalEdge =
-        (R->num_particles * (R->num_particles - 1)) / Ntask + Ntask;
+    // This is the maximum number of edges per task allocated by
+    // loop_scheduling_N2
+    int num_local_edge =
+        (R->num_particles * (R->num_particles - 1)) / 2 / Ntask + 1;
 
-    mst->local_edge = calloc(NumLocalEdge, sizeof(struct graph_edge));
+    mst->local_edge = calloc(num_local_edge, sizeof(struct graph_edge));
     mst->edge_in_mst = calloc(R->num_particles - 1, sizeof(struct graph_edge));
 
     mst->edge_rel_pos = calloc(1, sizeof(double[R->num_particles - 1][3]));
