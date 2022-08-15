@@ -1,3 +1,11 @@
+// Ketju-integrator (MSTAR)
+// Copyright (C) 2020-2022 Matias Mannerkoski and contributors.
+// Licensed under the GPLv3 license.
+// See LICENSE.md or <https://www.gnu.org/licenses/> for details.
+
+
+// Functions related to the post-Newtonian corrections for BHs.
+
 #include <string.h>
 
 #include "ketju_integrator/internal.h"

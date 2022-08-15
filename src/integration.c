@@ -1,3 +1,9 @@
+// Ketju-integrator (MSTAR)
+// Copyright (C) 2020-2022 Antti Rantala, Matias Mannerkoski, and contributors.
+// Licensed under the GPLv3 license.
+// See LICENSE.md or <https://www.gnu.org/licenses/> for details.
+
+
 // Main integration and force calculation functions
 
 #include <float.h>

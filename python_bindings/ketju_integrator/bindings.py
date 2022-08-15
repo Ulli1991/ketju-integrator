@@ -1,3 +1,8 @@
+# Ketju-integrator Python bindings
+# Copyright (C) 2020-2022 Matias Mannerkoski and contributors.
+# Licensed under the GPLv3 license.
+# See LICENSE.md or <https://www.gnu.org/licenses/> for details.
+
 """
 Simple bindings that allow running the integrator in parallel from a standard 
 python instance through the use of subprocesses.

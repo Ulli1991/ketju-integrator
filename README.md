@@ -2,6 +2,7 @@
 
 A highly parallel regularized N-body integrator library.
 
+
 The interface to the integrator is defined in  
 `include/ketju_integrator/ketju_integrator.h`  
 see the comments there for detailed explanations.
@@ -54,3 +55,7 @@ running the integrator in subprocesses with MPI.
 An example of using the bindings is in
 `python_bindings/ketju_integrator_example.py`.
 For more convenient usage add the `python_bindings` directory to the `PYTHONPATH`.
+
+## License
+
+This software is licensed under the GPLv3 license, see [LICENSE.md](LICENSE.md) for details.

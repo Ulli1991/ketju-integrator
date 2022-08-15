@@ -1,3 +1,8 @@
+// Ketju-integrator Python bindings.
+// Copyright (C) 2020-2022 Matias Mannerkoski and contributors.
+// Licensed under the GPLv3 license.
+// See LICENSE.md or <https://www.gnu.org/licenses/> for details.
+
 #include <mpi.h>
 #include <stdio.h>
 
