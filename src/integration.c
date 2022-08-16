@@ -689,6 +689,10 @@ static void mst_leapfrog(struct ketju_system *R, double Hstep,
 // GBS style extrapolation //
 /////////////////////////////
 
+// Many of the theoretical details of to the extrapolation algorithm are
+// explained in e.g. Hairer et al. "Solving Ordinary differential Equations I"
+// (DOI 10.1007/978-3-540-78862-1), particularly chapter II.9.
+
 static int num_gbs_substeps(int row) { return 2 * row; }
 // sum of the number of function evalutations for a given number of rows k
 static int gbs_total_cost(int k) {
@@ -729,6 +733,9 @@ static int argmin_int(int *arr, int size) {
 
 // Get the values of k that are done by the gbs groups.
 // The values are in descending order
+// Using 1-based counting for rows, so that empty fields
+// in the table are just 0 and are directly falsy.
+// This is also the convention in num_gbs_substeps(row) above.
 static void get_gbs_rows_for_groups(struct ketju_system *R,
                                     int *gbs_rows_for_groups) {
     const int k = R->internal_state->gbs_k;
@@ -837,25 +844,25 @@ static void allocate_gbs_storage(struct gbs_storage *gs, int num_particles,
 
 static void free_gbs_storage(struct gbs_storage *gs) { free(gs->data); }
 
-// store the data for this k for extrapolation
+// store the data for this row for extrapolation
 static void store_gbs_data(struct gbs_storage *gs, const struct ketju_system *R,
-                           int k) {
+                           int row) {
     double(*data)[gs->num_vars] = (double(*)[gs->num_vars])gs->data;
-    const int k_ind = k - 1;
-    data[k_ind][0] = R->physical_state->time;
+    const int row_ind = row - 1;
+    data[row_ind][0] = R->physical_state->time;
     int offset = 1;
     const struct spanning_tree_coordinate_system *const mst =
         R->internal_state->mst;
-    memcpy(&data[k_ind][offset], mst->root_pos, sizeof(double[3]));
+    memcpy(&data[row_ind][offset], mst->root_pos, sizeof(double[3]));
     offset += 3;
-    memcpy(&data[k_ind][offset], mst->root_vel, sizeof(double[3]));
+    memcpy(&data[row_ind][offset], mst->root_vel, sizeof(double[3]));
     offset += 3;
     const size_t edge_vec_size = sizeof(double[R->num_particles - 1][3]);
-    memcpy(&data[k_ind][offset], mst->edge_rel_pos, edge_vec_size);
+    memcpy(&data[row_ind][offset], mst->edge_rel_pos, edge_vec_size);
     offset += 3 * (R->num_particles - 1);
-    memcpy(&data[k_ind][offset], mst->edge_rel_vel, edge_vec_size);
+    memcpy(&data[row_ind][offset], mst->edge_rel_vel, edge_vec_size);
     offset += 3 * (R->num_particles - 1);
-    memcpy(&data[k_ind][offset], R->physical_state->spin,
+    memcpy(&data[row_ind][offset], R->physical_state->spin,
            sizeof(double[R->num_pn_particles][3]));
 }
 
@@ -912,27 +919,32 @@ static void finish_gbs_comm(MPI_Request *requests, int request_index,
     timer_stop(&R->perf->time_gbscomm);
 }
 
-static double get_n_double(int i) { return (2.0 * (i + 1.0)); }
 static void extrapolate_single_variable(double *y, double yscal, const int N,
                                         double *result, double *error,
                                         double *error_lower_order) {
-    double gbsS[N][N];
+    // Aitken--Neville extrapolation, e.g. ch. II.9 eq. (9.10) of the Hairer et
+    // al. book. Index labels and their order differ here, and obviously
+    // indexing is 0-based.
+    double T[N][N];
     for (int i = 0; i < N; i++) {
-        gbsS[i][0] = y[i];
+        T[0][i] = y[i];
     }
-    for (int j = 1; j < N; j++) {
-        for (int i = 0; i < N - j; i++) {
-            double nterm = pow(get_n_double(i + j) / get_n_double(i), 2);
-            gbsS[i][j] =
-                (nterm * gbsS[i + 1][j - 1] - gbsS[i][j - 1]) / (nterm - 1.0);
+    for (int j = 0; j < N - 1; j++) {
+        for (int i = j + 1; i < N; i++) {
+            const double nterm = pow((double)num_gbs_substeps(i + 1)
+                                         / (double)num_gbs_substeps(i - j),
+                                     2);
+            // Simplified form of (9.10) which seems to behave better
+            // numerically.
+            T[j + 1][i] = (nterm * T[j][i] - T[j][i - 1]) / (nterm - 1.0);
         }
     }
-    *result = gbsS[0][N - 1];
-    *error = fabs(gbsS[0][N - 1] - gbsS[0][N - 2]) / yscal;
-    *error_lower_order = fabs(gbsS[0][N - 2] - gbsS[0][N - 3]) / yscal;
+    *result = T[N - 1][N - 1];
+    *error = fabs(T[N - 1][N - 1] - T[N - 2][N - 2]) / yscal;
+    *error_lower_order = fabs(T[N - 2][N - 2] - T[N - 3][N - 3]) / yscal;
 }
 
-// Factor for next stepsize, from the Hairer et al. diff. eq. book
+// Factor for next stepsize, from the Hairer et al. book.
 static double gbs_new_stepsize_fac(double scaled_err, int k) {
     return 0.94 * pow(0.65 / scaled_err, 1.0 / (2 * k - 1));
 }
