@@ -27,9 +27,9 @@ endif()
 project(ketju-integrator C CXX)
 
 set(PROJECT_NAME "Ketju-integrator")
-set(PROJECT_COPYRIGHT_YEARS "2019-2020")
-set(PROJECT_VERSION_MAJOR 0)
-set(PROJECT_VERSION_MINOR 1)
+set(PROJECT_COPYRIGHT_YEARS "2019-2022")
+set(PROJECT_VERSION_MAJOR 1)
+set(PROJECT_VERSION_MINOR 0)
 set(PROJECT_VERSION_PATCH 0)
 set(PROJECT_VERSION_TWEAK -dev)
 set(PROJECT_VERSION_STRING "${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}.${PROJECT_VERSION_PATCH}${PROJECT_VERSION_TWEAK}")
@@ -114,20 +114,20 @@ target_link_libraries(nbody ketju-integrator)
 # Python shim
 add_subdirectory("python_bindings")
 
-## Generate install cmake files
-##
-#include(CMakePackageConfigHelpers)
+# Generate install cmake files
 #
-#write_basic_package_version_file(
-#    "${MAINFOLDER}/ketju-integrator-config-version.cmake"
-#    VERSION ${PROJECT_VERSION_STRING}
-#    COMPATIBILITY AnyNewerVersion
-#)
-#
-#export(TARGETS ketju-integrator
-#    FILE "${MAINFOLDER}/ketju-integrator-targets.cmake"
-#)
-#
+include(CMakePackageConfigHelpers)
+
+write_basic_package_version_file(
+    "${MAINFOLDER}/ketju-integrator-config-version.cmake"
+    VERSION ${PROJECT_VERSION_STRING}
+    COMPATIBILITY AnyNewerVersion
+)
+
+export(TARGETS ketju-integrator
+    FILE "${MAINFOLDER}/ketju-integrator-config.cmake"
+)
+
 ## unit tests if enabled
 option(UNIT_TESTS "Build and run unit-tests" ON)
 if(UNIT_TESTS)
@@ -135,34 +135,3 @@ if(UNIT_TESTS)
 endif()
 
 
-##
-## Documentation Target
-#
-#option(BUILD_DOC "Build Doxygen documentation" ON)
-#
-#if (BUILD_DOC)
-## check if Doxygen is installed
-#    find_package(Doxygen)
-#    if (DOXYGEN_FOUND)
-#        # set input and output files for autogeneration
-#        set(DOXYGEN_IN ${MAINFOLDER}/docs/Doxyfile.in)
-#        set(DOXYGEN_OUT ${MAINFOLDER}/docs/Doxyfile)
-#
-#        # generate the Doxyfile
-#        configure_file(${DOXYGEN_IN} ${DOXYGEN_OUT} @ONLY)
-#
-#        # generate mainpage.md
-#        configure_file(${MAINFOLDER}/docs/mainpage.md.in
-#                       ${MAINFOLDER}/docs/mainpage.md
-#                      )
-#
-#        add_custom_target( doc_doxygen ALL
-#                           COMMAND ${DOXYGEN_EXECUTABLE} ${DOXYGEN_OUT}
-#                           WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-#                           COMMENT "Generating API documentation with Doxygen"
-#                           VERBATIM )
-#    else (DOXYGEN_FOUND)
-#        message(
-#            "Doxygen not found, skipping generation of documentation")
-#    endif (DOXYGEN_FOUND)
-#endif (BUILD_DOC)

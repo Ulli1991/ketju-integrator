@@ -51,6 +51,8 @@ Makefile
 cmake_install.cmake
 install_manifest.txt
 CTestTestfile.cmake
+ketju-integrator-config-version.cmake
+ketju-integrator-config.cmake
 
 #OSX files
 .DS_Store

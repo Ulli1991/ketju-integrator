@@ -38,11 +38,20 @@ The public interface of the library is included in the file
 `include/ketju_integrator/ketju_integrator.h`,
 so in your C or C++ code add  
 `#include <ketju_integrator/ketju_integrator.h>`  
-and add  
-`-I/path/to/include/`  
-to your compiler flags.  
-To link the library, add  
-`-L/path/to/lib -lketju-integrator`  
+to use the definitions.
+
+If you're building your project with `cmake`, you can use the following commands
+in your `CMakeLists.txt` to add the necessary include and linker flags:  
+
+    set(ketju-integrator_DIR "/path/to/new-ketju-integrator/") 
+    find_package(ketju-integrator 1.0 REQUIRED)  
+    add_executable(nbody "main.c") # using the nbody program as an example  
+    target_link_libraries(nbody ketju-integrator)
+
+Otherwise simply add (assuming gcc/clang)   
+`-I/path/to/new-ketju-integrator/include/`  
+to your compiler flags and    
+`-L/path/to/new-ketju-integrator/lib -lketju-integrator`  
 to your linker flags.
 
 
@@ -55,6 +64,10 @@ running the integrator in subprocesses with MPI.
 An example of using the bindings is in
 `python_bindings/ketju_integrator_example.py`.
 For more convenient usage add the `python_bindings` directory to the `PYTHONPATH`.
+
+These bindings may not work on all systems, as internally the code calls `mpirun`
+to launch the integrator subprocess.
+They might however be useful for small experiments on e.g. desktop systems.
 
 ## License
 
