@@ -34,6 +34,7 @@ class CIntegratorOptions(ctypes.Structure):
     _fields_ = [
         ('gbs_kmax', ctypes.c_int),
         ('gbs_relative_tolerance', ctypes.c_double),
+        ('gbs_absolute_tolerance', ctypes.c_double),
         ('output_time_relative_tolerance', ctypes.c_double),
         ('output_time_absolute_tolerance', ctypes.c_double),
         ('PN_flags', ctypes.c_uint),
