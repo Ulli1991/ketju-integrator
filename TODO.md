@@ -8,7 +8,7 @@ Optimization
 - The divide and conquer code has a lot of dynamic allocation, which might be
   avoidable. May not be significant for performance, though.
 
-- Currently the timers do not capture enough things, for large task numbers some
+? Currently the timers do not capture enough things, for large task numbers some
   30% of the time is missed from the subcategories
 
 Other

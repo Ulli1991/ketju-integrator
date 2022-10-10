@@ -202,8 +202,8 @@ void ketju_calculate_bh_merger_remnant_properties(
     const double L_isco = 2. / sqrt(3 * r_isco) * (3 * sqrt(r_isco) - 2 * chi);
 
     // Calculate mass loss.
-    // Only use the E_c term, the other term should be small and can't be
-    // modelled so that it would increase the accuracy
+    // Only use the E_c term in Eq. (30), the other term should be small and
+    // can't be modelled so that it would improve accuracy.
     {
         const double k2a = -0.024;
         const double k2d = 0;
@@ -229,8 +229,10 @@ void ketju_calculate_bh_merger_remnant_properties(
         const double eps2 = 0.0050;
         const double eps3 = -0.009;
 
+        // Eq. (33)
         const double E_HU =
             0.0025829 - 0.0773079 / (2 * S0_tilde_para - 1.693959);
+        // Eq. (32)
         const double Ec_para =
             pow(4 * eta, 2)
                 * (E_HU + k2a * delta_m * Delta_tilde_para
@@ -246,6 +248,7 @@ void ketju_calculate_bh_merger_remnant_properties(
                    + k4g * pow(delta_m, 3) * Delta_tilde_para)
             + pow(delta_m, 6) * eta * (1 - E_isco);
 
+        // Eq. (34)
         const double Ec =
             Ec_para
             + pow(4 * eta, 2)
@@ -267,9 +270,9 @@ void ketju_calculate_bh_merger_remnant_properties(
         out->m = m * (1 - Ec);
     }
 
-    // Calculate square of remnant spin magnitude, using only the A_c term.
-    // Spin direction is  assumed to be equal to total angular momentum, which
-    // the paper assures is accurate to within 20 degrees
+    // Calculate square of remnant spin magnitude, using only the A_c term in
+    // Eq. (31). Spin direction is  assumed to be equal to total angular
+    // momentum, which the paper assures is accurate to within 20 degrees.
     {
 
         const double L0 = 0.686710;
