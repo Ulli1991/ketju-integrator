@@ -129,7 +129,7 @@ export(TARGETS ketju-integrator
 )
 
 ## unit tests if enabled
-option(UNIT_TESTS "Build and run unit-tests" ON)
+option(UNIT_TESTS "Build and run unit-tests" OFF)
 if(UNIT_TESTS)
     add_subdirectory("unit-tests")
 endif()
