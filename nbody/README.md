@@ -41,7 +41,8 @@ and giving as arguments the IC file, the integration time, number of output time
 spread over the integration time, and the integration tolerance to use.
 
 For example, assuming current working directory is the repository main directory:   
-`mpirun -np 2 bin/nbody nbody/nbody_sample_ic.txt 1e-3 10 1e-8`
+`mpirun -np 2 bin/nbody nbody/nbody_sample_ic.txt 1e-3 10 1e-8`  
+to run the code using two MPI tasks.
 
 
 Output

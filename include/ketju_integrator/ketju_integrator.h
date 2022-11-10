@@ -137,6 +137,12 @@ struct ketju_integration_options {
 };
 
 // Default values applied when creating the system
+// Note that when including this header in C++ code, this only works if the 
+// compiler extends the standard to support designated initializers,
+// which aren't standard C++ before C++20.
+// Both GCC (>=8.1) and Clang support this.
+// But if necessary, these definitions could be guarded with ifdef __cplusplus
+// to hide them from C++ code while allowing internal use.
 static const struct ketju_integration_options
     ketju_default_integration_options = {
         .gbs_kmax = 10,
@@ -156,33 +162,52 @@ static const struct ketju_integration_options
         .enable_bh_merger_kicks = true,
 };
 
+// The unit system used by the integrator is specified by setting the values of
+// these constants.
 struct ketju_natural_constants {
-    double G;
-    double c;
+    double G; // Gravitational constant
+    double c; // Speed of light
 };
-// Gadget-3 default values for now
+
+// Default unit system based on the Gadget-2/3 default unit system:
+// Mass in 10^10 Msol (= 1.989e43 g), length in kpc, velocity in cm/s.
+// The resulting unit of time is ~ 0.978 Gyr.
+// The value of G is based on the value of 6.678e-8 in cgs units.
 static const struct ketju_natural_constants ketju_default_natural_constants = {
     .G = 43007.1, .c = 299792.0};
 
 // The physical state of the system.
-// The coordinate system is arbitrary, but it is numerically favorable to have
-// the CoM of the system stay near the origin.
-// Note that the PN corrections depend slightly on the coordinate velocities
-// so that different choices of the reference frame lead to slightly different
-// results. The PN corrected equations of motion are approximately
+// The values for the ith particle are stored in the ith element of each array,
+// with the num_pn_particles PN-enabled particles (BHs) coming first.
+// The order of the particles stays the same during the integration,
+// but mergers cause the data to be shifted in order to remove the merged
+// particles. If you want to track individual particles over mergers, add IDs
+// using the particle_extra_data field of ketju_system.
+// 
+// The origin of the coordinate system can be set freely,
+// but it is numerically favorable to have the CoM of the system stay near the
+// origin. Note that the PN corrections depend slightly on the coordinate
+// velocities so that different choices of the reference frame lead to slightly
+// different results. The PN corrected equations of motion are approximately
 // Lorentz-invariant, while the standard Newtonian equations are
 // Galilei-invariant, so for general systems mixing these particle types there
 // is no real 'correct' way to choose the coordinates. The differences caused by
 // these effects are very small for reasonable choices of rest frame.
+//
+// Spins for PN particles (BHs) are stored as the spin angular momentum vector,
+// with units of (length)*(mass)*(velocity),
+// not to be confused with the spin length scale a or the dimensionless spin
+// parameter chi that are often used when discussing black holes.
 struct ketju_system_physical_state {
-    double time;
-    double *mass;
-    double (*pos)[3];
-    double (*vel)[3];
-    double (*spin)[3]; // spin only for pn particles
+    double time; // Physical time of the system.
+    double *mass; // array of length num_particles
+    double (*pos)[3]; // particle positions: array of shape [num_particles][3]
+    double (*vel)[3]; // particle velocities: shape [num_particles][3]
+    double (*spin)[3]; // PN particle spins: shape [num_pn_particles][3]
 };
 
 struct ketju_performance_counters {
+// Timers for different parts of the code
     double time_force;
     double time_force_comm;
     double time_coord;
@@ -194,12 +219,12 @@ struct ketju_performance_counters {
     // Sub-timers for DnC Prim, time included in time_mst also.
     double tprim1, tprim2, tprim3, tprim4, tprim5;
 
-    int successful_steps;
-    int failed_steps;
+    int successful_steps; // Number of accepted steps
+    int failed_steps; // Number of failed steps
     double total_work; //< ~ Number of force evaluations done
     double relative_energy_error;
     //< Relative change in the energy of the system.
-    //  Gives information on accuracy only when PN terms are disabled
+    //  Gives information on accuracy only when PN terms are disabled.
 };
 
 struct ketju_bh_merger_info {
@@ -235,6 +260,8 @@ struct ketju_system {
     //< Optional extra data (e.g. IDs) associated with the particles, which is
     // reordered in case of mergers so that the removed particle data are found
     // at the end of the array.
+    // If you set this pointer, you must also set particle_extra_data_elem_size
+    // so that the reordering of the data during mergers is done correctly.
     // The caller is responsible for managing this memory.
 
     size_t particle_extra_data_elem_size;
@@ -267,15 +294,17 @@ void ketju_free_system(struct ketju_system *R);
 // Compute the centre of mass of the system, puts results in CoM_pos and CoM_vel
 void ketju_compute_CoM(const struct ketju_system *R, double CoM_pos[3],
                        double CoM_vel[3]);
-// Shift the coordinate origin of the system to the CoM, outputs the original
-// values
+// Shift the reference frame origin of the system to the CoM.
+// Outputs the CoM coordinates in the original frame in CoM_pos and CoM_vel.
 void ketju_into_CoM_frame(struct ketju_system *R, double CoM_pos[3],
                           double CoM_vel[3]);
 // Runs the integrator for a given time interval.
 // The time interval can be negative for backwards-in-time integration.
 void ketju_run_integrator(struct ketju_system *R, double time_interval);
 
-// debug helpers
+// Debug helpers for dumping the state to a file and reading it later for
+// analysis. The state is dumped in case of some fatal errors, such as when the
+// potential energy of the system is not finite.
 void ketju_debug_dump_integrator_state(const struct ketju_system *R,
                                        const char *fname);
 bool ketju_debug_read_integrator_state(struct ketju_system *R,
