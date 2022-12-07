@@ -223,7 +223,8 @@ struct ketju_performance_counters {
     int failed_steps; // Number of failed steps
     double total_work; //< ~ Number of force evaluations done
     double relative_energy_error;
-    //< Relative change in the energy of the system.
+    //< Relative change in the energy of the system over the last
+    //  ketju_run_integrator call.
     //  Gives information on accuracy only when PN terms are disabled.
 };
 

@@ -15,7 +15,7 @@ Additional details and references are given in the comments within the code.
 ## Building
 The code requires an MPI library/environment (e.g. OpenMPI) to be installed before building.
 
-To build the integrator library, first configure the CMake build system by running
+To build the integrator library, first configure the CMake build system by running  
 ```
     mkdir build
     cd build
@@ -88,15 +88,15 @@ your build system.
 If you're building your code with `cmake`, you can use the following commands
 in your `CMakeLists.txt` to add the necessary include and linker flags:  
 ```cmake
-    set(ketju-integrator_DIR "/path/to/new-ketju-integrator/") 
+    set(ketju-integrator_DIR "/path/to/ketju-integrator/") 
     find_package(ketju-integrator 1.0 REQUIRED)  
     add_executable(nbody "main.c") # using the nbody program as an example  
     target_link_libraries(nbody ketju-integrator)
 ```
 Otherwise, simply add (assuming gcc/clang)   
-`-I/path/to/new-ketju-integrator/include/`  
+`-I/path/to/ketju-integrator/include/`  
 to your compiler flags and    
-`-L/path/to/new-ketju-integrator/lib -lketju-integrator`  
+`-L/path/to/ketju-integrator/lib -lketju-integrator`  
 to your linker flags.
 And naturally you will need to include the necessary MPI flags or use the 
 MPI compiler wrapper to compile your code to link the necessary MPI library.
