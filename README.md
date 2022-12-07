@@ -16,11 +16,11 @@ Additional details and references are given in the comments within the code.
 The code requires an MPI library/environment (e.g. OpenMPI) to be installed before building.
 
 To build the integrator library, first configure the CMake build system by running
-
+```
     mkdir build
     cd build
     cmake .. [CMAKE_OPTIONS]
-
+```
 Configuration options such specific compiler optimization flags can then be
 changed by editing the `CMakeCache.txt` file either directly or using e.g. `ccmake`,
 but doing this is not typically required.
@@ -43,7 +43,7 @@ You also need to include the MPI library in your code and perform the necessary
 initialization for it before calling the integrator.
 
 The general outline of using the integrator looks something like this:
-    
+```C++
     // Set up your MPI environment etc. with mpi_communicator being a communicator
     // over the tasks you want to use for the integration (can be MPI_COMM_WORLD).
     // All the tasks on this communicator must call the following functions and
@@ -79,7 +79,7 @@ The general outline of using the integrator looks something like this:
 
     // Finally free the allocated memory and communicators
     ketju_free_system(&R);
-
+```
 You can have multiple independent integrator systems within your program at the same time,
 as all of the integrator state is contained within the `ketju_system` struct.
 
@@ -87,12 +87,12 @@ Finally, to build your code that uses the integrator, you need to make some chan
 your build system.
 If you're building your code with `cmake`, you can use the following commands
 in your `CMakeLists.txt` to add the necessary include and linker flags:  
-
+```cmake
     set(ketju-integrator_DIR "/path/to/new-ketju-integrator/") 
     find_package(ketju-integrator 1.0 REQUIRED)  
     add_executable(nbody "main.c") # using the nbody program as an example  
     target_link_libraries(nbody ketju-integrator)
-
+```
 Otherwise, simply add (assuming gcc/clang)   
 `-I/path/to/new-ketju-integrator/include/`  
 to your compiler flags and    
