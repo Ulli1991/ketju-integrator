@@ -145,8 +145,15 @@ void ketju_calculate_bh_merger_remnant_properties(
 
     S0_tilde_para = vector_dot(S0_tilde, Lhat);
 
-    // calculate the components of recoil velocity, in km/s
+    // Calculate the components of recoil velocity, in km/s
     // Eq. (37)
+    // Note that this equation appears to have a typo in the leading eta term
+    // in the paper. There it reads 4*pow(eta,2), but using that form gives 
+    // far too low maximum kick values compared to the simulation results
+    // in e.g. table XI. All the other formulae use pow(4*eta,2) as well,
+    // including the closely related eq 19, so it seems that this is the correct
+    // form. The maximal kick values from table XI are also reproduced within
+    // the quoted tolerance using this formula.
     const double v_para =
         pow(4 * eta, 2)
         * (vector_dot(Delta_tilde, n0)
