@@ -3,7 +3,6 @@
 // Licensed under the GPLv3 license.
 // See LICENSE.md or <https://www.gnu.org/licenses/> for details.
 
-
 // Functions for constructing and working with the MST coordinate system
 
 #include <float.h>
@@ -22,6 +21,7 @@
 //////////////////////////////////////////////////////////
 // These functions are intended to be called through the dispatcher function
 // defined in internal.h.
+// See there for explanation of arguments.
 
 // Special cases for small Nd = max_tree_distance
 bool ketju_check_relative_proximity_ND_1(int v1, int v2,
@@ -109,6 +109,8 @@ bool ketju_check_relative_proximity_general(int v1, int v2, const int Nd,
 
     const struct graph_vertex *vertex = R->internal_state->mst->vertex;
 
+    // Some placeholder invalid values to make it easier to spot if the results
+    // are used wrong.
     for (int i = 0; i < Nd; i++) {
         path[i] = -1000;
         sign[i] = 0;
@@ -603,7 +605,8 @@ static void spatialpartition(struct ketju_system *R, int max_leaf_size) {
     octree(R, octd->root_node, max_leaf_size, &label);
 }
 
-static int get_longest(double w[3], int id[3]) {
+// Get the edge index from id with the largest length (weight) given in w.
+static int get_longest_edge(double w[3], int id[3]) {
 
     double L = -1;
     int ind = -1;
@@ -816,7 +819,7 @@ after_loops:;
             w[1] = W[ind[1]].weight;
             w[2] = W[ind[2]].weight;
             if (w[1] < 0 || w[2] < 0) continue;
-            int elong = get_longest(w, ind);
+            int elong = get_longest_edge(w, ind);
 
             flag[elong] = true;
             W[elong].weight *= -1;

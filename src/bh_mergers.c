@@ -3,7 +3,6 @@
 // Licensed under the GPLv3 license.
 // See LICENSE.md or <https://www.gnu.org/licenses/> for details.
 
-
 #include <assert.h>
 #include <math.h>
 #include <stdlib.h>
@@ -35,6 +34,9 @@ struct bh_merger_remnant_properties {
 // on the inplane total spin and difference in spins. The values used in the
 // fits are measured just before merger, whereas we need to use the values at
 // the separation where the merger is triggered.
+// The model also assumes a quasi-circular merger, so in the rare case that the
+// orbit is still eccentric at merger the results will be incorrect by
+// <~25% for the kick velocity (e.g. Radia et al. 2021 arxiv:2101.11015).
 //
 // Note that we don't have access to the exact rest frame of the binary,
 // as the PN CoM velocity formulae implemented in pn.c are only accurate to
@@ -68,15 +70,15 @@ void ketju_calculate_bh_merger_remnant_properties(
     }
 
     // Check that L is non-zero to handle the corner case of a head-on merger
-    // separately. This shouldn't be a common occurrence, but don't want it to
+    // separately. This shouldn't really ever happen, but don't want it to
     // crash then anyway.
     if (L[0] == 0 && L[1] == 0 && L[2] == 0) {
-        // In this case there won't be significant GW emission I guess,
-        // so use Newtonian values
+        // In this case there won't be significant GW emission,
+        // so just use Newtonian values and assume spin conservation.
         out->m = m;
         for (int i = 0; i < 3; ++i) {
             out->vkick[i] = 0;
-            out->S[i] = 0;
+            out->S[i] = in->S1[i] + in->S2[i];
         }
         return;
     }
@@ -148,7 +150,7 @@ void ketju_calculate_bh_merger_remnant_properties(
     // Calculate the components of recoil velocity, in km/s
     // Eq. (37)
     // Note that this equation appears to have a typo in the leading eta term
-    // in the paper. There it reads 4*pow(eta,2), but using that form gives 
+    // in the paper. There it reads 4*pow(eta,2), but using that form gives
     // far too low maximum kick values compared to the simulation results
     // in e.g. table XI. All the other formulae use pow(4*eta,2) as well,
     // including the closely related eq 19, so it seems that this is the correct
@@ -184,7 +186,10 @@ void ketju_calculate_bh_merger_remnant_properties(
     if (v_ortho2 < 0) { v_ortho2 = 0; }
     const double v_ortho = sqrt(v_ortho2);
 
+    // Conversion between the internal unit system defined by the given value of
+    // c and the SI units. The model gives kick velocities in km/s.
     const double km_per_s = c / 2.99792458e5;
+
     // XXX: we will set the parallel component along the direction of
     // original r, since the PN dynamics can't follow the binary until the
     // initial separation of the simulations.
@@ -193,8 +198,10 @@ void ketju_calculate_bh_merger_remnant_properties(
         out->vkick[i] = km_per_s * (v_para * Lhat[i] + v_ortho * n0[i]);
     }
 
-    // for mass loss and spin, we need (dimensionless) energy and angular
+    // For mass loss and spin, we need (dimensionless) energy and angular
     // momentum evaluated at ISCO of Kerr metric, with spin = S_tilde_para.
+    // Formulas are standard, mostly given after Eq. (35) in the corrected arXiv
+    // version.
     const double chi = S_tilde_para;
     const double sign_chi = chi == 0 ? 0 : (chi > 0 ? 1 : -1);
     const double Z1 = 1
@@ -204,9 +211,9 @@ void ketju_calculate_bh_merger_remnant_properties(
     // also dimensionless / in units of system mass
     const double r_isco =
         3 + Z2 - sign_chi * sqrt((3 - Z1) * (3 + Z1 + 2 * Z2));
-    const double E_isco = sqrt(1 - 2. / (3 * r_isco));
-    // Given after Eq. (35) in the corrected arXiv version
     const double L_isco = 2. / sqrt(3 * r_isco) * (3 * sqrt(r_isco) - 2 * chi);
+    // E_isco not given in the paper, but is a standard result.
+    const double E_isco = sqrt(1 - 2. / (3 * r_isco));
 
     // Calculate mass loss.
     // Only use the E_c term in Eq. (30), the other term should be small and
@@ -302,6 +309,8 @@ void ketju_calculate_bh_merger_remnant_properties(
         const double L4h = 0.001629;
         const double L4i = -0.066693;
 
+        // The A_* coefficients have large uncertainties, so no need to bother
+        // with the last decimals.
         const double A_A = 3.0;
         const double A_B = -7.3;
         const double A_D = -2.0;
@@ -316,6 +325,7 @@ void ketju_calculate_bh_merger_remnant_properties(
         const double zeta2 = -0.038;
         const double zeta3 = 0.04;
 
+        // Eq. (35)
         const double alpha_align =
             pow(4 * eta, 2)
                 * (L0 + L1 * S_tilde_para + L2a * delta_m * Delta_tilde_para
@@ -336,6 +346,7 @@ void ketju_calculate_bh_merger_remnant_properties(
             + S_tilde_para * (1 + 8 * eta) * pow(delta_m, 4)
             + eta * L_isco * pow(delta_m, 6);
 
+        // Eq. (36)
         double Ac =
             pow(alpha_align, 2)
             + pow(4 * eta, 2)
@@ -395,6 +406,9 @@ static void merge_bhs(struct ketju_system *R, int i, int j) {
     // CoM quantities.
     // Position using Newtonian formulae, since it's close enough (somewhere
     // between the BHs), but velocity needs PN corrections.
+    // Errors in CoM position insignificant compared to typical
+    // uncertainties/errors in velocity after just a few years even for the most
+    // massive BHs.
     double xcom[3], vcom[3];
     for (int k = 0; k < 3; k++) {
         xcom[k] = (bh_input.m1 * bh_input.x1[k] + bh_input.m2 * bh_input.x2[k])
@@ -486,8 +500,8 @@ int ketju_do_bh_mergers(struct ketju_system *R) {
                     R->physical_state->pos[i][k] - R->physical_state->pos[j][k];
                 r2 += dr * dr;
             }
-            // Simple condition: merge if particles within 6 times their
-            // combined Schwarzschild radii.
+            // Simple condition: merge if particles within a user-specified
+            // factor times their combined Schwarzschild radii.
             double fac = R->options->bh_merger_distance_in_Rs * 2
                          * R->constants->G
                          / (R->constants->c * R->constants->c);

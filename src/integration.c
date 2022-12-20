@@ -3,7 +3,6 @@
 // Licensed under the GPLv3 license.
 // See LICENSE.md or <https://www.gnu.org/licenses/> for details.
 
-
 // Main integration and force calculation functions
 
 #include <float.h>
@@ -108,10 +107,10 @@ static void compute_U(struct ketju_system *R) {
 
     is->U = 0;
     int istart = 0;
-    int CumNumEdge, ThisBlock, jstart;
+    int cum_num, block_size, jstart;
     loop_scheduling_N2(R->num_particles, is->task_info->gbs_group_size,
                        is->task_info->gbs_group_rank, &istart, &jstart,
-                       &ThisBlock, &CumNumEdge);
+                       &block_size, &cum_num);
     int c = 0;
 
     const int Nd = R->options->max_tree_distance;
@@ -127,7 +126,7 @@ static void compute_U(struct ketju_system *R) {
         if (i > istart) { jstart = i + 1; }
 
         for (int j = jstart; j < R->num_particles; j++) {
-            if (c >= ThisBlock) { goto after_loops; }
+            if (c >= block_size) { goto after_loops; }
             if (R->options->no_star_star_gravity && i >= R->num_pn_particles
                 && j >= R->num_pn_particles) {
                 continue;
@@ -180,10 +179,10 @@ static void comp_U_acc_loop_standard(struct ketju_system *R) {
 
     const int istop = R->num_particles;
     const int jstop = R->num_particles;
-    int ThisBlock, CumNumEdge, jstart, istart;
+    int block_size, cum_num, jstart, istart;
     loop_scheduling_N2(R->num_particles, is->task_info->gbs_group_size,
                        is->task_info->gbs_group_rank, &istart, &jstart,
-                       &ThisBlock, &CumNumEdge);
+                       &block_size, &cum_num);
     int c = 0;
     const int Nd = R->options->max_tree_distance;
 
@@ -197,7 +196,7 @@ static void comp_U_acc_loop_standard(struct ketju_system *R) {
         if (i > istart) jstart = i + 1;
 
         for (int j = jstart; j < jstop; j++) {
-            if (c >= ThisBlock) { return; }
+            if (c >= block_size) { return; }
 
             const double r2 =
                 separation_and_r2(R, i, j, dr, Nd, path, sign, &d);
@@ -285,11 +284,10 @@ static void comp_U_acc_loop_softened_star_star(struct ketju_system *R) {
 
     const int istop = R->num_particles;
     const int jstop = R->num_particles;
-    int ThisBlock, CumNumEdge, jstart, istart;
-    loop_scheduling_N2(R->num_particles - R->num_pn_particles,
-                       is->task_info->gbs_group_size,
-                       is->task_info->gbs_group_rank, &istart, &jstart,
-                       &ThisBlock, &CumNumEdge);
+    int block_size, cum_num, jstart, istart;
+    loop_scheduling_N2(
+        R->num_particles - R->num_pn_particles, is->task_info->gbs_group_size,
+        is->task_info->gbs_group_rank, &istart, &jstart, &block_size, &cum_num);
     istart += R->num_pn_particles;
     jstart += R->num_pn_particles;
     int c = 0;
@@ -308,7 +306,7 @@ static void comp_U_acc_loop_softened_star_star(struct ketju_system *R) {
         if (i > istart) jstart = i + 1;
 
         for (int j = jstart; j < jstop; j++) {
-            if (c >= ThisBlock) { return; }
+            if (c >= block_size) { return; }
 
             const double r2 =
                 separation_and_r2(R, i, j, dr, Nd, path, sign, &d);
@@ -387,7 +385,7 @@ static void compute_T(struct ketju_system *R) {
     struct ketju_system_internal_state *const is = R->internal_state;
     struct ketju_system_physical_state *const ps = R->physical_state;
     is->T = 0;
-    // TODO: this might benefit from parallelization for large particle numbers
+
     for (int i = 0; i < R->num_particles; i++) {
         double dv, v2 = 0;
         for (int k = 0; k < 3; k++) {
@@ -483,8 +481,6 @@ static void update_pos(struct ketju_system *R) {
     timer_stop(&R->perf->time_coord);
 }
 
-// TODO this and the above update_pos are very similar to
-// into_Cartesian_from_MST, can they be deduplicated?
 static void update_vel(struct ketju_system *R,
                        enum velocity_type propagated_velocity) {
 
@@ -747,8 +743,7 @@ static void get_gbs_rows_for_groups(struct ketju_system *R,
     memset(group_workloads, 0, sizeof group_workloads);
     int row_ind[num_groups];
     memset(row_ind, 0, sizeof row_ind);
-    // TODO could take into account group sizes also, or even divide the groups
-    // based on the most even division of gbs steps/task
+
     for (int row = k; row > 0; --row) {
         int cost = num_gbs_substeps(row);
         int group_ind = argmin_int(group_workloads, num_groups);
@@ -1131,10 +1126,10 @@ static double estimate_initial_timestep(struct ketju_system *R) {
     struct ketju_system_physical_state *const ps = R->physical_state;
 
     int istart, jstart;
-    int CumNumEdge, ThisBlock;
+    int cum_num, block_size;
     loop_scheduling_N2(R->num_particles, is->task_info->main_group_size,
                        is->task_info->main_group_rank, &istart, &jstart,
-                       &ThisBlock, &CumNumEdge);
+                       &block_size, &cum_num);
 
     const int Nd = R->options->max_tree_distance;
     int d;
@@ -1151,7 +1146,7 @@ static double estimate_initial_timestep(struct ketju_system *R) {
         int Li = mst->vertex[i].level;
         if (i > istart) { jstart = i + 1; }
         for (int j = jstart; j < R->num_particles; j++) {
-            if (c >= ThisBlock) { goto after_loops; }
+            if (c >= block_size) { goto after_loops; }
             if (R->options->no_star_star_gravity && i >= R->num_pn_particles
                 && j >= R->num_pn_particles) {
                 continue;
@@ -1163,6 +1158,9 @@ static double estimate_initial_timestep(struct ketju_system *R) {
             double v2 = 0;
             bool proximity = false;
 
+            // Use MST coordinates or global coordinates depending on
+            // tree proximity. Like in separation_and_r2, but here velocity is
+            // needed as well.
             if (abs(Li - Lj) < Nd) {
                 proximity =
                     ketju_check_relative_proximity(j, i, Nd, R, &d, path, sign);
@@ -1239,7 +1237,6 @@ static double step_total_work(const struct ketju_system *R) {
 }
 
 void ketju_run_integrator(struct ketju_system *R, double time_interval) {
-    // TODO return status/error code?
 
     // special case for when no actual integration is needed
     if (R->num_particles < 2) {

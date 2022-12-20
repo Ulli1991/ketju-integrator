@@ -1,20 +1,18 @@
 // Ketju-integrator (MSTAR)
 // Copyright (C) 2020-2022 Antti Rantala, Matias Mannerkoski, and contributors.
-// 
+//
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
-// 
+//
 // This program is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 // GNU General Public License for more details.
-// 
+//
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
-
-
 
 // The public interface header with all the user-facing types and function
 // prototypes.
@@ -34,10 +32,9 @@ extern "C" {
 
 // Using bitflags for the PN terms allows more fine-grained control of the used
 // terms (e.g. only PN2.5 radiation reaction or only conservative terms).
-// Combine flags with the bitwise or operator |, remove flags from the predefined
-// sets using bitwise and with negation,
-// e.g. KETJU_PN_CONSERVATIVE & ~KETJU_PN_THREEBODY
-// for conservative terms without three-body cross-terms.
+// Combine flags with the bitwise or operator |, remove flags from the
+// predefined sets using bitwise and with negation, e.g. KETJU_PN_CONSERVATIVE &
+// ~KETJU_PN_THREEBODY for conservative terms without three-body cross-terms.
 enum ketju_PN_flags {
     KETJU_PN_NONE = 0,
     KETJU_PN_1_0_ACC = 1 << 0,
@@ -56,7 +53,8 @@ enum ketju_PN_flags {
     KETJU_PN_1_5_SPIN_ACC = 1 << 8,
     KETJU_PN_2_0_SPIN_ACC = 1 << 9,
     KETJU_PN_SPIN_EVOL = 1 << 10,
-    KETJU_PN_SPIN_ALL = 0x700,
+    KETJU_PN_SPIN_ALL =
+        KETJU_PN_1_5_SPIN_ACC | KETJU_PN_2_0_SPIN_ACC | KETJU_PN_SPIN_EVOL,
 
     KETJU_PN_ALL = KETJU_PN_DYNAMIC_ALL | KETJU_PN_SPIN_ALL,
 };
@@ -64,7 +62,7 @@ enum ketju_PN_flags {
 enum ketju_mst_algorithm {
     KETJU_MST_PRIM,
     //< Exact MST construction using Prim's algorithm, the default mode suitable
-    //for most systems.
+    // for most systems.
     KETJU_MST_DIVIDE_AND_CONQUER_PRIM,
     //< Approximate MST construction by splitting the domain into smaller pieces
     // and then combining the sub-trees.
@@ -137,7 +135,7 @@ struct ketju_integration_options {
 };
 
 // Default values applied when creating the system
-// Note that when including this header in C++ code, this only works if the 
+// Note that when including this header in C++ code, this only works if the
 // compiler extends the standard to support designated initializers,
 // which aren't standard C++ before C++20.
 // Both GCC (>=8.1) and Clang support this.
@@ -183,7 +181,7 @@ static const struct ketju_natural_constants ketju_default_natural_constants = {
 // but mergers cause the data to be shifted in order to remove the merged
 // particles. If you want to track individual particles over mergers, add IDs
 // using the particle_extra_data field of ketju_system.
-// 
+//
 // The origin of the coordinate system can be set freely,
 // but it is numerically favorable to have the CoM of the system stay near the
 // origin. Note that the PN corrections depend slightly on the coordinate
@@ -199,15 +197,15 @@ static const struct ketju_natural_constants ketju_default_natural_constants = {
 // not to be confused with the spin length scale a or the dimensionless spin
 // parameter chi that are often used when discussing black holes.
 struct ketju_system_physical_state {
-    double time; // Physical time of the system.
-    double *mass; // array of length num_particles
-    double (*pos)[3]; // particle positions: array of shape [num_particles][3]
-    double (*vel)[3]; // particle velocities: shape [num_particles][3]
+    double time;       // Physical time of the system.
+    double *mass;      // array of length num_particles
+    double (*pos)[3];  // particle positions: array of shape [num_particles][3]
+    double (*vel)[3];  // particle velocities: shape [num_particles][3]
     double (*spin)[3]; // PN particle spins: shape [num_pn_particles][3]
 };
 
 struct ketju_performance_counters {
-// Timers for different parts of the code
+    // Timers for different parts of the code
     double time_force;
     double time_force_comm;
     double time_coord;
@@ -220,8 +218,8 @@ struct ketju_performance_counters {
     double tprim1, tprim2, tprim3, tprim4, tprim5;
 
     int successful_steps; // Number of accepted steps
-    int failed_steps; // Number of failed steps
-    double total_work; //< ~ Number of force evaluations done
+    int failed_steps;     // Number of failed steps
+    double total_work;    //< ~ Number of force evaluations done
     double relative_energy_error;
     //< Relative change in the energy of the system over the last
     //  ketju_run_integrator call.

@@ -3,7 +3,6 @@
 // Licensed under the GPLv3 license.
 // See LICENSE.md or <https://www.gnu.org/licenses/> for details.
 
-
 // Functions related to the post-Newtonian corrections for BHs.
 
 #include <string.h>
@@ -21,6 +20,7 @@ inline static void particle_separation(const struct ketju_system *R, int i,
     int sign[Nd];
     int d;
 
+    // Use MST or Cartesian coordinates depending on distance in the tree
     if (ketju_check_relative_proximity(i, j, Nd, R, &d, path, sign)) {
         for (int k = 0; k < 3; k++) {
             rv[k] = 0;
@@ -150,7 +150,7 @@ static void compute_PN_acc_single(struct ketju_system *R, int i,
         const double vijnij = vector_dot(vv_ij, nv_ij);
 
         if (flags & KETJU_PN_1_0_ACC) {
-            // Eq. 4.11a from Thorne & Hartle (1985)  without the Newtonian part
+            // Eq. 4.11a from Thorne & Hartle (1985) with the Newtonian part
             // removed and factors of c2, G added. The index substitutions are
             // K->i, A->j, B,C->k. Sign changes have been made to account for
             // the different directions of nv_ij vs n_AK etc.
@@ -185,15 +185,20 @@ static void compute_PN_acc_single(struct ketju_system *R, int i,
                     }
                 }
             } else {
-                // the k=j part from above
+                // The two-body contributions from the above expressions,
+                // equivalent to the non-velocity dependent part in Eq. 4.18a.
+                // The k=j part from above
                 nij_factor -= 4. * G * mj / rij;
-                // the k=i part from above
+                // The k=i part from above
                 nij_factor -= 5. * G * mi / rij;
             }
 
             nij_factor *= -G * mj / (rij2 * c2);
+
+            // Here 4*vijnij + vjnij = 4*vinij - 3*vjnij
             const double vij_factor =
                 G * mj / (rij2 * c2) * (4. * vijnij + vjnij);
+
             for (int l = 0; l < 3; ++l) {
                 acc[l] += nij_factor * nv_ij[l] + vij_factor * vv_ij[l];
             }
@@ -269,12 +274,14 @@ static void compute_PN_acc_single(struct ketju_system *R, int i,
                     buffer[l] += factor * v_diffxnij[l];
                 }
 
-                // Then N_Q (4.17c) using (1.7) and omitting the cross product
+                // Then N_Q (4.17c) using (1.7) and factoring out the cross
+                // product
                 factor = 3 * G * mj / (rij3 * mi * c2) * nijSi;
                 for (int l = 0; l < 3; ++l) {
                     buffer[l] += factor * nv_ij[l];
                 }
 
+                // Finally the cross product with the spin
                 double sder[3];
                 vector_cross(buffer, spin[i], sder);
                 for (int l = 0; l < 3; ++l) {
@@ -567,7 +574,10 @@ void ketju_binary_PN_CoM_velocity(struct ketju_system *R, int i, int j,
     }
 }
 
-// helper used above
+// Helper used above.
+// Calculates the momentum contribution from a single particle
+// into CoM_p and returns the effective mass of the particle corrected with
+// binding energy.
 static double binary_PN_CoM_momentum_single_contribution(struct ketju_system *R,
                                                          int i, int j,
                                                          double CoM_p[3]) {
@@ -620,10 +630,10 @@ static double binary_PN_CoM_momentum_single_contribution(struct ketju_system *R,
     double vi_fac = mi;
     double nij_fac = 0;
 
-    // Spin independend part.
+    // Spin independent part.
     // From de Andrade et al. 2001 Class. Quantum Grav. 18 753
     // doi:10.1088/0264-9381/18/5/301
-    // eq. 4.2 with the gauge transform applied to remove the log terms at 3PN
+    // eq. 4.3 with the gauge transform applied to remove the log terms at 3PN
     // level.
 
     if (flags & KETJU_PN_1_0_ACC) {
@@ -678,10 +688,9 @@ static double binary_PN_CoM_momentum_single_contribution(struct ketju_system *R,
              + G3 * mi3 * mj / rij3
                    * (-46517. / 840. * vinij
                       + 34547. / 840. * vjnij
-                      // I think the gauge transform only introduces this
-                      // term, and the sign should be this way to cancel the log
-                      // terms. In any case, the error will not be large
-                      // even if this is slightly wrong.
+                      // This following term is what comes out of the gauge
+                      // transform in addition to the terms that cancel out the
+                      // log() terms.
                       + 22. / 3. * (vinij - vjnij)))
             / c6;
 

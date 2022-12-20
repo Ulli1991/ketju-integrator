@@ -3,7 +3,6 @@
 // Licensed under the GPLv3 license.
 // See LICENSE.md or <https://www.gnu.org/licenses/> for details.
 
-
 // Header for internal implementation details
 
 #ifndef KETJU_INTEGRATOR_INTERNAL_H
@@ -127,11 +126,11 @@ struct ketju_system_internal_state {
     struct spanning_tree_coordinate_system *mst;
     struct octree_data *octree_data;
 
-    double U; // potential energy
-    double T;
-    double B;
+    double U; // potential energy (Newtonian)
+    double T; // kinetic energy (Newtonian)
+    double B; // binding energy (=T+U), evolved separately during kicks
 
-    int gbs_k;
+    int gbs_k; // number of different substep divisions for extrapolation
 
     double (*aux_vel)[3];
     double (*acc)[3];    // velocity independent acceleration
@@ -153,9 +152,7 @@ struct ketju_system_internal_state {
 static inline void timer_start(double *timer) { *timer -= MPI_Wtime(); }
 static inline void timer_stop(double *timer) { *timer += MPI_Wtime(); }
 
-// for exiting on catastrophic errors
-// TODO most uses now could be replaced with error codes allowing potentially
-// recovering from errors during integration / saving the state so far.
+// For exiting on catastrophic errors
 static inline void terminate(const char *msg) {
     fprintf(stderr, "%s\n", msg);
     fflush(stderr);
@@ -209,7 +206,7 @@ static inline void loop_scheduling_N2(int N, int Nt, int task, int *istart,
                                       int *jstart, int *block_size,
                                       int *cum_num) {
     int Np = (N * (N - 1)) / 2;
-    int block = (int)floor(Np / Nt);
+    int block = floor(Np / Nt);
     int limit = (block + 1) * Nt - Np;
     int cumN;
     if (task < limit) {
@@ -220,11 +217,10 @@ static inline void loop_scheduling_N2(int N, int Nt, int task, int *istart,
         *block_size = block + 1;
     }
 
-    double drow = 1.0 * N - 0.5
-                  - 0.5 * sqrt((1.0 - 2.0 * N) * (1.0 - 2.0 * N) - 8.0 * cumN);
-    int row = (int)floor(drow);
-    int rowstart =
-        (int)round(-0.5 * (1.0 * row + 1.0) * (row - 2.0 * N) - 1.0 * N);
+    int row =
+        floor(1.0 * N - 0.5
+              - 0.5 * sqrt((1.0 - 2.0 * N) * (1.0 - 2.0 * N) - 8.0 * cumN));
+    int rowstart = round(-0.5 * (1.0 * row + 1.0) * (row - 2.0 * N) - 1.0 * N);
     *istart = row;
     *jstart = cumN - rowstart + row + 1;
     *cum_num = cumN;
@@ -256,6 +252,13 @@ bool ketju_check_relative_proximity_ND_1(int v1, int v2,
                                          const struct ketju_system *R, int *d,
                                          int path[1], int sign[1]);
 
+// Are vertices v1 and v2 within Nd steps from each other in the tree.
+// If yes, returns true and sets *d to the number of steps (distance) in the
+// tree, the first *d-1 entries in path to the edges that need to be traversed
+// in the tree, and the first *d-1 entries in sign to the sign of the direction
+// the edge is traversed in.
+// Otherwise returns false and the output values are left in some unspecified
+// state.
 static inline bool ketju_check_relative_proximity(int v1, int v2, const int Nd,
                                                   const struct ketju_system *R,
                                                   int *d, int path[/*Nd*/],
