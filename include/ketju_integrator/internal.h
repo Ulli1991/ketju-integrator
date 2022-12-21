@@ -126,9 +126,9 @@ struct ketju_system_internal_state {
     struct spanning_tree_coordinate_system *mst;
     struct octree_data *octree_data;
 
-    double U; // potential energy (Newtonian)
+    double U; // minus potential energy (Newtonian)
     double T; // kinetic energy (Newtonian)
-    double B; // binding energy (=T+U), evolved separately during kicks
+    double B; // binding energy (=U-T), evolved separately during kicks
 
     int gbs_k; // number of different substep divisions for extrapolation
 
