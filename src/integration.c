@@ -1276,8 +1276,10 @@ void ketju_run_integrator(struct ketju_system *R, double time_interval) {
 
     compute_total_energy(R);
 
+    // Let's not try to step over whole interval in one go for safety,
+    // even if the timescale estimate would allow it.
     double dt = copysign(1, time_interval)
-                * fmin(estimate_initial_timestep(R), fabs(time_interval) / 10);
+                * fmin(estimate_initial_timestep(R), fabs(time_interval) / 2);
     double Hstep = dt * R->internal_state->U;
     // set the start point to 0 for better accuracy when the t_start is large
     const double t_start = R->physical_state->time;
