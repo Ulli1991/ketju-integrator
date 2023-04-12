@@ -15,11 +15,16 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 # To avoid depending on additional mpi libraries, for this example the mpi
-# setup is handled using some functions from the bindings.
+# setup is handled using some functions from the bindings shim.
 # For more serious use, consider using something like mpi4py.
+# With mpi4py you only need to do
+# 
+# from mpi4py import MPI
+# mpi_rank = MPI.COMM_WORLD.Get_rank()
+# 
+# and can remove the init and finalize calls that use the shim
 
 from ketju_integrator.bindings import shim
-
 mpi_rank = shim.init_mpi()
 
 # Initial state of the system

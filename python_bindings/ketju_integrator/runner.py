@@ -2,6 +2,13 @@
 # Copyright (C) 2020-2023 Matias Mannerkoski and contributors.
 # Licensed under the GPLv3 license.
 # See LICENSE.md or <https://www.gnu.org/licenses/> for details.
+
+"""
+A helper module to run the integrator using subprocesses.
+Launched from the run_integrator() and load_state_dump() functions,
+and communicates with the main process using pickle and piped stdout.
+"""
+
 import sys
 import pickle
 import ctypes

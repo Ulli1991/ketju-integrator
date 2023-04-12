@@ -113,7 +113,7 @@ running the integrator in subprocesses with MPI, or by running python directly w
 Examples of using the bindings are given in
 `python_bindings/ketju_integrator_example.py` and `python_bindings/ketju_integrator_example_mpi.py`.
 After building the library as described above,
-you can install install the python bindings with `pip` by running `python3 -m pip install --user python_bindings/`
+you can install install the python bindings with `pip` by running `python3 -m pip install --user ./python_bindings/`
 (you can omit `--user` if in a venv), you may need to first upgrade `pip` with
 `python3 -m pip install --upgrade pip`.
 
