@@ -165,8 +165,8 @@ class State:
 
         if spin is not None:
             self.spin = np.atleast_2d(spin)
-            if self.spin.shape != self.pos.shape:
-                raise ValueError("spin must have shape (len(mass), 3)")
+            if self.spin.shape[0] > self.pos.shape[0] or self.spin.shape[1] != 3:
+                raise ValueError("spin must have shape (N, 3), N must be at most the total number of particles")
         else:
             self.spin = None
         if ids is None:

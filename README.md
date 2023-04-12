@@ -117,6 +117,9 @@ you can install install the python bindings with `pip` by running `python3 -m pi
 (you can omit `--user` if in a venv), you may need to first upgrade `pip` with
 `python3 -m pip install --upgrade pip`.
 
+The `ketju_utils` package included in the `gadget4-ketju` repository includes
+some utilities for analysing the integrator output.
+
 ## Test suite
 
 If you are making changes to the integrator code itself, it is useful to also
