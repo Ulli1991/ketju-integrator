@@ -4,9 +4,13 @@
 # See LICENSE.md or <https://www.gnu.org/licenses/> for details.
 
 """
-A simple example of using the bindings with two BHs.
-Run from this directory or with this directory on the python 
+A simple example of using the bindings with two BHs
+using subprocesses to run the calculation.
+Run like any other python script.
+Run either with the module installed or from this directory or with this directory on the python 
 search path for the below import to work.
+This subprocess mode may not work in all environments,
+see the mpi mode example in that case.
 """
 from ketju_integrator import *
 

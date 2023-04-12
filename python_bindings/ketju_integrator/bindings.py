@@ -1,11 +1,10 @@
 # Ketju-integrator Python bindings
-# Copyright (C) 2020-2022 Matias Mannerkoski and contributors.
+# Copyright (C) 2020-2023 Matias Mannerkoski and contributors.
 # Licensed under the GPLv3 license.
 # See LICENSE.md or <https://www.gnu.org/licenses/> for details.
 
 """
-Simple bindings that allow running the integrator in parallel from a standard 
-python instance through the use of subprocesses.
+Simple bindings that allow running the integrator.
 """
 import subprocess
 import io
@@ -13,7 +12,6 @@ import os
 import sys
 import enum
 import ctypes
-from ctypes.util import find_library
 import pickle
 
 import numpy as np
@@ -209,7 +207,6 @@ class State:
         system.particle_extra_data_elem_size = ctypes.sizeof(ids_ctype)
         return id_storage
 
-_this_file = os.path.realpath(__file__)
 
 # Running this file as main results in the State objects being pickled as
 # __main__.State, and unpickling fails unless the State class is imported to
@@ -225,38 +222,65 @@ def _unpickle_subprocess_output(output):
     return _SubprocessUnpickler(io.BytesIO(output)).load()
         
 
-def run_integrator(instate, ts, nproc=1, c=1., G=1., **integrator_options):
+def run_integrator(instate, ts, c=1., G=1., nproc=1, mpi_rank=None, **integrator_options):
     """
     Run the integrator starting from the State in instate storing states at the
-    times given in ts using nproc tasks.
-    Options for the integration can be given as keyword arguments matching the
-    names of the options struct members.
-    Returns a dict containing a list of State objects at the requested times and
-    the performance counters from the integrator.
+    times given in ts.
+
+    Can be run in two modes:
+        subprocess mode (default): launches nproc processes using mpirun to perform the integration,
+            communicating with them through their stdout. Not very robust in cluster environments,
+            but allows easy running on typical desktop machines e.g. from an interactive session.
+        MPI mode: specified by setting mpi_rank to an integer value specifying the current rank.
+            In this case this function is called from python processes launched with e.g. mpirun,
+            and the MPI context has been initialized and is managed using e.g. mpi4py.
+            All tasks in COMM_WORLD must call this function, but on tasks with mpi_rank != 0
+            all the other arguments can be set to None and are ignored.
+
+    Arguments
+    ---------
+    instate: A state object describing the system at the initial time t=0.
+    ts: an array of times t for output states from the integration.
+    c,G: speed of light and gravitational constant to use for the integration, defines the unit system used.
+    nproc: how many processes to use for the integration, only relevant for subprocess mode.
+    mpi_rank: the rank of the current task in MPI_COMM_WORLD when run in MPI mode.
+    **integrator_options: any options that can be set in the ketju_integrator_options struct in C.
+
+    Returns
+    -------
+    A dict with keys:
+        'states': a list of State objects at the requested times
+        'perf': a dict of the performance counters from the integrator
+        'merger_infos': a list of dicts of describing the BH mergers during the integration.
+
+    Only returned on the root task in when run in MPI mode.
     """
-    data = dict(ts=ts, instate=instate, integrator_options=integrator_options, c=c, G=G)
+    if mpi_rank is None:
+        data = dict(ts=ts, instate=instate, integrator_options=integrator_options, c=c, G=G)
 # Run this file using multiple tasks with mpirun. The below run_main() function gets called
-#TODO mpirun might not be the correct one to call on all systems, needs to be specifiable.
+#TODO mpirun might not be the correct one to call on all systems, maybe make specifiable.
 # Pass the input data through stdin, get the output data through stdout as pickled objects
-#XXX: killing/interrupting the parent task can leave the workers behind,
+#XXX: killing/interrupting the parent task can sometimes leave the workers behind,
 # even though mpirun should handle killing them in that case. How to fix that?
-    ret = subprocess.check_output(['mpirun', '-np', str(nproc), 'python3',
-                                   _this_file, "integrate"],
-                    input=pickle.dumps(data, protocol=pickle.HIGHEST_PROTOCOL))
-    return _unpickle_subprocess_output(ret)
+        ret = subprocess.check_output(['mpirun', '-np', str(nproc), sys.executable,
+                                       '-m', 'ketju_integrator.runner',
+                                       'integrate'],
+                        input=pickle.dumps(data, protocol=pickle.HIGHEST_PROTOCOL))
+        return _unpickle_subprocess_output(ret)
+
+    else:
+        return _integrate(mpi_rank, instate, ts, c, G, integrator_options)
 
 def load_state_dump(fname):
     return _unpickle_subprocess_output(
-            subprocess.check_output(['python3', _this_file,
+            subprocess.check_output([sys.executable, '-m', 'ketju_integrator.runner',
                                      'load_dump', fname]))
 
-# Executed in the subtasks
 
 def _load_shim():
 # Load the shim library
-#TODO: this hardcoded path isn't very robust
-    shim_file = os.path.join(os.path.dirname(_this_file), 
-                             "../../lib/libketju_integrator_python_shim.so")
+    _this_dir = os.path.dirname(os.path.realpath(__file__))
+    shim_file = os.path.join(_this_dir, "libketju_integrator_python_shim.so")
     shim = ctypes.cdll.LoadLibrary(shim_file)
     shim.init_system.argtypes = [ctypes.POINTER(CSystem), ctypes.c_int, ctypes.c_int]
     shim.comm_initial_data.argtypes = [ctypes.POINTER(CSystem)]
@@ -266,8 +290,9 @@ def _load_shim():
     shim.run_integrator.argtypes = [ctypes.POINTER(CSystem), ctypes.c_double]
     shim.load_state_dump.argtypes = [ctypes.POINTER(CSystem), ctypes.c_char_p]
     return shim
+shim = _load_shim()
 
-def _integrate():
+def _integrate(this_task, instate, ts, c, G, integrator_options):
 # Since I didn't want to require an additional dependency like mpi4py for the
 # minor amount of comms needed for setup, they are instead handled by the shim
 # library and some values here are actually meaningful only on the root task
@@ -275,10 +300,6 @@ def _integrate():
     system = CSystem()
     n_pn_part = n_other_part = -1
     if this_task == 0:
-# Read the input data
-        indata = pickle.loads(sys.stdin.buffer.read())
-        instate = indata['instate']
-        ts = indata['ts']
         num_ts = len(ts)
         n_pn_part = len(instate.spin) if instate.spin is not None else 0
         n_other_part = len(instate.pos) - n_pn_part
@@ -289,9 +310,9 @@ def _integrate():
     if this_task == 0:
 # set the initial values
         id_storage = instate.to_c_system(system)
-        system.constants[0].c = indata['c']
-        system.constants[0].G = indata['G']
-        for k,v in indata['integrator_options'].items():
+        system.constants[0].c = c
+        system.constants[0].G = G
+        for k,v in integrator_options.items():
             setattr(system.options[0], k, v)
 # The ids are only handled on the root task.
 # This is fine since all the extra data management stuff is handled separately
@@ -311,42 +332,12 @@ def _integrate():
 # The integration time is communicated in the shim.
             shim.run_integrator(system, 0.)
 
-# Dump the results to stdout
     if this_task == 0:
         perf = struct_to_dict(system.perf[0])
         merger_infos = [struct_to_dict(system.merger_infos[i]) for i in range(system.num_mergers)]
         retval = dict(states=outstates, perf=perf, merger_infos=merger_infos)
-        sys.stdout.buffer.write(pickle.dumps(retval, protocol=pickle.HIGHEST_PROTOCOL))
-        sys.stdout.flush()
+    else:
+        retval = None
 
     shim.free_system(system)
-
-def _load_dump(fname):
-    system = CSystem()
-    fnb = fname.encode('utf-8')
-    shim.load_state_dump(system, fnb)
-    state = State.from_c_system(system)
-    options = struct_to_dict(system.options[0])
-    constants = struct_to_dict(system.constants[0])
-    retval = dict(state=state, options=options, constants=constants)
-    shim.free_system(system)
-    if this_task == 0:
-        sys.stdout.buffer.write(pickle.dumps(retval, protocol=pickle.HIGHEST_PROTOCOL))
-
-
-def _run_main():
-    if sys.argv[1] == 'integrate':
-        _integrate()
-    elif sys.argv[1] == 'load_dump':
-        _load_dump(sys.argv[2])
-
-if __name__ == '__main__':
-    shim = _load_shim()
-# Need to load the mpi library using global mode to avoid missing symbol errors
-# TODO: is this robust, should we use something like mpi4py that probably handles this better?
-    _mpilib = ctypes.CDLL(find_library('mpi'), mode=ctypes.RTLD_GLOBAL)
-    this_task = shim.init_mpi()
-    _run_main()
-    shim.finalize_mpi()
-
-
+    return retval

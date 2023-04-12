@@ -31,6 +31,7 @@ lib/
 
 # Python cache
 __pycache__
+*.egg-info
 
 # Build and output directories
 build*/

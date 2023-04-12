@@ -107,15 +107,15 @@ MPI compiler wrapper to compile your code to link the necessary MPI library.
 
 Simple Python 3 bindings depending only on the standard library and NumPy are
 included as the `ketju_integrator` module under `python_bindings`.
-They function via a small C library shim and allow parallel integration by
-running the integrator in subprocesses with MPI.
-An example of using the bindings is in
-`python_bindings/ketju_integrator_example.py`.
-For more convenient usage add the `python_bindings` directory to the `PYTHONPATH`.
 
-These bindings may not work on all systems, as internally the code calls `mpirun`
-to launch the integrator subprocesses.
-They might however be useful for small experiments on e.g. desktop systems.
+They function via a small C library shim and allow parallel integration by
+running the integrator in subprocesses with MPI, or by running python directly with MPI.
+Examples of using the bindings are given in
+`python_bindings/ketju_integrator_example.py` and `python_bindings/ketju_integrator_example_mpi.py`.
+After building the library as described above,
+you can install install the python bindings with `pip` by running `python3 -m pip install --user python_bindings/`
+(you can omit `--user` if in a venv), you may need to first upgrade `pip` with
+`python3 -m pip install --upgrade pip`.
 
 ## Test suite
 
