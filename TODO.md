@@ -28,13 +28,8 @@ Optimization
 Other
 -----
 
-+ Python bindings
-    + Mostly work
-    - Could be easier to use, but maybe simple is good enough
-    - Some things are probably not portable enough, mainly the mpirun stuff.
-
 + Automated tests
     + Basics setup and some tests done
-    - More comprehensive testing
+    ? More comprehensive testing
 
 - Automated benchmarks

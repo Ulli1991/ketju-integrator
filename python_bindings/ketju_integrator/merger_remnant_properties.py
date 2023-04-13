@@ -11,6 +11,8 @@ import ctypes
 
 import numpy as np
 
+__all__ = ["normalized_merger_properties"]
+
 class BHMergerInput(ctypes.Structure):
     _fields_ = [
     ('G', ctypes.c_double),
@@ -45,20 +47,40 @@ class BHMergerRemnantProperties(ctypes.Structure):
     ('S', ctypes.c_double*3),
     ]
 
-_this_file = os.path.realpath(__file__)
-shim_file = os.path.join(os.path.dirname(_this_file), 
-                         "../../lib/libketju_integrator_python_shim.so")
-shim = ctypes.cdll.LoadLibrary(shim_file)
-shim.ketju_calculate_bh_merger_remnant_properties.argtypes = [
+def _load_shim():
+    _this_dir = os.path.dirname(os.path.realpath(__file__))
+    shim_file = os.path.join(_this_dir, "libketju_integrator_python_shim.so")
+    shim = ctypes.cdll.LoadLibrary(shim_file)
+
+    shim.ketju_calculate_bh_merger_remnant_properties.argtypes = [
                 ctypes.POINTER(BHMergerInput),
                 ctypes.POINTER(BHMergerRemnantProperties)]
+    return shim
+shim = _load_shim()
 
 
 def normalized_merger_properties(q, R, V, chi1_vec, chi2_vec):
     """
-    Merger properties for a system with mass ratio q on a separation R (along x)
-    with a relative velocity V (along y) and the given spin magnitudes (chi = S/m**2).
+    Wrapper for the merger remnant calculation function used by the integrator.
+
+    Uses units with G=c=1, with the binary total mass set to 1.
+
+    Arguments
+    ---------
+    q: mass ratio of the binary.
+    R: separation of the binary along the x-axis.
+    V: relative velocity of the binary along the y-axis.
+    chi1_vec, chi2_vec: dimensionless spin vectors of the BHs (chi = (spin angular momentum)/m**2).
+
+    Returns
+    -------
+    A dict containing the merger remnant properties, with keys:
+        mass: mass of the remnant.
+        vkick: recoil kick velocity.
+        S: spin angular momentum vector.
+        chi: dimensionless spin magnitude.
     """
+
     m1 = 1/(1+q)
     m2 = 1 - m1
     S1 = m1**2 * np.asarray(chi1_vec)

@@ -111,14 +111,14 @@ included as the `ketju_integrator` module under `python_bindings`.
 They function via a small C library shim and allow parallel integration by
 running the integrator in subprocesses with MPI, or by running python directly with MPI.
 Examples of using the bindings are given in
-`python_bindings/ketju_integrator_example.py` and `python_bindings/ketju_integrator_example_mpi.py`.
+`python_bindings/examples/`.
 After building the library as described above,
-you can install install the python bindings with `pip` by running `python3 -m pip install --user ./python_bindings/`
+you can install the python bindings with `pip` by running `python3 -m pip install --user ./python_bindings/`
 (you can omit `--user` if in a venv), you may need to first upgrade `pip` with
 `python3 -m pip install --upgrade pip`.
 
-The `ketju_utils` package included in the `gadget4-ketju` repository includes
-some utilities for analysing the integrator output.
+The [`ketju_utils` package](https://bitbucket.org/helsinkiextragalacticgroup/ketju-utils)
+provides some utilities for analysing BH orbits with post-Newtonian corrections.
 
 ## Test suite
 

@@ -4,7 +4,7 @@
 # See LICENSE.md or <https://www.gnu.org/licenses/> for details.
 
 """
-Simple bindings that allow running the integrator.
+Implementation of the bindings.
 """
 import subprocess
 import io
