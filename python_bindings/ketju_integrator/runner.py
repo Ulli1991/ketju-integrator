@@ -12,7 +12,6 @@ and communicates with the main process using pickle and piped stdout.
 import sys
 import pickle
 import ctypes
-from ctypes.util import find_library
 
 from .bindings import shim, _integrate
 
@@ -56,8 +55,6 @@ def _run_main(this_task):
         _load_dump(sys.argv[2], this_task)
 
 if __name__ == '__main__':
-# Need to load the mpi library using global mode to avoid missing symbol errors
-    _mpilib = ctypes.CDLL(find_library('mpi'), mode=ctypes.RTLD_GLOBAL)
     this_task = shim.init_mpi()
     _run_main(this_task)
     shim.finalize_mpi()
