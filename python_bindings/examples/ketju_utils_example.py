@@ -77,7 +77,11 @@ ts = np.linspace(0, prop_t, 10000)
 # change this if it doesn't work on your system.
 ret = ketju_integrator.run_integrator(
                      init_state, ts, nproc=2, gbs_relative_tolerance=1e-8,
-                     PN_flags=pnflags, G=1, c=1)
+                     PN_flags=pnflags, G=1, c=1,
+# BH merger distance set to a lower value than the default to illustrate the
+# problematic small separation behavior
+                     bh_merger_distance_in_Rs=6,
+                     )
 
 if ret['merger_infos']:
     print("Had merger")
@@ -124,5 +128,18 @@ ax1.set_ylabel('$a/R_s$')
 ax2.plot(t_in_s, pars['e_t'])
 ax2.set_ylabel('$e_t$')
 ax2.set_xlabel('$t/\mathrm{s}$')
+
+
+# CoM velocity and binary separation, useful for checking that the PN level
+# errors in the CoM velocity aren't too large for you merger separation setting.
+fig, (ax0, ax1) = plt.subplots(2,1, sharex='col')
+
+ax0.plot(t_in_s, pars['R']/Rs)
+ax0.set_ylabel('$R/R_s$')
+
+ax1.plot(t_in_s, ketju_utils.binary_CoM_vel(bh1,bh2,PN_level=6)/ketju_utils.units.km_per_s)
+ax1.set_ylabel(r'$v_\mathrm{CoM}/\mathrm{km\,s^{-1}}$')
+ax1.set_xlabel('$t/$s')
+
 
 plt.show()
