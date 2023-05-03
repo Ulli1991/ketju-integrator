@@ -2,14 +2,39 @@
 
 A highly parallel regularized N-body integrator library.
 
-The interface to the integrator is defined in
-`include/ketju_integrator/ketju_integrator.h`.
-See the comments there for explanations of the code interface.
-A simple example program is included in the `nbody/` directory.
-For a more complex example of using the library, see the [gadget4-ketju repository](https://bitbucket.org/helsinkiextragalacticgroup/gadget4-ketju).
+This code forms the core of the KETJU project, which adds detailed small-scale
+modelling of supermassive black hole dynamics to galactic simulation codes such as
+GADGET-4.
+See the [GADGET4-KETJU paper] and the [GADGET4-KETJU repository] for more details on KETJU.
+In addition to being used in KETJU, this integrator code is designed to be easily
+used in other codes as well.
+To help with this, the repository includes both a simple example `nbody` program written in C,
+as well as bindings that allow the integrator to be called from Python.
 
-The main numerical methods used in the code are explained in the [code paper](https://ui.adsabs.harvard.edu/abs/2020MNRAS.492.4131R).
-Additional details and references are given in the comments within the code.
+The MSTAR integrator is based on algorithmic regularization together with a
+minimum spanning tree -based relative coordinate system to allow accurate integration
+of even collisional orbits while reducing the impact of rounding errors.
+The code also includes post-Newtonian corrections for modelling black hole dynamics and their mergers.
+Good scaling behaviour to systems of several thousands of particles on hundreds of CPU cores
+is achieved through MPI parallelization of both the calculation of gravitational interactions
+and the Gragg–Bulirsch–Stoer extrapolation algorithm.
+For more detail on the technical aspects of the integrator, see the [code paper] as well
+as comments within the code.
+
+When publishing work utilizing this code, please cite the [code paper].
+
+[code paper]: https://ui.adsabs.harvard.edu/abs/2020MNRAS.492.4131R
+[GADGET4-KETJU paper]: TODO
+[GADGET4-KETJU repository]: https://bitbucket.org/helsinkiextragalacticgroup/gadget4-ketju
+
+## License
+
+This software is licensed under the GPLv3 license:
+you are free to modify and distribute it under certain conditions,
+and it comes without any warranty.
+See [LICENSE.md](LICENSE.md) for details.
+
+The code included in the `thirdparty` directory is distributed under the licenses specified there.
 
 
 ## Building
@@ -32,15 +57,24 @@ See the [`nbody` README](nbody/README.md) for details on using it.
 
 ## Usage in other codes
 
+The integrator is easiest to use from programs written in C or C++,
+or through the included Python wrapper.
+For use from other languages,
+you may need to write a small wrapper for the library using C first.
+You also need to include the MPI library in your code and perform the necessary
+initialization for it before calling the integrator.
+
+Examples of using the integrator in C and C++ can be found in the included `nbody`
+code as well in the [GADGET4-KETJU repository].
+
+### Use in C or C++
+
 The public interface of the library is included in the file 
 `include/ketju_integrator/ketju_integrator.h`,
 so in your C or C++ code add  
 `#include <ketju_integrator/ketju_integrator.h>`  
 to use the definitions.
-For use with other languages,
-you may need to write a small wrapper for the library using C first.
-You also need to include the MPI library in your code and perform the necessary
-initialization for it before calling the integrator.
+Details of the interface are also explained in the comments included in that header file.
 
 The general outline of using the integrator looks something like this:
 ```C++
@@ -83,6 +117,8 @@ The general outline of using the integrator looks something like this:
 You can have multiple independent integrator systems within your program at the same time,
 as all of the integrator state is contained within the `ketju_system` struct.
 
+### Building your code and linking the library
+
 Finally, to build your code that uses the integrator, you need to make some changes to
 your build system.
 If you're building your code with `cmake`, you can use the following commands
@@ -98,12 +134,12 @@ Otherwise, simply add (assuming gcc/clang)
 to your compiler flags and    
 `-L/path/to/ketju-integrator/lib -lketju-integrator`  
 to your linker flags.
-And naturally you will need to include the necessary MPI flags or use the 
+naturally you will also need to include the necessary MPI flags or use the 
 MPI compiler wrapper to compile your code to link the necessary MPI library.
 
 
 
-## Python bindings
+### Python bindings
 
 Simple Python 3 bindings depending only on the standard library and NumPy are
 included as the `ketju_integrator` module under `python_bindings`.
@@ -136,8 +172,3 @@ by different compilers and optimizations, so in case the tests fail inspect the
 output to see if the errors in the results are only slightly over the assigned tolerances.
 
 
-## License
-
-This software is licensed under the GPLv3 license, see [LICENSE.md](LICENSE.md) for details.
-
-The code under `thirdparty` is distributed under the licenses specified there.
