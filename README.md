@@ -5,9 +5,9 @@ A highly parallel regularized N-body integrator library.
 This code forms the core of the KETJU project, which adds detailed small-scale
 modelling of supermassive black hole dynamics to galactic simulation codes such as
 GADGET-4.
-See the [GADGET4-KETJU paper] and the [GADGET4-KETJU repository] for more details on KETJU.
-In addition to being used in KETJU, this integrator code is designed to be easily
-used in other codes as well.
+See the [KETJU project website] for more details on KETJU.
+In addition to being used in our GADGET-based KETJU codes,
+this integrator code is designed to be easily used in other codes as well.
 To help with this, the repository includes both a simple example `nbody` program written in C,
 as well as bindings that allow the integrator to be called from Python.
 
@@ -23,9 +23,12 @@ as comments within the code.
 
 When publishing work utilizing this code, please cite the [code paper].
 
+If you encounter issues when using the code, you can report them using the [issue tracker].
+
 [code paper]: https://ui.adsabs.harvard.edu/abs/2020MNRAS.492.4131R
-[GADGET4-KETJU paper]: TODO
+[KETJU project website]: https://www.mv.helsinki.fi/home/phjohans/ketju
 [GADGET4-KETJU repository]: https://bitbucket.org/helsinkiextragalacticgroup/gadget4-ketju
+[issue tracker]: https://bitbucket.org/helsinkiextragalacticgroup/ketju-integrator/issues 
 
 ## License
 
@@ -43,9 +46,9 @@ The code requires an MPI library/environment (e.g. OpenMPI) to be installed befo
 To build the integrator library, first configure the CMake build system by running  
 
 ```
-    mkdir build
-    cd build
-    cmake .. [CMAKE_OPTIONS]
+mkdir build
+cd build
+cmake .. [CMAKE_OPTIONS]
 ```
 
 Configuration options such as specific compiler optimization flags can then be
@@ -81,41 +84,41 @@ Details of the interface are also explained in the comments included in that hea
 The general outline of using the integrator looks something like this:
 
 ```C++
-    // Set up your MPI environment etc. with mpi_communicator being a communicator
-    // over the tasks you want to use for the integration (can be MPI_COMM_WORLD).
-    // All the tasks on this communicator must call the following functions and
-    // modify the integrator setting and initial state in the same way.
+// Set up your MPI environment etc. with mpi_communicator being a communicator
+// over the tasks you want to use for the integration (can be MPI_COMM_WORLD).
+// All the tasks on this communicator must call the following functions and
+// modify the integrator setting and initial state in the same way.
 
-    // Create the integrator data structures
-    // num_pn_particles is the number of particles (usually black holes)
-    // with PN terms enabled (depending on options).
-    // num_other_particles is the number of particles (usually stars)
-    // using only Newtonian gravity, possibly with softening.
-    struct ketju_system R;
-    ketju_create_system(&R, num_pn_particles, num_other_particles, mpi_communicator);
+// Create the integrator data structures
+// num_pn_particles is the number of particles (usually black holes)
+// with PN terms enabled (depending on options).
+// num_other_particles is the number of particles (usually stars)
+// using only Newtonian gravity, possibly with softening.
+struct ketju_system R;
+ketju_create_system(&R, num_pn_particles, num_other_particles, mpi_communicator);
 
-    // Set the configuration in R.options and R.constants if you want to change the defaults.
-    // Initialize values in R.physical_state:
-    //   Set mass, pos, vel for R.num_particles (= num_pn_particles + num_other_particles) entries.
-    //   Set spins for the first num_pn_particles.
-    ...
+// Set the configuration in R.options and R.constants if you want to change the defaults.
+// Initialize values in R.physical_state:
+//   Set mass, pos, vel for R.num_particles (= num_pn_particles + num_other_particles) entries.
+//   Set spins for the first num_pn_particles.
+...
 
-    // Optional:
-    // If the initial data you just set is far from the center-of-mass frame of the system,
-    // you may benefit from shifting the system to its CoM frame using
-    double CoM_pos[3], CoM_vel[3];
-    ketju_into_CoM_frame(&R, CoM_pos, CoM_vel);
-    // to maintain the best numerical resolution for the system coordinates during the integration.
-    // CoM_pos and CoM_vel give the original coordinates of the CoM for later processing.
+// Optional:
+// If the initial data you just set is far from the center-of-mass frame of the system,
+// you may benefit from shifting the system to its CoM frame using
+double CoM_pos[3], CoM_vel[3];
+ketju_into_CoM_frame(&R, CoM_pos, CoM_vel);
+// to maintain the best numerical resolution for the system coordinates during the integration.
+// CoM_pos and CoM_vel give the original coordinates of the CoM for later processing.
 
-    // Repeat as desired:
-    // Run the integration
-    ketju_run_integrator(&R, integration_time);
-    // Read the resulting state from R.physical_state and process it
-    ...
+// Repeat as desired:
+// Run the integration
+ketju_run_integrator(&R, integration_time);
+// Read the resulting state from R.physical_state and process it
+...
 
-    // Finally free the allocated memory and communicators
-    ketju_free_system(&R);
+// Finally free the allocated memory and communicators
+ketju_free_system(&R);
 ```
 
 You can have multiple independent integrator systems within your program at the same time,
@@ -144,10 +147,10 @@ If you're building your code with `cmake`, you can use the following commands
 in your `CMakeLists.txt` to add the necessary include and linker flags:  
 
 ```cmake
-    set(ketju-integrator_DIR "/path/to/ketju-integrator/") 
-    find_package(ketju-integrator 1.0 REQUIRED)  
-    add_executable(nbody "main.c") # using the nbody program as an example  
-    target_link_libraries(nbody ketju-integrator)
+set(ketju-integrator_DIR "/path/to/ketju-integrator/") 
+find_package(ketju-integrator 1.0 REQUIRED)  
+add_executable(nbody "main.c") # using the nbody program as an example  
+target_link_libraries(nbody ketju-integrator)
 ```
 
 Otherwise, simply add (assuming gcc/clang)   
@@ -170,12 +173,18 @@ running the integrator in subprocesses with MPI, or by running python directly w
 Examples of using the bindings are given in
 `python_bindings/examples/`.
 After building the library as described above,
-you can install the python bindings with `pip` by running `python3 -m pip install --user ./python_bindings/`
+you can install the python bindings with `pip` by running 
+
+```
+python3 -m pip install --user ./python_bindings/
+```
+
 (you can omit `--user` if in a venv), you may need to first upgrade `pip` with
 `python3 -m pip install --upgrade pip`.
 
 The [`ketju_utils` package](https://bitbucket.org/helsinkiextragalacticgroup/ketju-utils)
-provides some utilities for analysing BH orbits with post-Newtonian corrections.
+provides some utilities for analysing BH orbits with post-Newtonian corrections,
+and an example utilizing it is included.
 
 ## Test suite
 
