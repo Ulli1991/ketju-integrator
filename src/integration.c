@@ -23,25 +23,6 @@ enum velocity_type { PHYSICAL, AUXILIARY };
 // Acceleration and energy calculation //
 /////////////////////////////////////////
 
-// Gadget softening kernels
-static inline double softened_inverse_r(double r, double h) {
-    if (h <= 0) return 1. / r;
-
-    const double hinv = 1. / h;
-    const double u = r * hinv;
-
-    if (u >= 1.) {
-        return 1. / r;
-    } else if (u < 0.5) {
-        return -hinv * (-2.8 + u * u * (16. / 3. + u * u * (6.4 * u - 9.6)));
-    } else {
-        return -hinv
-               * (-3.2 + 2. / 30. / u
-                  + u * u
-                        * (32. / 3. + u * (-16.0 + u * (9.6 - 32. / 15. * u))));
-    }
-}
-
 static inline double softened_inverse_r3(double r, double h) {
     if (h <= 0) return 1. / (r * r * r);
 
@@ -1326,6 +1307,9 @@ void ketju_run_integrator(struct ketju_system *R, double time_interval) {
     const double t_start = R->physical_state->time;
     R->physical_state->time = 0;
     const double initial_B = R->internal_state->B;
+    // conserved Newtonian energy T - U - U_tide (U softened as integrated), and the energy booked by collisions
+    const double initial_E = -initial_B - external_tide(R, NULL);
+    double collision_dE = 0;
 
     struct state_backup old_state;
     allocate_state_backup(&old_state, R->num_particles, R->num_pn_particles);
@@ -1366,7 +1350,9 @@ void ketju_run_integrator(struct ketju_system *R, double time_interval) {
         }
         // Contact collisions of non-PN particles, checked on each accepted state
         if (pair_rv && Hstep > 0) {
+            const int m0 = R->num_mergers;
             int num_coll = ketju_do_star_collisions(R, pair_rv);
+            for (int m = m0; m < R->num_mergers; ++m) collision_dE += R->merger_infos[m].dE_collision;
             if (num_coll) {
                 if (R->num_particles < 2) {
                     trivial_propagation(R, time_interval
@@ -1502,8 +1488,17 @@ void ketju_run_integrator(struct ketju_system *R, double time_interval) {
 
     // a pericentre passed in the last step is not seen by the next call
     if (pair_rv && time_interval > 0 && R->num_particles >= 2) {
+        const int m0 = R->num_mergers;
         ketju_do_star_collisions(R, pair_rv);
+        for (int m = m0; m < R->num_mergers; ++m) collision_dE += R->merger_infos[m].dE_collision;
+        if (R->num_mergers > m0 && R->num_particles >= 2) ketju_construct_MST(R); // for the energy below
     }
+
+    // Error of the conserved energy T - U - U_tide net of the collision bookings; with PN forces the
+    // PN energy is not included, so this is not the error then (also not after BH mergers)
+    compute_total_energy(R); // before the gbs communicators are freed
+    R->perf->relative_energy_error =
+        (-R->internal_state->B - external_tide(R, NULL) - initial_E - collision_dE) / initial_E;
 
     // Restore the initial physical time offset
     R->physical_state->time += t_start;
@@ -1515,11 +1510,6 @@ void ketju_run_integrator(struct ketju_system *R, double time_interval) {
     free_gbs_extrapolation_inds(&gbs_indices);
     free(gbs_rows_for_groups);
     ketju_free_gbs_comms(R);
-
-    // Note that this is not really the error when dissipative PN forces are
-    // enabled
-    R->perf->relative_energy_error =
-        (R->internal_state->B - initial_B) / initial_B;
 
     timer_stop(&R->perf->time_total);
 }

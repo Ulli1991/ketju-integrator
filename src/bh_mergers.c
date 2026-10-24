@@ -528,7 +528,10 @@ static void merge_stars(struct ketju_system *R, int i, int j) {
         r2 += (ps->pos[j][k] - ps->pos[i][k]) * (ps->pos[j][k] - ps->pos[i][k]);
         v2 += (ps->vel[j][k] - ps->vel[i][k]) * (ps->vel[j][k] - ps->vel[i][k]);
     }
-    const double E_pair = 0.5 * m1 * m2 / M * v2 - R->constants->G * m1 * m2 / sqrt(r2);
+    // the energy MSTAR conserves: star-star pairs softened as integrated, PN pairs not
+    const double G = R->constants->G, h = R->options->star_star_softening;
+    const double E_pair = 0.5 * m1 * m2 / M * v2
+                          - (R->options->no_star_star_gravity ? 0 : G * m1 * m2 * softened_inverse_r(sqrt(r2), h));
     // potential energy change with the other particles as the pair moves to its CoM
     double dE_others = 0;
     {
@@ -536,14 +539,27 @@ static void merge_stars(struct ketju_system *R, int i, int j) {
         for (int k = 0; k < 3; ++k) xc[k] = (m1 * ps->pos[i][k] + m2 * ps->pos[j][k]) / M;
         for (int q = 0; q < R->num_particles; ++q) {
             if (q == i || q == j) continue;
+            if (R->options->no_star_star_gravity && q >= R->num_pn_particles) continue;
+            const double hq = q < R->num_pn_particles ? 0 : h;
             double d1 = 0, d2 = 0, dc = 0;
             for (int k = 0; k < 3; ++k) {
                 d1 += (ps->pos[q][k] - ps->pos[i][k]) * (ps->pos[q][k] - ps->pos[i][k]);
                 d2 += (ps->pos[q][k] - ps->pos[j][k]) * (ps->pos[q][k] - ps->pos[j][k]);
                 dc += (ps->pos[q][k] - xc[k]) * (ps->pos[q][k] - xc[k]);
             }
-            dE_others += R->constants->G * ps->mass[q] * (m1 / sqrt(d1) + m2 / sqrt(d2) - M / sqrt(dc));
+            dE_others += G * ps->mass[q] * (m1 * softened_inverse_r(sqrt(d1), hq) + m2 * softened_inverse_r(sqrt(d2), hq)
+                                            - M * softened_inverse_r(sqrt(dc), hq));
         }
+    }
+    // external tide: -1/2 sum m x.T.x changes by +1/2 mu r.T.r
+    double dE_tide = 0;
+    if (R->options->enable_external_tide) {
+        const double *t = R->options->external_tidal_tensor;
+        double r[3];
+        for (int k = 0; k < 3; ++k) r[k] = ps->pos[j][k] - ps->pos[i][k];
+        const double Tr[3] = {t[0] * r[0] + t[3] * r[1] + t[5] * r[2], t[3] * r[0] + t[1] * r[1] + t[4] * r[2],
+                              t[5] * r[0] + t[4] * r[1] + t[2] * r[2]};
+        dE_tide = 0.5 * m1 * m2 / M * (r[0] * Tr[0] + r[1] * Tr[1] + r[2] * Tr[2]);
     }
     for (int k = 0; k < 3; ++k) {
         ps->pos[i][k] = (m1 * ps->pos[i][k] + m2 * ps->pos[j][k]) / M;
@@ -567,7 +583,7 @@ static void merge_stars(struct ketju_system *R, int i, int j) {
     info->extra_index1 = i;
     info->extra_index2 = R->num_particles - 1;
     info->is_collision = 1;
-    info->dE_collision = -E_pair + dE_others;
+    info->dE_collision = -E_pair + dE_others + dE_tide;
     for (int k = 0; k < R->num_mergers; ++k) {
         struct ketju_bh_merger_info *old_info = &R->merger_infos[k];
         if (old_info->extra_index1 == j) {

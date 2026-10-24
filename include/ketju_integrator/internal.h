@@ -226,6 +226,25 @@ static inline void loop_scheduling_N2(int N, int Nt, int task, int *istart,
     *cum_num = cumN;
 }
 
+// Gadget softening kernels
+static inline double softened_inverse_r(double r, double h) {
+    if (h <= 0) return 1. / r;
+
+    const double hinv = 1. / h;
+    const double u = r * hinv;
+
+    if (u >= 1.) {
+        return 1. / r;
+    } else if (u < 0.5) {
+        return -hinv * (-2.8 + u * u * (16. / 3. + u * u * (6.4 * u - 9.6)));
+    } else {
+        return -hinv
+               * (-3.2 + 2. / 30. / u
+                  + u * u
+                        * (32. / 3. + u * (-16.0 + u * (9.6 - 32. / 15. * u))));
+    }
+}
+
 // declarations of internal functions used between compilation units
 
 void ketju_binary_PN_CoM_velocity(struct ketju_system *R, int i, int j,

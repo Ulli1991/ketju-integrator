@@ -107,6 +107,8 @@ TEST(Gizmo_star_collisions, head_on_contact) {
         // energy: E_end = E0 + dE_collision (= the product's kinetic energy 1/2 M V^2)
         EXPECT_NEAR(energy(&R), E0 + mi.dE_collision, 1e-10 * std::abs(E0));
         EXPECT_NEAR(energy(&R), 0.5 * 1.5 * V * V, 1e-12);
+        // the reported error is net of the booked collision energy
+        EXPECT_LT(std::abs(R.perf->relative_energy_error), 1e-10);
         ketju_free_system(&R);
     }
 }
@@ -144,6 +146,7 @@ TEST(Gizmo_star_collisions, graze_and_miss) {
             EXPECT_EQ(R.physical_state->mass[0], 2.0);
             EXPECT_NEAR(energy(&R), E0 + R.merger_infos[0].dE_collision, 1e-9 * std::abs(E0));
         }
+        EXPECT_LT(std::abs(R.perf->relative_energy_error), 1e-9);
         ketju_free_system(&R);
     }
 }
@@ -287,10 +290,56 @@ TEST(Gizmo_external_tide, harmonic_com_and_energy) {
         EXPECT_NEAR(Vc[0], -X0 * w * std::sin(w * t_end), 1e-12);
         EXPECT_NEAR(Xc[1], 0, 1e-10);
         EXPECT_NEAR(energy(&R, T), E0, 1e-10 * std::abs(E0));
+        // the reported error is that of the energy including the tide's potential
+        EXPECT_NEAR(R.perf->relative_energy_error, (energy(&R, T) - E0) / E0, 1e-12);
+        EXPECT_LT(std::abs(R.perf->relative_energy_error), 1e-10);
         // negative check: the tide does work on the system (the energy without its potential changes)
         EXPECT_GT(std::abs(energy(&R) - EN0), 1e4 * 1e-10 * std::abs(E0));
         // the tide stays out of the time transformation: no step-count blow-up (max_step_count aborts before efcfb032)
         EXPECT_LT(R.perf->successful_steps, 2 * steps_off);
         ketju_free_system(&R);
     }
+}
+
+// the booked collision energy is the change of the energy MSTAR conserves: star-star pairs softened by
+// star_star_softening, and -1/2 sum m x.T.x of the external tide
+TEST(Gizmo_collision_energy, tide_and_softening) {
+    const double m[3] = {1.0, 3.0, 2.0};
+    const double x[3][3] = {{0.3, 0.1, 0}, {-0.1, 0.0, 0.1}, {0.9, 0.6, -0.3}};
+    const double v[3][3] = {{0.2, -0.5, 0.1}, {-0.3, 0.4, 0}, {0.05, 0, 0.1}};
+    const double T[6] = {-0.02, 0.01, 0.015, 0.004, -0.003, 0.006};
+    const double h = 0.8; // r01 = 0.42 < h and the third star inside h of both: all kernel branches
+    double dE_variant[2];
+    for (int full = 0; full <= 1; ++full) {
+        struct ketju_system R;
+        setup_stars(&R, 3);
+        std::vector<double> radius = {0.5, 0.5, 0.5};
+        R.collision_radius = radius.data();
+        R.options->star_star_softening = full ? h : 0;
+        R.options->enable_external_tide = full;
+        for (int k = 0; k < 6; ++k) R.options->external_tidal_tensor[k] = T[k];
+        for (int i = 0; i < 3; ++i) {
+            R.physical_state->mass[i] = m[i];
+            for (int k = 0; k < 3; ++k) R.physical_state->pos[i][k] = x[i][k], R.physical_state->vel[i][k] = v[i][k];
+        }
+        // energy as integrated: T - G sum m m softened_inverse_r(r, h) - 1/2 sum m x.T.x
+        auto E = [&](const struct ketju_system *S) {
+            const auto *ps = S->physical_state;
+            double e = energy(S, full ? T : nullptr);
+            for (int i = 0; i < S->num_particles; ++i)
+                for (int j = i + 1; j < S->num_particles; ++j) {
+                    double r2 = 0;
+                    for (int k = 0; k < 3; ++k) r2 += (ps->pos[i][k] - ps->pos[j][k]) * (ps->pos[i][k] - ps->pos[j][k]);
+                    e += ps->mass[i] * ps->mass[j] * (1 / std::sqrt(r2) - softened_inverse_r(std::sqrt(r2), S->options->star_star_softening));
+                }
+            return e;
+        };
+        const double E0 = E(&R);
+        ASSERT_EQ(ketju_do_star_collisions(&R, nullptr), 1);
+        dE_variant[full] = R.merger_infos[0].dE_collision;
+        EXPECT_NEAR(E(&R) - E0, dE_variant[full], 1e-13 * std::abs(E0));
+        ketju_free_system(&R);
+    }
+    // negative check: tide and softening change the booking well beyond the tolerance above
+    EXPECT_GT(std::abs(dE_variant[1] - dE_variant[0]), 1e-2 * std::abs(dE_variant[0]));
 }

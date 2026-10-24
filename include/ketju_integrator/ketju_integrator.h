@@ -229,7 +229,7 @@ struct ketju_performance_counters {
     double total_work;    //< ~ Number of force evaluations done
     double relative_energy_error;
     //< Relative change in the energy of the system over the last
-    //  ketju_run_integrator call.
+    //  ketju_run_integrator call: T - U - U_tide, collision energies (dE_collision) removed.
     //  Gives information on accuracy only when PN terms are disabled.
 };
 
@@ -242,7 +242,8 @@ struct ketju_bh_merger_info {
         extra_index2; // Indices of the components in particle_extra_data
     int is_collision; // 1: non-PN contact collision (collision_radius), 0: BH merger
     double dE_collision; // energy change of a collision: minus the pair's internal energy, plus the change of its
-                         // potential energy with the other particles as it moves to its CoM
+                         // potential energy with the other particles and in the external tide as it moves to its CoM
+                         // (star-star pairs softened by star_star_softening, as integrated)
 };
 
 struct ketju_system {
