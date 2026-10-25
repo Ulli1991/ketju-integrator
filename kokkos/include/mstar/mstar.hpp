@@ -70,6 +70,11 @@ struct Options {
     int max_tree_distance = 2;                      // <= 8 here
     long max_step_count = -1;                       // > 0: run() stops (returns false) after this many attempted steps
     double star_star_softening = 0;                 // GADGET spline softening between non-PN particles (<= 0: off)
+    bool softening_kink_landing = true;             // land GBS steps on the softening kernel's break points (u = r / h
+                                                    // = 0.5, 1) when a softened pair crosses one inside a step
+    double softening_kink_eta = 5e-4;               // a crossing within this fraction of a step from an end is accepted
+    double softening_kink_error_ratio = 1;          // crossings with an estimated local error (J dt^6 / 6!) below this
+                                                    // ratio x the tolerance on the separation are not landed
     bool no_star_star_gravity = false;              // no forces between non-PN particles
     bool enable_bh_mergers = true;
     double bh_merger_distance_in_Rs = 12;
@@ -94,6 +99,7 @@ struct Constants {
 // ketju_performance_counters (+ timers of this library)
 struct PerformanceCounters {
     long successful_steps = 0, failed_steps = 0;
+    long kink_landings = 0;             // steps repeated to land on a softening-kernel break point
     double total_work = 0;              // ~ number of force evaluations (KETJU's step_total_work sum)
     double relative_energy_error = 0;   // over the last run(): energy T - U - U_tide (U softened as integrated), the
                                         // collision energies dE_collision removed; not the error with PN forces, extra

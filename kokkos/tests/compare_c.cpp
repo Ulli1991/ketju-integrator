@@ -60,6 +60,7 @@ struct Opt {
     double T[6] = {};
     std::vector<double> radius;      // collision_radius (empty: off)
     int calls = 1;                   // the interval in this many run calls
+    bool kink = true;                // softening_kink_landing
 };
 
 void unit_constants(mstar::System& M) {
@@ -81,6 +82,7 @@ Run run_c(const Sys& sy, const Opt& o, double T) {
     R.options->enable_bh_mergers = o.mergers;
     R.options->bh_merger_distance_in_Rs = o.merge_rs;
     R.options->star_star_softening = o.soft;
+    R.options->softening_kink_landing = o.kink;
     R.options->no_star_star_gravity = o.no_ss;
     R.options->enable_external_tide = o.tide;
     for (int q = 0; q < 6; q++) R.options->external_tidal_tensor[q] = o.T[q];
@@ -144,6 +146,7 @@ Run run_k(const Sys& sy, const Opt& o, double T, mstar::PerformanceCounters* per
     M.options.bh_merger_distance_in_Rs = o.merge_rs;
     M.options.team_rows_max_n = M.options.team_rows_max_n_device = o.team_max;
     M.options.star_star_softening = o.soft;
+    M.options.softening_kink_landing = o.kink;
     M.options.no_star_star_gravity = o.no_ss;
     M.options.enable_external_tide = o.tide;
     for (int q = 0; q < 6; q++) M.options.external_tidal_tensor[q] = o.T[q];
@@ -189,9 +192,9 @@ double rel_diff(const std::vector<double>& a, const std::vector<double>& b) {
 }
 
 int g_fail = 0;
-bool check(const char* c, const char* what, double v, double bound) {
-    const bool ok = v <= bound;
-    std::printf("  %s %-14s %-22s %.3e (<= %.3e)\n", ok ? "ok  " : "FAIL", c, what, v, bound);
+bool check(const char* c, const char* what, double v, double bound, bool lower = false) {
+    const bool ok = lower ? v >= bound : v <= bound;
+    std::printf("  %s %-14s %-22s %.3e (%s %.3e)\n", ok ? "ok  " : "FAIL", c, what, v, lower ? ">=" : "<=", bound);
     if (!ok) g_fail++;
     return ok;
 }
@@ -373,6 +376,7 @@ void segment_compare(const char* name, const Sys& s, const Opt& o, double T, int
     check(name, "max segment |dx|/x", dx_max, bound_x);
 }
 
+double g_ens_max_c = 0, g_ens_max_k = 0;   // maxima of the last energy_ensemble
 // |dE/E| over an ensemble of 128 initial states (x_0 shifted by q 1e-9): median and 90th percentile, C and Kokkos
 void energy_ensemble(const char* name, const Sys& sy, const Opt& o, double T, double* med_c, double* p90_c, double* med_k,
                      double* p90_k) {
@@ -386,6 +390,8 @@ void energy_ensemble(const char* name, const Sys& sy, const Opt& o, double T, do
     std::sort(ec.begin(), ec.end());
     std::sort(ek.begin(), ek.end());
     *med_c = ec[64]; *p90_c = ec[115]; *med_k = ek[64]; *p90_k = ek[115];
+    g_ens_max_c = ec[127];
+    g_ens_max_k = ek[127];
     std::printf("%s: |dE/E| over 128 states: C median %.2e p90 %.2e max %.2e | Kokkos median %.2e p90 %.2e max %.2e\n", name,
                 *med_c, *p90_c, ec[127], *med_k, *p90_k, ek[127]);
 }
@@ -602,11 +608,11 @@ int main(int argc, char** argv) {
             if (want(argc, argv, "collision_tolscan")) collision_tolscan("coll_tide_soft", s, o, 20);
         }
         if (want(argc, argv, "softening_ensemble")) {
-            // Finding (C library and this one alike): a pair that moves through the softening kernel's break points
-            // (u = 0.5 and 1; the spline's higher derivatives jump there) defeats the GBS error estimate: |dE/E| is
-            // 1e2 - 1e5 x the tolerance and varies by orders of magnitude with 1e-9 changes of the initial state
-            // (two-body softened orbit through h: 3e-8 median at tolerance 1e-11, 2e-9 at 1e-13). Single trajectories
-            // are therefore compared as ensembles: the Kokkos median and maximum against the C ones
+            // A pair moving through the softening kernel's break points (u = 0.5 and 1; the spline's 4th force
+            // derivative jumps there) defeats the GBS error estimate unless the step is landed on the crossing
+            // (softening_kink_landing, both libraries). Without landing |dE/E| was 1e2 - 1e6 x the tolerance and varied
+            // by orders of magnitude with 1e-9 changes of the initial state (C: max 8e-7 at tolerance 1e-11, 8e-6 at
+            // 1e-13 over 128 states); with landing it is at the tolerance level for every state.
             Sys s;
             s.n = 3;
             s.m = {1, 0.7, 0.5};
@@ -628,12 +634,18 @@ int main(int argc, char** argv) {
                 // A100 (Kokkos / C 0.47 / 0.12). Bounds 1.3x the A100 values
                 segment_compare(tol > 1e-12 ? "softening_segments_1e-11" : "softening_segments_1e-13", s, o, 20, 80,
                                 tol > 1e-12 ? 1.5e-6 : 9.7e-7);
-                // (b) ensembles over 128 initial states (x_0 + q 1e-9): reported; the C library's own 16-state medians
-                // vary by 10-100x between sets of states, its 128-state medians by 2.4x between shift scales
+                // (b) ensembles over 128 initial states (x_0 + q 1e-9). Measured (CPU, C = Kokkos): max |dE/E| 1.99e-12
+                // (1e-11), 6.84e-13 (1e-13); without landing 7.95e-7 / 8.10e-6
                 double mc, pc, mk, pk;
                 energy_ensemble(tol > 1e-12 ? "softening_ensemble_1e-11" : "softening_ensemble_1e-13", s, o, 20, &mc, &pc, &mk, &pk);
                 check("softening_ens", "Kokkos / C median |dE/E| (128)", mk / mc, 3.0);
                 check("softening_ens", "Kokkos / C p90 |dE/E| (128)", pk / pc, 3.0);
+                check("softening_ens", "max |dE/E| C (128)", g_ens_max_c, tol > 1e-12 ? 2.6e-12 : 8.9e-13);
+                check("softening_ens", "max |dE/E| Kokkos (128)", g_ens_max_k, tol > 1e-12 ? 2.6e-12 : 8.9e-13);
+                Opt off = o;
+                off.kink = false;
+                energy_ensemble(tol > 1e-12 ? "softening_ensemble_off_1e-11" : "softening_ensemble_off_1e-13", s, off, 20, &mc, &pc, &mk, &pk);
+                check("softening_ens", "landing off: max C (lower)", g_ens_max_c, 1e3 * (tol > 1e-12 ? 2.6e-12 : 8.9e-13), true);
             }
         }
         if (want(argc, argv, "collision_tolscan")) {
@@ -684,7 +696,7 @@ int main(int argc, char** argv) {
             Opt o;
             o.tol = 1e-10;
             o.soft = 0.05;
-            compare("softening_core", s, o, 0.25, 6.4e-11, 6.5e-12, 6.5e-12);   // dv CPU 3.5e-11, A100 4.9e-11; |dE/E| C 5.0e-12, CPU 3.1e-12, A100 3.9e-12
+            compare("softening_core", s, o, 0.25, 6.4e-11, 1.5e-12, 1.5e-12);   // with landing: |dE/E| C 1.1e-12, CPU 4.9e-13 (without: C 5.0e-12, CPU 3.1e-12, A100 3.9e-12); dv bound from the A100 without landing (4.9e-11)
             Sys c = plummer(62, 2, 7, 0.05);
             c.x[0] = 0.02; c.x[3] = -0.02;
             const double vb = std::sqrt(0.1 / 0.04) / 2;

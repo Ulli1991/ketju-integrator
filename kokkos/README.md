@@ -150,13 +150,23 @@ Results (CPU: gcc 15, Kokkos OpenMP, 1 thread; A100: CUDA 13.2) are noted at eac
   differs from C by the same amounts; the energy including the booked collision energies is conserved to the
   tolerance level in every case, and so are momentum and angular momentum (minus the pair's internal angular momentum,
   which a merger at the CoM removes in both libraries).
-* **Softened pairs defeat the GBS error estimate.** The GADGET spline (`star_star_softening`) has jumps in its
-  higher derivatives at u = r / h = 0.5 and 1. A pair that moves through them breaks the smoothness that the
-  extrapolation and its error estimate rely on: in the C library a softened two-body orbit through h has |dE/E|
-  3e-8 (median over 16 states) at tolerance 1e-11 and 2e-9 at 1e-13, with outliers up to 7e-6 when a collision is
-  involved (`softening_ensemble`), varying by orders of magnitude with 1e-9 changes of the initial state. The Kokkos
-  library behaves identically (the same ensemble statistics); single softened trajectories are compared through
-  these ensembles. Collisions decided before the pair reaches h (R1 + R2 > h) are not affected.
+* **Softening kinks: steps landed on the kernel's break points (both libraries).** The GADGET spline
+  (`star_star_softening`, unchanged) has a jump in the 4th derivative of its force at u = r / h = 0.5 and 1. A GBS
+  step across such a point loses the smoothness the extrapolation and its error estimate assume (Hairer, Norsett &
+  Wanner I, II.6; Gear & Osterby 1984: locate the discontinuity and restart there). Before, |dE/E| reached 1e2 - 1e6 x
+  the tolerance and did not converge with it (128 states of the stella collision set-up: max 8e-7 at tolerance
+  1e-11, 8e-6 at 1e-13). Now (`softening_kink_landing`, default on) every accepted step is checked: r^2 of each
+  softened pair over the step is the cubic Hermite interpolant of its end values and slopes, its first crossing of
+  (0.5 h)^2 or h^2 is located, and if it lies inside the step (more than `softening_kink_eta` = 5e-4 of the step from
+  either end) and its estimated local error J dt^6 / 6! (J = G M / h^2 [f^(4)] (v_r / h)^4, the jump of the 4th time
+  derivative of the relative acceleration) exceeds `softening_kink_error_ratio` (1) x the tolerance on the
+  separation, the step is repeated ending on the crossing. Result, identical in C and Kokkos: max |dE/E| 2.0e-12
+  (1e-11) and 6.8e-13 (1e-13) over the 128 states; a softened two-body orbit converges with the tolerance (1.6e-8 at
+  1e-11, 8.5e-10 at 1e-13, against 1.2e-5 without landing). Cost (attempted GBS steps / wall, CPU, C library): the
+  three-body set-up 1.3-1.4x; 100-body Plummer core h = 0.01: 1.06x wall (|dE/E| 1.5e-11 -> 2.4e-14), h = 0.05:
+  1.7x (2.9e-10 -> 9e-15); 400 bodies with h = 0.05 (many pairs inside h): 2.3x without an accuracy gain there
+  (2.0e-13 -> 9.8e-14); `softening_kink_error_ratio` = 100 lowers that to 1.6x. Tests: `unit-tests/softening_kink.cpp`
+  (C) and `tests/softening_kink_kokkos.cpp`, `softening_ensemble` in `mstar_compare_c`.
 * **FMA on the GPU.** nvcc contracts multiply-adds (FMA, the default, kept on); the CPU build does not. In smooth
   problems this is round-off. In the softened and collision cases FMA rounding changes a step size; at the softening
   kernel's kinks, or where a collision is recorded at a step end, the step sequence then diverges within a few steps.

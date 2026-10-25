@@ -1230,6 +1230,118 @@ after_loops:
     return safetyfac * sqrt(t2min);
 }
 
+// Event location at the softening kernel's break points. The spline's higher derivatives jump at u = r/h = 0.5 and
+// 1; a GBS step across such a point loses the smoothness that the extrapolation and its error estimate assume
+// (Hairer, Norsett & Wanner I, II.6; Gear & Osterby 1984), so an accepted step with a softened pair crossing one
+// inside it is repeated with the step ending on the crossing. r^2 of a pair over the step is the cubic Hermite
+// interpolant of its end values and slopes (d r^2 / d theta = 2 r.v dt, theta = (t - t0) / dt in [0, 1]).
+// Same arithmetic as kokkos/src/kernels.hpp HermiteR2.
+struct hermite_r2 {
+    double g0, g1, d0, d1;
+};
+
+static inline double hermite_r2_eval(const struct hermite_r2 *p, double t) {
+    const double t2 = t * t, t3 = t2 * t;
+    return p->g0 * (2 * t3 - 3 * t2 + 1) + p->d0 * (t3 - 2 * t2 + t)
+           + p->g1 * (-2 * t3 + 3 * t2) + p->d1 * (t3 - t2);
+}
+
+static inline double hermite_r2_slope(const struct hermite_r2 *p, double t) {
+    const double t2 = t * t;
+    return p->g0 * (6 * t2 - 6 * t) + p->d0 * (3 * t2 - 4 * t + 1) + p->g1 * (-6 * t2 + 6 * t)
+           + p->d1 * (3 * t2 - 2 * t);
+}
+
+// first theta in [0, 1] with r^2 = c, 2 if none: monotone pieces between the
+// roots of the slope, bisection
+static double hermite_r2_first_crossing(const struct hermite_r2 *p, double c) {
+    const double A = 6 * p->g0 + 3 * p->d0 - 6 * p->g1 + 3 * p->d1,
+                 B = -6 * p->g0 - 4 * p->d0 + 6 * p->g1 - 2 * p->d1, C = p->d0;
+    double edge[4] = {0, 1, 1, 1};
+    int ne = 1;
+    if (fabs(A) > 1e-14 * (fabs(B) + fabs(C))) {
+        const double disc = B * B - 4 * A * C;
+        if (disc > 0) {
+            const double q = -0.5 * (B + (B >= 0 ? sqrt(disc) : -sqrt(disc)));
+            double r1 = q / A, r2 = q != 0 ? C / q : r1;
+            if (r1 > r2) {
+                const double tmp = r1;
+                r1 = r2;
+                r2 = tmp;
+            }
+            if (r1 > 0 && r1 < 1) edge[ne++] = r1;
+            if (r2 > 0 && r2 < 1 && r2 != r1) edge[ne++] = r2;
+        }
+    } else if (B != 0) {
+        const double r = -C / B;
+        if (r > 0 && r < 1) edge[ne++] = r;
+    }
+    edge[ne++] = 1;
+    for (int q = 0; q + 1 < ne; q++) {
+        double a = edge[q], b = edge[q + 1];
+        const double fa = hermite_r2_eval(p, a) - c, fb = hermite_r2_eval(p, b) - c;
+        if (fa == 0) return a;
+        if ((fa < 0) == (fb < 0) && fb != 0) continue;
+        for (int it = 0; it < 50; it++) {
+            const double m = 0.5 * (a + b), fm = hermite_r2_eval(p, m) - c;
+            if ((fm < 0) == (fa < 0) && fm != 0) {
+                a = m;
+            } else {
+                b = m;
+            }
+        }
+        return 0.5 * (a + b);
+    }
+    return 2;
+}
+
+// Local error of a GBS step across a kink: the 4th time derivative of the pair's
+// relative acceleration jumps by J = G M / h^2 [f] (v_r / h)^4, [f] = 1536
+// at u = 0.5 and 384 at u = 1 (f(u) the spline force in units of G M / h^2), and
+// the extrapolation leaves a position error ~ J dt^6 / 6!. Crossings whose error
+// is below softening_kink_error_ratio x the tolerance on the pair's separation
+// (tol u h) need no landing (grazing crossings, short steps).
+static inline double softening_kink_error(double GM, double h, double jump, double vr, double dt) {
+    const double w = vr / h, dt2 = dt * dt;
+    return GM / (h * h) * jump * (w * w) * (w * w) * (dt2 * dt2 * dt2) / 720;
+}
+
+// First crossing of u = r/h = 0.5 or 1 that needs a landing, by a softened (non-PN)
+// pair over the step from old_pos/old_vel at old_time to the current state; 2 if none
+static double softening_kink_theta(const struct ketju_system *R, double (*old_pos)[3], double (*old_vel)[3],
+                                   double old_time) {
+    const struct ketju_system_physical_state *ps = R->physical_state;
+    const double h = R->options->star_star_softening, dt = ps->time - old_time;
+    const double tol = R->options->gbs_relative_tolerance * R->options->softening_kink_error_ratio;
+    double theta = 2;
+    for (int i = R->num_pn_particles; i < R->num_particles; ++i) {
+        for (int j = i + 1; j < R->num_particles; ++j) {
+            struct hermite_r2 p = {0, 0, 0, 0};
+            for (int k = 0; k < 3; k++) {
+                const double dr0 = old_pos[j][k] - old_pos[i][k], dv0 = old_vel[j][k] - old_vel[i][k];
+                const double dr1 = ps->pos[j][k] - ps->pos[i][k], dv1 = ps->vel[j][k] - ps->vel[i][k];
+                p.g0 += dr0 * dr0;
+                p.g1 += dr1 * dr1;
+                p.d0 += dr0 * dv0;
+                p.d1 += dr1 * dv1;
+            }
+            p.d0 *= 2 * dt;
+            p.d1 *= 2 * dt;
+            const double GM = R->constants->G * (ps->mass[i] + ps->mass[j]);
+            double tp = 2;
+            for (int b = 0; b < 2; b++) {
+                const double uc = b == 0 ? 0.5 : 1.0, jump = b == 0 ? 1536.0 : 384.0;
+                const double t = hermite_r2_first_crossing(&p, uc * uc * h * h);
+                if (!(t < tp)) continue;
+                const double vr = fabs(hermite_r2_slope(&p, t)) / (2 * uc * h * fabs(dt)); // |dr/dt| at the crossing
+                if (softening_kink_error(GM, h, jump, vr, dt) > tol * uc * h) tp = t;
+            }
+            if (tp < theta) theta = tp;
+        }
+    }
+    return theta;
+}
+
 static void trivial_propagation(struct ketju_system *R, double time_interval) {
     // Only makes sense when there's just a single particle, but this guards
     // against the zero particle case (altohugh it shouldn't really happen)
@@ -1315,6 +1427,11 @@ void ketju_run_integrator(struct ketju_system *R, double time_interval) {
     allocate_state_backup(&old_state, R->num_particles, R->num_pn_particles);
     store_state_backup(&old_state, R);
 
+    // event location at the softening kernel's break points (softening_kink_theta)
+    const bool kink_landing = R->options->softening_kink_landing && R->options->star_star_softening > 0
+                              && !R->options->no_star_star_gravity;
+    int kink_retries = 0;
+
     double *pair_rv = NULL; // r.v per pair at the last collision check
     if (R->collision_radius) {
         pair_rv = malloc(sizeof(double) * (R->num_particles * R->num_particles + 1));
@@ -1390,12 +1507,29 @@ void ketju_run_integrator(struct ketju_system *R, double time_interval) {
 
         int new_k;
         double Hstep_new_k;
+        const double Hstep_attempted = Hstep;
         bool converged = gbs_extrapolate(&gbs_storage, &gbs_indices, &Hstep,
                                          &new_k, &Hstep_new_k, R);
 
         R->perf->total_work += step_total_work(R);
+        bool kink_retry = false;
         if (converged) {
             update_system_from_gbs_result(R, &gbs_storage);
+            // a softened pair crossed a kernel break point inside the step: repeat it ending on the crossing
+            if (kink_landing && kink_retries < 20) {
+                const double theta = softening_kink_theta(R, old_state.pos, old_state.vel, old_state.time);
+                const double eta = R->options->softening_kink_eta;
+                if (theta >= eta && theta < 1 - eta) {
+                    kink_retry = true;
+                    kink_retries += 1;
+                    R->perf->kink_landings += 1;
+                    restore_state_backup(&old_state, R);
+                    Hstep = theta * Hstep_attempted;
+                }
+            }
+            if (!kink_retry) kink_retries = 0;
+        }
+        if (converged && !kink_retry) {
             compute_total_energy(R);
             R->perf->successful_steps += 1;
             steps_since_reconstruction += 1;
@@ -1467,7 +1601,7 @@ void ketju_run_integrator(struct ketju_system *R, double time_interval) {
 
                 store_state_backup(&old_state, R);
             }
-        } else {
+        } else if (!converged) {
             restore_state_backup(&old_state, R);
             // stepsize is updated by the extrapolation function
 

@@ -77,14 +77,14 @@ if(MSTAR_TESTS)
     # KETJU's unit tests (unit-tests/, GIZMO's additions included) on the C library, GoogleTest stand-in
     add_executable(ketju-unit-c ${T}/ketju_unit_main.cpp ${KETJU_ROOT}/unit-tests/integration.cpp
                    ${KETJU_ROOT}/unit-tests/mergers.cpp ${KETJU_ROOT}/unit-tests/mst_construction.cpp
-                   ${KETJU_ROOT}/unit-tests/gizmo_additions.cpp)
+                   ${KETJU_ROOT}/unit-tests/gizmo_additions.cpp ${KETJU_ROOT}/unit-tests/softening_kink.cpp)
     target_include_directories(ketju-unit-c PRIVATE ${T}/gtest_shim)
     target_link_libraries(ketju-unit-c ketju-ref)
     target_compile_features(ketju-unit-c PRIVATE cxx_std_17)
     add_test(NAME ketju_unit_c COMMAND ketju-unit-c)
 
-    # the same GIZMO-addition tests on the Kokkos library
-    add_executable(mstar-gizmo-additions ${T}/gizmo_additions_kokkos.cpp)
+    # the same GIZMO-addition and softening-landing tests on the Kokkos library
+    add_executable(mstar-gizmo-additions ${T}/gizmo_additions_kokkos.cpp ${T}/softening_kink_kokkos.cpp)
     target_include_directories(mstar-gizmo-additions PRIVATE ${T}/gtest_shim)
     target_link_libraries(mstar-gizmo-additions mstar::mstar)
     add_test(NAME mstar_gizmo_additions COMMAND mstar-gizmo-additions)

@@ -45,6 +45,90 @@ KOKKOS_INLINE_FUNCTION double softened_inverse_r3(double r, double h) {
     }
 }
 
+// Event location at the softening kernel's break points (integration.c softening_kink_theta). The spline's higher
+// derivatives jump at u = r / h = 0.5 and 1; a GBS step across such a point loses the smoothness the extrapolation and
+// its error estimate assume (Hairer, Norsett & Wanner I, II.6; Gear & Osterby 1984), so the step is landed on the
+// crossing. r^2 of a pair over the step is the cubic Hermite interpolant of its end values and slopes
+// (d r^2 / d theta = 2 r.v dt, theta = (t - t0) / dt in [0, 1]).
+struct HermiteR2 {
+    double g0, g1, d0, d1;
+    KOKKOS_INLINE_FUNCTION double operator()(double t) const {
+        const double t2 = t * t, t3 = t2 * t;
+        return g0 * (2 * t3 - 3 * t2 + 1) + d0 * (t3 - 2 * t2 + t) + g1 * (-2 * t3 + 3 * t2) + d1 * (t3 - t2);
+    }
+    KOKKOS_INLINE_FUNCTION double slope(double t) const {   // d r^2 / d theta
+        const double t2 = t * t;
+        return g0 * (6 * t2 - 6 * t) + d0 * (3 * t2 - 4 * t + 1) + g1 * (-6 * t2 + 6 * t) + d1 * (3 * t2 - 2 * t);
+    }
+    // first theta in [0, 1] with r^2 = c, 2 if none: monotone pieces between the roots of the slope, bisection
+    KOKKOS_INLINE_FUNCTION double first_crossing(double c) const {
+        const double A = 6 * g0 + 3 * d0 - 6 * g1 + 3 * d1, B = -6 * g0 - 4 * d0 + 6 * g1 - 2 * d1, C = d0;
+        double edge[4] = {0, 1, 1, 1};
+        int ne = 1;
+        if (fabs(A) > 1e-14 * (fabs(B) + fabs(C))) {
+            const double disc = B * B - 4 * A * C;
+            if (disc > 0) {
+                const double q = -0.5 * (B + (B >= 0 ? sqrt(disc) : -sqrt(disc)));
+                double r1 = q / A, r2 = q != 0 ? C / q : r1;
+                if (r1 > r2) { const double tmp = r1; r1 = r2; r2 = tmp; }
+                if (r1 > 0 && r1 < 1) edge[ne++] = r1;
+                if (r2 > 0 && r2 < 1 && r2 != r1) edge[ne++] = r2;
+            }
+        } else if (B != 0) {
+            const double r = -C / B;
+            if (r > 0 && r < 1) edge[ne++] = r;
+        }
+        edge[ne++] = 1;
+        for (int q = 0; q + 1 < ne; q++) {
+            double a = edge[q], b = edge[q + 1];
+            const double fa = (*this)(a) - c, fb = (*this)(b) - c;
+            if (fa == 0) return a;
+            if ((fa < 0) == (fb < 0) && fb != 0) continue;
+            for (int it = 0; it < 50; it++) {
+                const double m = 0.5 * (a + b), fm = (*this)(m) - c;
+                if ((fm < 0) == (fa < 0) && fm != 0) a = m; else b = m;
+            }
+            return 0.5 * (a + b);
+        }
+        return 2;
+    }
+};
+
+// Local error of a GBS step across a kink: the 4th time derivative of the pair's relative acceleration jumps by
+// J = G M / h^2 [f] (v_r / h)^4, [f] = 1536 at u = 0.5 and 384 at u = 1 (f(u) the spline force in units of
+// G M / h^2), and the extrapolation leaves a position error ~ J dt^6 / 6!. Crossings whose error is below
+// softening_kink_error_ratio x the tolerance on the pair's separation (tol u h) need no landing (grazing crossings,
+// short steps).
+KOKKOS_INLINE_FUNCTION double softening_kink_error(double GM, double h, double jump, double vr, double dt) {
+    const double w = vr / h, dt2 = dt * dt;
+    return GM / (h * h) * jump * (w * w) * (w * w) * (dt2 * dt2 * dt2) / 720;
+}
+
+// First crossing of u = r / h = 0.5 or 1 that needs a landing, by a pair of total mass M over a step: dr0, dv0
+// (r = x_j - x_i, v_j - v_i) at the start, dr1, dv1 at the end, dt the step's length, tol the GBS tolerance times
+// softening_kink_error_ratio; 2 if none
+KOKKOS_INLINE_FUNCTION double softening_kink_theta(const double* dr0, const double* dv0, const double* dr1,
+                                                   const double* dv1, double dt, double h, double GM, double tol) {
+    HermiteR2 p{0, 0, 0, 0};
+    for (int k = 0; k < 3; k++) {
+        p.g0 += dr0[k] * dr0[k];
+        p.g1 += dr1[k] * dr1[k];
+        p.d0 += dr0[k] * dv0[k];
+        p.d1 += dr1[k] * dv1[k];
+    }
+    p.d0 *= 2 * dt;
+    p.d1 *= 2 * dt;
+    double theta = 2;
+    for (int b = 0; b < 2; b++) {
+        const double uc = b == 0 ? 0.5 : 1.0, jump = b == 0 ? 1536.0 : 384.0;
+        const double t = p.first_crossing(uc * uc * h * h);
+        if (!(t < theta)) continue;
+        const double vr = fabs(p.slope(t)) / (2 * uc * h * fabs(dt));   // |dr/dt| at the crossing
+        if (softening_kink_error(GM, h, jump, vr, dt) > tol * uc * h) theta = t;
+    }
+    return theta;
+}
+
 // bh_mergers.c time_since_pericentre: time since the pericentre of the osculating two-body orbit (r.v >= 0 side)
 KOKKOS_INLINE_FUNCTION double time_since_pericentre(double mu, double r, double v2, double rv, double e) {
     const double eps = 0.5 * v2 - mu / r, h2 = r * r * v2 - rv * rv, p = h2 / mu;

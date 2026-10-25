@@ -12,6 +12,7 @@ set(UNIT_TEST_SRCS
     integration.cpp
     mergers.cpp
     gizmo_additions.cpp
+    softening_kink.cpp
     )
 
 add_executable(ketju-integrator-unit-tests ${UNIT_TEST_SRCS})

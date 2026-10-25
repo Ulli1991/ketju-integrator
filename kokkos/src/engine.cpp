@@ -870,10 +870,13 @@ struct Engine {
     int gbs_k = 4;
     bool work_on = false;   // B carries non-Newtonian work (PN, extra forces): the ledger pn_dB is kept
     // per-step result read back to the host: 0 T, 1 U, 2 time, 3 e0, 4 e1, 5 bad, 6 extrapolated B, 7 collision
-    // pair key i N + j (-1: none), 8 r_sep, 9 r_coll, 10 type; from RES_PN the PN positions
-    static constexpr int RES_PN = 12;
+    // pair key i N + j (-1: none), 8 r_sep, 9 r_coll, 10 type, 11 extra work, 12 first softening-kernel crossing
+    // (fraction of the step, 2: none); from RES_PN the PN positions
+    static constexpr int RES_PN = 13;
     V<double*> res;
     Kokkos::View<long, Mem> ckey;
+    Kokkos::View<double, Mem> kink;   // first crossing of a softening-kernel break point in the candidate step
+    bool kink_on = false;
     bool coll_on = false;
     Kokkos::View<double*, Kokkos::HostSpace> h_res;
     V<double*> tmin;                // initial time step reduction
@@ -906,6 +909,7 @@ struct Engine {
         d.no_ss = o.options.no_star_star_gravity;
         d.ss_mod = d.no_ss || d.soft > 0;
         work_on = d.vdep_on || d.track_vi;
+        kink_on = o.options.softening_kink_landing && d.soft > 0 && !d.no_ss;
         d.nvars = 1 + 3 + 3 + 6 * (N - 1) + 3 * Npn;
         if (N == cap_N && Npn == cap_pn && K == cap_k) return;
         cap_N = N; cap_pn = Npn; cap_k = K;
@@ -939,6 +943,7 @@ struct Engine {
         res = V<double*>("mstar_res", RES_PN + 3 * P);
         h_res = Kokkos::View<double*, Kokkos::HostSpace>("mstar_hres", RES_PN + 3 * P);
         ckey = Kokkos::View<long, Mem>("mstar_ckey");
+        kink = Kokkos::View<double, Mem>("mstar_kink");
         tmin = V<double*>("mstar_tmin", 1);
         errview = Kokkos::View<ErrVal, Mem>("mstar_err");
         bslot = K; cslot = K + 1;
@@ -1327,6 +1332,32 @@ struct Engine {
         o.perf.launches++;
     }
 
+    // First crossing (fraction of the step) of a softening-kernel break point that needs a landing, by a softened pair
+    // between slot s_prev (step start) and slot s (step end), into kink (2: none); integration.c softening_kink_theta
+    void launch_kink(int s, int s_prev) {
+        const Dev dd = d;
+        const int N = d.N;
+        const Kokkos::View<double, Mem> th = kink;
+        if (!kink_on) return;
+        const double tol = o.options.gbs_relative_tolerance * o.options.softening_kink_error_ratio;
+        Kokkos::parallel_reduce("mstar_kink", Kokkos::RangePolicy<Exec>(dd.Npn, N), KOKKOS_LAMBDA(int i, double& mn) {
+            const double dt = dd.scal(s, S_TIME) - dd.scal(s_prev, S_TIME);
+            for (int j = i + 1; j < N; j++) {
+                double dr0[3], dv0[3], dr1[3], dv1[3];
+                for (int k = 0; k < 3; k++) {
+                    dr0[k] = dd.pos(s_prev, j, k) - dd.pos(s_prev, i, k);
+                    dv0[k] = dd.vel(s_prev, j, k) - dd.vel(s_prev, i, k);
+                    dr1[k] = dd.pos(s, j, k) - dd.pos(s, i, k);
+                    dv1[k] = dd.vel(s, j, k) - dd.vel(s, i, k);
+                }
+                const double GM = dd.G * (dd.mass(i) + dd.mass(j));
+                const double t = detail::softening_kink_theta(dr0, dv0, dr1, dv1, dt, dd.soft, GM, tol);
+                if (t < mn) mn = t;
+            }
+        }, Kokkos::Min<double, Mem>(th));
+        o.perf.launches++;
+    }
+
     // estimate_initial_timestep on slot s
     double initial_timestep(int s) {
         const Dev dd = d;
@@ -1455,6 +1486,9 @@ struct Engine {
             total_energy(cs);
             launch_collision(cs, bs);
             launch_collision_res(cs, bs);
+            launch_kink(cs, bs);
+            const Kokkos::View<double, Mem> th = kink;
+            const bool kon = kink_on;
             const V<double*> r = res;
             const int Npn = d.Npn;
             Kokkos::parallel_for("mstar_res", Kokkos::RangePolicy<Exec>(0, 1), KOKKOS_LAMBDA(int) {
@@ -1466,6 +1500,7 @@ struct Engine {
                 r(5) = errv().bad;
                 r(6) = dd.data(KR, nv);
                 r(11) = dd.data(KR, nv + 1);
+                r(12) = kon && th() < 2.0 ? th() : 2.0;
                 for (int i = 0; i < Npn; i++)
                     for (int q = 0; q < 3; q++) r(RES_PN + 3 * i + q) = dd.pos(cs, i, q);
             });
@@ -1653,6 +1688,7 @@ bool run_on(System& S, Engine<Exec>& im, double time_interval) {
     double Hstep = dt * U;
     bool finished = false, ok = true;
     double B_now = initial_B;
+    int kink_retries = 0;   // consecutive landing retries of the current step
     std::vector<double> xp, vp;   // previous accepted state (collision pericentre test)
     do {
         if (opt.enable_bh_mergers && Hstep > 0 && detail::bh_merger_due(S)) {
@@ -1673,6 +1709,7 @@ bool run_on(System& S, Engine<Exec>& im, double time_interval) {
             }
         }
         const int k = im.gbs_k;
+        const double Hstep_attempted = Hstep;
         im.gbs_step(Hstep);
         const ErrVal err = im.last_err;
         double e0 = err.e0, e1 = err.e1;
@@ -1712,7 +1749,20 @@ bool run_on(System& S, Engine<Exec>& im, double time_interval) {
             perf.total_work += gbs_total_cost(k) * (.5 * n * (opt.no_star_star_gravity ? npn : n - 1)
                                                     + (npn * (npn - 1) * (opt.PN_flags & PN_THREEBODY ? npn - 2 : 1)));
         }
-        if (converged) {
+        // a softened pair crossed a kernel break point inside the converged step: repeat it ending on the crossing
+        // (integration.c: the same rule)
+        bool kink_retry = false;
+        if (converged && im.kink_on && kink_retries < 20) {
+            const double theta = im.h_res(12), eta = opt.softening_kink_eta;
+            if (theta >= eta && theta < 1 - eta) {
+                kink_retry = true;
+                kink_retries += 1;
+                perf.kink_landings += 1;
+                Hstep = theta * Hstep_attempted;
+            }
+        }
+        if (converged && !kink_retry) kink_retries = 0;
+        if (converged && !kink_retry) {
             std::swap(im.bslot, im.cslot);
             if (im.work_on) S.pn_dB += im.h_res(6) - B_now;   // work of the non-Newtonian forces
             if (im.d.track_vi) S.ext_work += im.h_res(11);     // of the velocity-independent extra forces
@@ -1774,7 +1824,7 @@ bool run_on(System& S, Engine<Exec>& im, double time_interval) {
                     steps_since_reconstruction = 0;
                 }
             }
-        } else {
+        } else if (!converged) {
             perf.failed_steps += 1;
         }
         if (opt.max_step_count > 0 && perf.failed_steps + perf.successful_steps > opt.max_step_count) {

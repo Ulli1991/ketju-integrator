@@ -118,6 +118,16 @@ struct ketju_integration_options {
 
     double star_star_softening;
     //< force softening length between non-pn particles, disabled if <= 0
+    bool softening_kink_landing;
+    //< Land GBS steps on the softening kernel's break points (u = r/h = 0.5 and 1)
+    // when a softened pair crosses one inside a step (the extrapolation error
+    // estimate fails across them otherwise).
+    double softening_kink_eta;
+    //< A crossing within this fraction of a step from either end is accepted.
+    double softening_kink_error_ratio;
+    //< Crossings whose estimated local error (the jump of the spline's 4th force
+    // derivative, J dt^6 / 6!) is below this ratio x the GBS tolerance on the
+    // pair's separation are not landed.
     bool no_star_star_gravity;
     //< Disable gravity between stars (non-pn particles), only interactions
     // including pn-particles are computed.
@@ -159,6 +169,9 @@ static const struct ketju_integration_options
         .max_step_count = -1,
         .mst_algorithm = KETJU_MST_PRIM,
         .star_star_softening = 0.,
+        .softening_kink_landing = true,
+        .softening_kink_eta = 5e-4,
+        .softening_kink_error_ratio = 1,
         .no_star_star_gravity = false,
         .enable_bh_mergers = true,
         .bh_merger_distance_in_Rs = 12,
@@ -226,6 +239,7 @@ struct ketju_performance_counters {
 
     int successful_steps; // Number of accepted steps
     int failed_steps;     // Number of failed steps
+    int kink_landings;    // Steps retried to land on a softening-kernel break point
     double total_work;    //< ~ Number of force evaluations done
     double relative_energy_error;
     //< Relative change in the energy of the system over the last
