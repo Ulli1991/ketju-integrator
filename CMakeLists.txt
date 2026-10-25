@@ -118,6 +118,10 @@ endif()
 add_executable(nbody "nbody/main.c")
 target_link_libraries(nbody ketju-integrator)
 
+# MPI scaling benchmark (same Plummer groups as kokkos/examples/mstar_bench.cpp)
+add_executable(ketju-mpi-bench "bench/ketju_mpi_bench.cpp")
+target_link_libraries(ketju-mpi-bench ketju-integrator)
+
 # Python shim
 add_subdirectory("python_bindings")
 
