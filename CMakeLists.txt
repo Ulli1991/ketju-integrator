@@ -97,6 +97,12 @@ target_link_libraries(ketju-integrator PUBLIC m) # math lib
 
 # Find packages
 
+# KETJU_SERIAL_MPI: build without MPI, with the single-task stand-in thirdparty/serial_mpi/mpi.h (one task per
+# communicator; the C++/Kokkos library in kokkos/ needs no MPI)
+option(KETJU_SERIAL_MPI "Build the C library with the single-task MPI stand-in instead of MPI" OFF)
+if(KETJU_SERIAL_MPI)
+    target_include_directories(ketju-integrator PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/serial_mpi)
+else()
 find_package(MPI REQUIRED)
 target_include_directories(ketju-integrator PUBLIC ${MPI_C_INCLUDE_PATH})
 target_link_libraries(ketju-integrator PUBLIC ${MPI_C_LIBRARIES})
@@ -105,6 +111,7 @@ target_link_libraries(ketju-integrator PUBLIC ${MPI_C_LIBRARIES})
 # First need to strip extra whitespace in the MPI variable which causes errors
 string(STRIP "${MPI_C_LINK_FLAGS}" MPI_C_LINK_FLAGS)
 target_link_libraries(ketju-integrator PUBLIC ${MPI_C_LINK_FLAGS})
+endif()
 
 # standalone executable
 
@@ -127,6 +134,13 @@ write_basic_package_version_file(
 export(TARGETS ketju-integrator
     FILE "${MAINFOLDER}/ketju-integrator-config.cmake"
 )
+
+## C++/Kokkos MSTAR library (kokkos/, GPU support; needs Kokkos: -DKokkos_ROOT=...)
+option(KETJU_KOKKOS "Build the C++/Kokkos MSTAR library in kokkos/ (target mstar::mstar) and its tests" OFF)
+if(KETJU_KOKKOS)
+    enable_testing()
+    add_subdirectory("kokkos")
+endif()
 
 ## unit tests if enabled
 option(UNIT_TESTS "Build and run unit-tests" OFF)

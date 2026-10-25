@@ -30,6 +30,16 @@ If you encounter issues when using the code, you can report them using the [issu
 [GADGET4-KETJU repository]: https://bitbucket.org/helsinkiextragalacticgroup/gadget4-ketju
 [issue tracker]: https://bitbucket.org/helsinkiextragalacticgroup/ketju-integrator/issues 
 
+## C++/Kokkos version (GPU)
+
+C++ rewrite of the MSTAR regularised integrator (Rantala et al. 2020; public KETJU integrator, Mannerkoski et al.
+2023) with Kokkos support for GPUs, by Ulrich Steinwandel: the library `mstar::mstar` in [`kokkos/`](kokkos/README.md),
+with the same physics and options as the C library here (including the GIZMO additions: contact collisions,
+their energy booking with tide and softening, the pericentre guard, the external tide). The C library stays the
+reference implementation. Build it with `cmake .. -DKETJU_KOKKOS=ON -DKokkos_ROOT=<kokkos install>` (add
+`-DKETJU_SERIAL_MPI=ON` to build the C library without MPI); see [`kokkos/README.md`](kokkos/README.md) for the
+API, the tests (C vs Kokkos comparisons) and the citations (Rantala et al. 2020, MNRAS 492, 4131 is required).
+
 ## License
 
 This software is licensed under the GPLv3 license:
