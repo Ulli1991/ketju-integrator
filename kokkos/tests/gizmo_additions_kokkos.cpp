@@ -322,14 +322,16 @@ TEST(Gizmo_collision_energy, tide_and_softening) {
     EXPECT_GT(std::abs(dE_variant[1] - dE_variant[0]), 1e-2 * std::abs(dE_variant[0]));
 }
 
-// a collision during run() with softening and the tide: E_end - E0 = dE_collision + the integration error (measured
-// 9.6e-13 at tolerance 1e-13, 1.5e-10 at 1e-11, bitwise as the C library: mstar-compare-c coll_tide_soft)
+// a collision during run() with softening and the tide: E_end - E0 = dE_collision + the integration error. h = 0.05
+// below R1 + R2 = 0.1: no pair crosses the softening kernel's break points before merging (pairs that do defeat the GBS
+// error estimate, in the C library too: mstar-compare-c softening_ensemble). Bitwise as the C library on the CPU
+// (mstar-compare-c coll_tide_soft_1e-13: |dE/E| 2.0e-13)
 TEST(Gizmo_collision_energy, run_with_tide_and_softening) {
     mstar::System S(0, 3);
     setup_stars(S);
     S.options.gbs_relative_tolerance = 1e-13;
     S.collision_radius = {0.05, 0.05, 0.05};
-    S.options.star_star_softening = 0.3;
+    S.options.star_star_softening = 0.05;
     S.options.enable_external_tide = true;
     const double T[6] = {-0.002, 0.001, 0.0015, 0.0004, -0.0003, 0.0006};
     for (int k = 0; k < 6; ++k) S.options.external_tidal_tensor[k] = T[k];
@@ -340,10 +342,10 @@ TEST(Gizmo_collision_energy, run_with_tide_and_softening) {
     const double E0 = S.energy();
     S.run(20);
     ASSERT_EQ((int)S.mergers.size(), 1);
-    EXPECT_NEAR(S.energy(), E0 + S.mergers[0].dE_collision, 1.3e-12 * std::abs(E0));
-    EXPECT_LT(std::abs(S.perf.relative_energy_error), 1.3e-12);
+    EXPECT_NEAR(S.energy(), E0 + S.mergers[0].dE_collision, 5e-13 * std::abs(E0));
+    EXPECT_LT(std::abs(S.perf.relative_energy_error), 5e-13);
     // negative check: without the booking the energy is off by the collision energy
-    EXPECT_GT(std::abs(S.energy() - E0), 1e9 * 1.3e-12 * std::abs(E0));
+    EXPECT_GT(std::abs(S.energy() - E0), 1e9 * 5e-13 * std::abs(E0));
 }
 
 int main(int argc, char **argv) {

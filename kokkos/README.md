@@ -130,9 +130,33 @@ stops the call at the colliding step instead of merging inside), `S.perturbers` 
   two BHs in a 60-star cusp with all PN terms, PN work ledger, stop-rule collisions, contact collisions (head-on and
   pericentre-decided, in one and ten calls), collision with tide and softening, external tide, softening, no
   star-star gravity, head-on and orbital BH mergers.
+  Each comparison also checks momentum and angular momentum (Kokkos within 2x of C or at the round-off floor).
+  `collision_tolscan` tabulates collision times and energies against the GBS tolerance and `softening_ensemble`
+  compares energy errors over 16 perturbed initial states (below).
 * `mstar_extra_force`: the extra forces against the branch patch forward-ported onto eb96fd0 and against RK4.
 * `mstar_embedded_tide`: an embedded group, impulsive member kicks against c.o.m. kicks + continuous tide.
 * `mstar_driver`: the driver on `../nbody/nbody_sample_ic.txt`.
 * `mstar-bench [N_max] [steps] [C_N_max] [team_N]`: scaling (not a ctest).
 
 Results (CPU: gcc 15, Kokkos OpenMP, 1 thread; A100: CUDA 13.2) are noted at each case in `tests/compare_c.cpp`.
+
+## Accuracy notes (both libraries)
+
+* **Collision times are resolved to one GBS step.** Both libraries detect a contact collision on the accepted state
+  at the end of a step and merge there, without landing on the contact. The recorded time and the collision energy
+  (the pair is already inside contact by a step-dependent amount) therefore follow the step sequence and do not
+  converge with the GBS tolerance: in `collision_tolscan` the C library's own collision times at tolerances
+  1e-8 .. 1e-13 differ by up to 6e-4 T, and its collision energies by up to 6e-8 relative. Kokkos (CPU and A100)
+  differs from C by the same amounts; the energy including the booked collision energies is conserved to the
+  tolerance level in every case, and so are momentum and angular momentum (minus the pair's internal angular momentum,
+  which a merger at the CoM removes in both libraries).
+* **Softened pairs defeat the GBS error estimate.** The GADGET spline (`star_star_softening`) has jumps in its
+  higher derivatives at u = r / h = 0.5 and 1. A pair that moves through them breaks the smoothness that the
+  extrapolation and its error estimate rely on: in the C library a softened two-body orbit through h has |dE/E|
+  3e-8 (median over 16 states) at tolerance 1e-11 and 2e-9 at 1e-13, with outliers up to 7e-6 when a collision is
+  involved (`softening_ensemble`), varying by orders of magnitude with 1e-9 changes of the initial state. The Kokkos
+  library behaves identically (the same ensemble statistics); single softened trajectories are compared through
+  these ensembles. Collisions decided before the pair reaches h (R1 + R2 > h) are not affected.
+* GPU (A100) results differ from the CPU ones by floating-point round-off (FMA contraction, team reduction order).
+  The step sequence amplifies that round-off, which explains the different step counts and collision times; the
+  measured CPU and A100 values are noted at each case in `tests/compare_c.cpp`.

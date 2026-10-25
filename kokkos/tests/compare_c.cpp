@@ -13,6 +13,7 @@
 // and the A100 (CUDA 13.2; FMA contraction and team reductions make the GBS step sequence differ at the
 // tolerance-1e-12 round-off floor) builds, noted at each case.
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -195,13 +196,56 @@ bool check(const char* c, const char* what, double v, double bound) {
 
 // bound_merge: |t_C - t_K| / T of every merger / collision (both are recorded at the end of the accepted step, so
 // with different step sequences they differ by up to a step), bound_mdE: |dE_coll,C - dE_coll,K| / |dE_coll,C|
-void compare(const char* name, const Sys& sy, const Opt& o, double T, double bound_x, double bound_dE_c,
+// Drift of the total momentum and angular momentum of r against the initial state s, relative to sum m |v| and
+// sum m |x x v| (the larger of initial and final; conserved without PN, tide and extra forces; a contact collision
+// conserves P and removes the pair's internal angular momentum from L, in both codes alike)
+void pl_drift(const Sys& s, const Run& r, double& dP, double& dL) {
+    auto sums = [](const std::vector<double>& m, const std::vector<double>& x, const std::vector<double>& v, int n,
+                   double* P, double* L, double& sp, double& sl) {
+        for (int k = 0; k < 3; k++) P[k] = L[k] = 0;
+        sp = sl = 0;
+        for (int i = 0; i < n; i++) {
+            const double* q = &x[3 * i];
+            const double* u = &v[3 * i];
+            const double l[3] = {q[1] * u[2] - q[2] * u[1], q[2] * u[0] - q[0] * u[2], q[0] * u[1] - q[1] * u[0]};
+            for (int k = 0; k < 3; k++) { P[k] += m[i] * u[k]; L[k] += m[i] * l[k]; }
+            sp += m[i] * std::sqrt(u[0] * u[0] + u[1] * u[1] + u[2] * u[2]);
+            sl += m[i] * std::sqrt(l[0] * l[0] + l[1] * l[1] + l[2] * l[2]);
+        }
+    };
+    double P0[3], L0[3], P1[3], L1[3], sp, sl, sp1, sl1;
+    sums(s.m, s.x, s.v, s.n, P0, L0, sp, sl);
+    sums(r.m, r.x, r.v, r.n, P1, L1, sp1, sl1);
+    sp = std::fmax(sp, sp1);
+    sl = std::fmax(sl, sl1);
+    dP = dL = 0;
+    for (int k = 0; k < 3; k++) {
+        dP = std::fmax(dP, std::fabs(P1[k] - P0[k]) / sp);
+        dL = std::fmax(dL, std::fabs(L1[k] - L0[k]) / sl);
+    }
+}
+
+// Returned: the largest C-vs-Kokkos differences (state, merger times, collision energies) for convergence checks
+struct Diff {
+    double x = 0, t_merge = 0, dE_coll = 0;
+};
+Diff compare(const char* name, const Sys& sy, const Opt& o, double T, double bound_x, double bound_dE_c,
              double bound_dE_k, double bound_merge = 1e-12, double bound_mdE = 1e-12) {
+    Diff df;
     const Run a = run_c(sy, o, T);
     const Run b = run_k(sy, o, T);
     std::printf("%s: N=%d npn=%d T=%g  C: %ld steps (%ld fail) dE %.3e %.3fs | Kokkos: %ld steps (%ld fail) dE %.3e %.3fs\n",
                 name, sy.n, sy.npn, T, a.steps, a.fails, a.dE, a.wall, b.steps, b.fails, b.dE, b.wall);
     check(name, "N_C - N_K", std::fabs((double)(a.n - b.n)), 0.0);
+    if (!o.pn && !o.tide) {   // momentum and angular momentum: Kokkos as good as C, or at the round-off floor 1.5e-13
+                              // (C: up to 1.0e-13 for 40-100 bodies)
+        double pa, la, pb, lb;
+        pl_drift(sy, a, pa, la);
+        pl_drift(sy, b, pb, lb);
+        std::printf("  dP C %.2e K %.2e, dL C %.2e K %.2e\n", pa, pb, la, lb);
+        check(name, "|dP| Kokkos (<= 2 C, 1.5e-13)", pb, std::fmax(2 * pa, 1.5e-13));
+        check(name, "|dL| Kokkos (<= 2 C, 1.5e-13)", lb, std::fmax(2 * la, 1.5e-13));
+    }
     check(name, "merger count C - K", std::fabs((double)a.merges.size() - (double)b.merges.size()), 0.0);
     for (size_t q = 0; q < a.merges.size() && q < b.merges.size(); q++) {
         const Merge &x = a.merges[q], &y = b.merges[q];
@@ -209,17 +253,21 @@ void compare(const char* name, const Sys& sy, const Opt& o, double T, double bou
                     x.t, y.t, x.m1, y.m1, x.m2, y.m2, x.dE, y.dE);
         check(name, "merger kind C - K", std::fabs((double)(x.is_coll - y.is_coll)), 0.0);
         check(name, "merger |dt| / T", std::fabs(x.t - y.t) / T, bound_merge);
+        df.t_merge = std::fmax(df.t_merge, std::fabs(x.t - y.t) / T);
+        if (x.is_coll) df.dE_coll = std::fmax(df.dE_coll, std::fabs(x.dE - y.dE) / std::fabs(x.dE));
         check(name, "merger masses", std::fabs(x.m1 - y.m1) + std::fabs(x.m2 - y.m2), 1e-14 * (x.m1 + x.m2));
         if (x.is_coll) check(name, "collision |ddE| / |dE|", std::fabs(x.dE - y.dE) / std::fabs(x.dE), bound_mdE);
     }
     if (!a.R.empty()) check(name, "collision radii C vs K", rel_diff(a.R, b.R), 0.0);
     check(name, "|dx|/x C vs Kokkos", rel_diff(a.x, b.x), bound_x);
     check(name, "|dv|/v C vs Kokkos", rel_diff(a.v, b.v), bound_x);
+    df.x = std::fmax(rel_diff(a.x, b.x), rel_diff(a.v, b.v));
     if (sy.npn) check(name, "|dS|/S C vs Kokkos", rel_diff(a.s, b.s), bound_x);
     check(name, "|t_C - t_K| / T", std::fabs(a.t - b.t) / T, 1e-12);
     check(name, "|dE/E| C", std::fabs(a.dE), bound_dE_c);
     check(name, "|dE/E| Kokkos", std::fabs(b.dE), bound_dE_k);
     check(name, "step count diff", std::fabs((double)(a.steps - b.steps)), std::fmax(2.0, 0.25 * a.steps));   // A100: 19 of 98 (Kepler)
+    return df;
 }
 
 void kepler_pair(double m1, double m2, double a, double e, double* q, double* v) {
@@ -270,6 +318,49 @@ Sys plummer(int n, int npn, unsigned seed, double m_bh = 0) {
     for (int i = 0; i < n; i++)
         for (int k = 0; k < 3; k++) { s.x[3 * i + k] -= cx[k] / M; s.v[3 * i + k] -= cv[k] / M; }
     return s;
+}
+
+// Collision times and energies against the GBS tolerance (no checks, a table): both codes record a collision at the
+// end of the accepted step on which it is detected, so t_merger is resolved only to a step and does not converge with
+// the tolerance; the C-vs-C spread over tolerances is the scale against which the Kokkos-vs-C differences are judged
+void collision_tolscan(const char* name, const Sys& sy, Opt o, double T) {
+    const double tols[4] = {1e-8, 1e-10, 1e-12, 1e-13};
+    Run c[4], k[4];
+    for (int q = 0; q < 4; q++) {
+        o.tol = tols[q];
+        c[q] = run_c(sy, o, T);
+        k[q] = run_k(sy, o, T);
+    }
+    std::printf("%s tolerance scan (|dt|/T, |ddE|/|dE| per merger; C-vs-C: against C at 1e-13):\n", name);
+    for (int q = 0; q < 4; q++) {
+        std::printf("  tol %.0e  C %ld steps |dE/E| %.2e, K %ld steps |dE/E| %.2e | x K-C %.2e C-C %.2e |", tols[q], c[q].steps,
+                    std::fabs(c[q].dE), k[q].steps, std::fabs(k[q].dE),
+                    std::fmax(rel_diff(c[q].x, k[q].x), rel_diff(c[q].v, k[q].v)),
+                    std::fmax(rel_diff(c[q].x, c[3].x), rel_diff(c[q].v, c[3].v)));
+        for (size_t m = 0; m < c[q].merges.size() && m < k[q].merges.size() && m < c[3].merges.size(); m++)
+            std::printf("  m%zu K-C %.2e %.2e  C-C %.2e %.2e", m, std::fabs(k[q].merges[m].t - c[q].merges[m].t) / T,
+                        std::fabs(k[q].merges[m].dE - c[q].merges[m].dE) / std::fabs(c[q].merges[m].dE),
+                        std::fabs(c[q].merges[m].t - c[3].merges[m].t) / T,
+                        std::fabs(c[q].merges[m].dE - c[3].merges[m].dE) / std::fabs(c[3].merges[m].dE));
+        std::printf("\n");
+    }
+}
+
+// |dE/E| over an ensemble of 16 initial states (x_0 shifted by q 1e-9): median and maximum for C and Kokkos
+void energy_ensemble(const char* name, const Sys& sy, const Opt& o, double T, double* med_c, double* max_c, double* med_k,
+                     double* max_k) {
+    std::vector<double> ec, ek;
+    for (int q = 0; q < 16; q++) {
+        Sys s = sy;
+        s.x[0] += q * 1e-9;
+        ec.push_back(std::fabs(run_c(s, o, T).dE));
+        ek.push_back(std::fabs(run_k(s, o, T).dE));
+    }
+    std::sort(ec.begin(), ec.end());
+    std::sort(ek.begin(), ek.end());
+    *med_c = ec[8]; *max_c = ec[15]; *med_k = ek[8]; *max_k = ek[15];
+    std::printf("%s: |dE/E| over 16 states: C median %.2e max %.2e | Kokkos median %.2e max %.2e\n", name, *med_c, *max_c,
+                *med_k, *max_k);
 }
 
 bool want(int argc, char** argv, const char* c) {
@@ -441,13 +532,17 @@ int main(int argc, char** argv) {
             o.tol = 1e-10;
             o.radius.assign(40, 1e-5);
             for (int i = 0; i < 4; i++) o.radius[i] = 0.001;
-            compare("star_collisions", s, o, 0.1, 3.1e-8, 1.4e-13, 1.4e-13, 5.2e-4, 4.4e-9);   // CPU dv 2.3e-8, dt 4.0e-4, ddE 3.4e-9 (the collisions are recorded at step ends)
+            // state, collision times and energies differ by the step-end recording of the collisions: bounds 1.3x the largest
+            // Kokkos-vs-C or C-vs-C difference of collision_tolscan (CPU: x 7.1e-8, dt 9.2e-4, ddE 1.0e-8; A100 at 1e-10:
+            // 4.6e-8, 6.7e-4, 6.6e-9); |dE/E| CPU 1.0e-13 / 6.2e-14, A100 6.7e-15
+            compare("star_collisions", s, o, 0.1, 9.3e-8, 1.4e-13, 1.4e-13, 1.2e-3, 1.3e-8);
             o.calls = 10;
-            compare("star_collisions_10", s, o, 0.1, 6.6e-10, 4.1e-14, 4.1e-14, 5.2e-5, 1.4e-10);   // CPU dv 5.1e-10, dt 4.0e-5, ddE 1.0e-10
+            compare("star_collisions_10", s, o, 0.1, 1.1e-9, 4.1e-14, 4.1e-14, 9.2e-5, 2.2e-10);   // dv CPU 5.1e-10 A100 8.7e-10, dt 4.0e-5 / 7.1e-5, ddE 1.0e-10 / 1.7e-10; |dE/E| CPU 3.1e-14, A100 2.7e-14
         }
         if (want(argc, argv, "coll_tide_soft")) {
-            // a collision during the run with star_star_softening and the external tide (gizmo_additions_kokkos
-            // Gizmo_collision_energy.run_with_tide_and_softening)
+            // a collision during the run with star_star_softening and the external tide. Well-conditioned set-up:
+            // h = 0.05 below the contact distance R1 + R2 = 0.1, so no integrated pair crosses the kernel's break
+            // points (u = 0.5, 1) before it merges (softening_ensemble below for pairs that do)
             Sys s;
             s.n = 3;
             s.m = {1, 0.7, 0.5};
@@ -456,14 +551,68 @@ int main(int argc, char** argv) {
             Opt o;
             o.tol = 1e-11;
             o.out_tol = 1e-12;
+            o.soft = 0.05;
+            o.tide = true;
+            const double T[6] = {-0.002, 0.001, 0.0015, 0.0004, -0.0003, 0.0006};
+            for (int q = 0; q < 6; q++) o.T[q] = T[q];
+            o.radius = {0.05, 0.05, 0.05};
+            // bounds: |dE/E| CPU 4.1e-13 (tolerance 1e-11); the state, collision time and energy: 1.3x the C-vs-C spread over
+            // tolerances 1e-8..1e-13 (collision_tolscan: x 7.1e-7, dt 9.4e-5, ddE 6.1e-8; CPU Kokkos vs C bitwise)
+            compare("coll_tide_soft", s, o, 20, 9.2e-7, 1e-12, 1e-12, 1.2e-4, 7.9e-8);
+            o.team_max = 0;   // staged path (the device default)
+            compare("coll_tide_soft_st", s, o, 20, 9.2e-7, 1e-12, 1e-12, 1.2e-4, 7.9e-8);
+            o.team_max = 96;
+            o.tol = 1e-13;
+            compare("coll_tide_soft_1e-13", s, o, 20, 9.2e-7, 5e-13, 5e-13, 1.2e-4, 7.9e-8);   // |dE/E| CPU 2.0e-13
+            if (want(argc, argv, "collision_tolscan")) collision_tolscan("coll_tide_soft", s, o, 20);
+        }
+        if (want(argc, argv, "softening_ensemble")) {
+            // Finding (C library and this one alike): a pair that moves through the softening kernel's break points
+            // (u = 0.5 and 1; the spline's higher derivatives jump there) defeats the GBS error estimate: |dE/E| is
+            // 1e2 - 1e5 x the tolerance and varies by orders of magnitude with 1e-9 changes of the initial state
+            // (two-body softened orbit through h: 3e-8 median at tolerance 1e-11, 2e-9 at 1e-13). Single trajectories
+            // are therefore compared as ensembles: the Kokkos median and maximum against the C ones
+            Sys s;
+            s.n = 3;
+            s.m = {1, 0.7, 0.5};
+            s.x = {1, 0, 0, -1, 0.02, 0, 0, 3, 0.5};
+            s.v = {-0.3, 0, 0, 0.3, 0, 0, 0.2, 0, 0};
+            Opt o;
+            o.out_tol = 1e-12;
             o.soft = 0.3;
             o.tide = true;
             const double T[6] = {-0.002, 0.001, 0.0015, 0.0004, -0.0003, 0.0006};
             for (int q = 0; q < 6; q++) o.T[q] = T[q];
             o.radius = {0.05, 0.05, 0.05};
-            compare("coll_tide_soft", s, o, 20, 1e-12, 1.9e-10, 1.9e-10);   // CPU bitwise, dE 1.48e-10 (tolerance 1e-11)
-            o.tol = 1e-13;
-            compare("coll_tide_soft_1e-13", s, o, 20, 1e-12, 1.25e-12, 1.25e-12);   // CPU bitwise, dE 9.6e-13
+            for (double tol : {1e-11, 1e-13}) {
+                o.tol = tol;
+                double mc, xc, mk, xk;
+                energy_ensemble(tol > 1e-12 ? "softening_ensemble_1e-11" : "softening_ensemble_1e-13", s, o, 20, &mc, &xc, &mk, &xk);
+                check("softening_ens", "Kokkos / C median |dE/E|", mk / mc, 3.0);
+                check("softening_ens", "Kokkos / C max |dE/E|", xk / xc, 10.0);
+            }
+        }
+        if (want(argc, argv, "collision_tolscan")) {
+            Sys s = plummer(40, 0, 11);
+            for (int k = 0; k < 12; k++) { s.x[k] = 0; s.v[k] = 0; }
+            const double rp = 0.001, vinf = 2.0, mu = 2.0 / 40, b = std::sqrt(rp * rp + 2 * mu * rp / (vinf * vinf));
+            s.x[0] = 0.05; s.x[3] = -0.05; s.v[0] = -1; s.v[3] = 1;
+            s.x[6] = 0.05; s.x[7] = 0.3 + b / 2; s.x[9] = -0.05; s.x[10] = 0.3 - b / 2; s.v[6] = -1; s.v[9] = 1;
+            Opt o;
+            o.radius.assign(40, 1e-5);
+            for (int i = 0; i < 4; i++) o.radius[i] = 0.001;
+            collision_tolscan("star_collisions", s, o, 0.1);
+            Sys t = plummer(50, 0, 5);
+            for (int i = 0; i < 50; i++) t.x[3 * i] += 0.3;
+            for (int k = 0; k < 6; k++) t.v[k] = 0;
+            t.x[0] = 0.35; t.x[1] = t.x[2] = 0; t.x[3] = 0.25; t.x[4] = t.x[5] = 0; t.v[0] = -1; t.v[3] = 1;
+            Opt p;
+            p.tide = true;
+            const double TT[6] = {-0.5, 0.2, 0.3, 0.1, -0.05, 0.08};
+            for (int q = 0; q < 6; q++) p.T[q] = TT[q];
+            p.radius.assign(50, 0.0);
+            p.radius[0] = p.radius[1] = 0.001;
+            collision_tolscan("external_tide_coll", t, p, 0.25);
         }
         if (want(argc, argv, "external_tide")) {
             // linear external tide a = T x (GIZMO addition) on a 50-body Plummer group off the origin
@@ -474,13 +623,15 @@ int main(int argc, char** argv) {
             o.tide = true;
             const double T[6] = {-0.5, 0.2, 0.3, 0.1, -0.05, 0.08};
             for (int q = 0; q < 6; q++) o.T[q] = T[q];
-            compare("external_tide", s, o, 0.25, 1.7e-13, 1.2e-13, 1.2e-13);   // CPU dv 1.3e-13, dE 8.9e-14 / 8.0e-14
+            compare("external_tide", s, o, 0.25, 3.9e-13, 1.2e-13, 1.2e-13);   // dv CPU 1.3e-13, A100 3.0e-13 (round-off); |dE/E| C 8.9e-14, CPU 8.0e-14, A100 1.5e-14
             // with contact collisions and the tide: the collision energy includes the tide term
             for (int k = 0; k < 6; k++) s.v[k] = 0;
             s.x[0] = 0.35; s.x[1] = s.x[2] = 0; s.x[3] = 0.25; s.x[4] = s.x[5] = 0; s.v[0] = -1; s.v[3] = 1;
             o.radius.assign(50, 0.0);
             o.radius[0] = o.radius[1] = 0.001;
-            compare("external_tide_coll", s, o, 0.25, 8.5e-9, 7.8e-14, 7.8e-14, 9.0e-6, 8.6e-11);   // CPU dv 6.6e-9, dE 6.0e-14, dt 6.9e-6, ddE 6.7e-11
+            // bounds 1.3x the C-vs-C spread of collision_tolscan (x 3.9e-7, dt 2.8e-4, ddE 3.7e-9; CPU Kokkos at 1e-10: 6.6e-9,
+            // 6.9e-6, 6.7e-11 (nearly the same step sequence); A100 3.4e-7, 2.6e-4, 3.2e-9); |dE/E| C 6.0e-14, CPU 5.2e-14, A100 4.6e-14
+            compare("external_tide_coll", s, o, 0.25, 5.0e-7, 7.8e-14, 7.8e-14, 3.7e-4, 4.8e-9);
         }
         if (want(argc, argv, "softening")) {
             // star_star_softening (GADGET spline between non-PN particles): a 100-body core with h = 0.05, and the
@@ -489,7 +640,7 @@ int main(int argc, char** argv) {
             Opt o;
             o.tol = 1e-10;
             o.soft = 0.05;
-            compare("softening_core", s, o, 0.25, 4.6e-11, 6.5e-12, 6.5e-12);   // CPU dv 3.5e-11, dE 5.0e-12 / 3.1e-12
+            compare("softening_core", s, o, 0.25, 6.4e-11, 6.5e-12, 6.5e-12);   // dv CPU 3.5e-11, A100 4.9e-11; |dE/E| C 5.0e-12, CPU 3.1e-12, A100 3.9e-12
             Sys c = plummer(62, 2, 7, 0.05);
             c.x[0] = 0.02; c.x[3] = -0.02;
             const double vb = std::sqrt(0.1 / 0.04) / 2;
