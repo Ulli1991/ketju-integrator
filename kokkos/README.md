@@ -157,6 +157,13 @@ Results (CPU: gcc 15, Kokkos OpenMP, 1 thread; A100: CUDA 13.2) are noted at eac
   involved (`softening_ensemble`), varying by orders of magnitude with 1e-9 changes of the initial state. The Kokkos
   library behaves identically (the same ensemble statistics); single softened trajectories are compared through
   these ensembles. Collisions decided before the pair reaches h (R1 + R2 > h) are not affected.
+* **FMA on the GPU.** nvcc contracts multiply-adds (FMA, the default, kept on); the CPU build does not. In smooth
+  problems this is round-off. In the softened and collision cases FMA rounding changes a step size; at the softening
+  kernel's kinks, or where a collision is recorded at a step end, the step sequence then diverges within a few steps.
+  In `mstar_compare_c`'s segment test (both libraries restarted from the same C state 80 times) the A100 states
+  differ from C by up to 1.1e-6 per segment in these cases (CPU 2e-14). Collisions match and the summed energy error
+  is no larger (A100 / C 0.47, 0.12). A CUDA build without FMA (`-DCMAKE_CXX_FLAGS=--fmad=false`, run as a variant
+  in the GPU test job) agrees to the CPU bounds. Smooth cases keep the strict bounds.
 * GPU (A100) results differ from the CPU ones by floating-point round-off (FMA contraction, team reduction order).
   The step sequence amplifies that round-off, which explains the different step counts and collision times; the
   measured CPU and A100 values are noted at each case in `tests/compare_c.cpp`.
