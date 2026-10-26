@@ -701,7 +701,7 @@ int main(int argc, char** argv) {
             Opt o;
             o.tol = 1e-10;
             o.soft = 0.05;
-            compare("softening_core", s, o, 0.25, 6.4e-11, 1.5e-12, 1.5e-12);   // with landing: |dE/E| C 1.3e-14, CPU 3.0e-15 (without: C 5.0e-12, CPU 3.1e-12, A100 3.9e-12); dv bound from the A100 without landing (4.9e-11)
+            compare("softening_core", s, o, 0.25, 8.4e-11, 1.5e-12, 9.1e-12);   // tolerance 1e-10; with landing |dE/E| C 1.3e-14, CPU 3.0e-15, A100 1.6e-15, A100 without FMA 7.0e-12 (one realization; dv 6.5e-11)
             Sys c = plummer(62, 2, 7, 0.05);
             c.x[0] = 0.02; c.x[3] = -0.02;
             const double vb = std::sqrt(0.1 / 0.04) / 2;

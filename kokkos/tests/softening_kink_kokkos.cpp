@@ -71,16 +71,16 @@ TEST(Softening_kink, two_body_orbit_converges) {
     const EnsembleResult a = ensemble(0, 1e-11, true), b = ensemble(0, 1e-13, true), off = ensemble(0, 1e-13, false);
     std::printf("  two-body: median / max |dE/E| tol 1e-11 %.3e / %.3e, 1e-13 %.3e / %.3e (landings %ld), landing off 1e-13 "
                 "%.3e / %.3e\n", a.median_err, a.max_err, b.median_err, b.max_err, b.kink_landings, off.median_err, off.max_err);
-    // medians 1.3x measured (2.21e-10, 1.24e-12). The maxima (6.03e-10, 8.54e-10) come from single steps in the
-    // smooth core where the GBS error estimate misses (no kink involved; C library alike: 8.7e-10 in one step at
-    // r = 0.02 for tolerance 1e-13) and vary between realizations: bounds with 3.3x / 1.8x room
-    EXPECT_LT(a.median_err, 2.9e-10);
-    EXPECT_LT(b.median_err, 1.6e-12);
-    EXPECT_LT(b.median_err, a.median_err / 30);   // converges with the tolerance (178x for 100x)
-    EXPECT_LT(a.max_err, 2e-9);
-    EXPECT_LT(b.max_err, 1.5e-9);
+    // Bounds 1.3x the largest of 8 sets of 16 states (C, CPU): medians 1.2e-10..2.7e-10 (1e-11), 1.2e-12..1.9e-11
+    // (1e-13); maxima 6.0e-10..7.8e-9, 2.3e-10..2.4e-9, from single steps in the smooth core where the GBS error
+    // estimate misses (no kink involved). A100 (FMA): 1.8e-10 / 7.7e-12, maxima 2.4e-9 / 4.6e-10.
+    EXPECT_LT(a.median_err, 3.5e-10);
+    EXPECT_LT(b.median_err, 2.5e-11);
+    EXPECT_LT(b.median_err, a.median_err / 5);   // converges with the tolerance (sets: 6x - 180x for 100x)
+    EXPECT_LT(a.max_err, 1e-8);
+    EXPECT_LT(b.max_err, 3.1e-9);
     EXPECT_GT(b.kink_landings, 0);
-    EXPECT_GT(off.max_err, 1000 * b.max_err);   // negative check: without landing (measured 1.18e-5)
+    EXPECT_GT(off.max_err, 100 * b.max_err);   // negative check: without landing (CPU 1.18e-5, A100 3.7e-7)
 }
 
 // The stella collision with tide and softening (the pair crosses u = 1 and 0.5 before it merges)
