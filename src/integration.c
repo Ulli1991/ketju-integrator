@@ -1336,6 +1336,32 @@ static double softening_kink_theta(const struct ketju_system *R, double (*old_po
                 const double vr = fabs(hermite_r2_slope(&p, t)) / (2 * uc * h * fabs(dt)); // |dr/dt| at the crossing
                 if (softening_kink_error(GM, h, jump, vr, dt) > tol * uc * h) tp = t;
             }
+            // A passage hidden in one step: a turning point of r inside the step can
+            // carry the pair across a break point and back between the step's ends,
+            // which the interpolant then misses. Near the softened region (an end
+            // inside 2 h, or a Keplerian pericentre below 2 h) such a step is shortened
+            // until the pair moves at most h / 4 (at most 20x per retry), where the
+            // crossings are located as above.
+            if (tp > 1 && (p.d0 < 0) != (p.d1 < 0)) {
+                double v2 = 0, disp2 = 0;
+                for (int k = 0; k < 3; k++) {
+                    const double dv0 = old_vel[j][k] - old_vel[i][k];
+                    const double dd = (ps->pos[j][k] - ps->pos[i][k]) - (old_pos[j][k] - old_pos[i][k]);
+                    v2 += dv0 * dv0;
+                    disp2 += dd * dd;
+                }
+                const double disp = sqrt(disp2);
+                bool near = p.g0 < 4 * h * h || p.g1 < 4 * h * h;
+                if (!near && p.d0 < 0) {
+                    const double r0 = sqrt(p.g0), rv = p.d0 / (2 * dt);
+                    const double L2 = p.g0 * v2 - rv * rv, eps = 0.5 * v2 - GM / r0;
+                    const double e2 = 1 + 2 * eps * L2 / (GM * GM), e = sqrt(e2 > 0 ? e2 : 0);
+                    near = L2 / (GM * (1 + e)) < 2 * h;
+                }
+                if (near && disp > 0.25 * h
+                    && softening_kink_error(GM, h, 1536.0, disp / fabs(dt), dt) > tol * 0.5 * h)
+                    tp = fmax(0.25 * h / disp, 0.05);
+            }
             if (tp < theta) theta = tp;
         }
     }

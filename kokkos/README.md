@@ -160,13 +160,17 @@ Results (CPU: gcc 15, Kokkos OpenMP, 1 thread; A100: CUDA 13.2) are noted at eac
   (0.5 h)^2 or h^2 is located, and if it lies inside the step (more than `softening_kink_eta` = 5e-4 of the step from
   either end) and its estimated local error J dt^6 / 6! (J = G M / h^2 [f^(4)] (v_r / h)^4, the jump of the 4th time
   derivative of the relative acceleration) exceeds `softening_kink_error_ratio` (1) x the tolerance on the
-  separation, the step is repeated ending on the crossing. Result, identical in C and Kokkos: max |dE/E| 2.0e-12
-  (1e-11) and 6.8e-13 (1e-13) over the 128 states; a softened two-body orbit converges with the tolerance (1.6e-8 at
-  1e-11, 8.5e-10 at 1e-13, against 1.2e-5 without landing). Cost (attempted GBS steps / wall, CPU, C library): the
-  three-body set-up 1.3-1.4x; 100-body Plummer core h = 0.01: 1.06x wall (|dE/E| 1.5e-11 -> 2.4e-14), h = 0.05:
-  1.7x (2.9e-10 -> 9e-15); 400 bodies with h = 0.05 (many pairs inside h): 2.3x without an accuracy gain there
-  (2.0e-13 -> 9.8e-14); `softening_kink_error_ratio` = 100 lowers that to 1.6x. Tests: `unit-tests/softening_kink.cpp`
-  (C) and `tests/softening_kink_kokkos.cpp`, `softening_ensemble` in `mstar_compare_c`.
+  separation, the step is repeated ending on the crossing. A passage can also hide between a step's ends (a turning
+  point of r inside the step, which algorithmic regularisation takes in few steps): near the softened region (an
+  end inside 2 h, or a Keplerian pericentre below 2 h) such a step is shortened until the pair moves at most h / 4.
+  Result, identical in C and Kokkos on the CPU: max |dE/E| 1.0e-12 (1e-11) and 6.7e-13 (1e-13) over the 128 states;
+  a softened two-body orbit converges with the tolerance (median 2.2e-10 at 1e-11, 1.2e-12 at 1e-13; without landing
+  max 1.2e-5 at 1e-13; the remaining maxima, 6e-10 / 8.5e-10, come from single steps deep in the smooth core where the
+  GBS error estimate misses, no kink involved). Cost in attempted GBS steps (CPU, C library): the three-body set-up
+  1.4-1.5x; 100-body Plummer core h = 0.01: 1.4x (|dE/E| 1.5e-11 -> 5.5e-15), h = 0.05: 1.7x (2.9e-10 -> 1.2e-14);
+  400 bodies, h = 0.01: 1.4x (2.0e-13 -> 2.1e-15), h = 0.05 (many pairs inside h): 2.4x (2.0e-13 -> 9.8e-14);
+  `softening_kink_error_ratio` > 1 trades accuracy for cost. Tests: `unit-tests/softening_kink.cpp` (C) and
+  `tests/softening_kink_kokkos.cpp`, `softening_ensemble` in `mstar_compare_c`.
 * **FMA on the GPU.** nvcc contracts multiply-adds (FMA, the default, kept on); the CPU build does not. In smooth
   problems this is round-off. In the softened and collision cases FMA rounding changes a step size; at the softening
   kernel's kinks, or where a collision is recorded at a step end, the step sequence then diverges within a few steps.

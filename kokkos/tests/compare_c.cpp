@@ -486,7 +486,7 @@ int main(int argc, char** argv) {
             o.tol = 1e-10;
             o.c = 30;
             o.pn = 0x7ff;
-            compare("imbh_cusp_pn", s, o, 0.05, 2.2e-13, 1e300, 1e300);   // dv CPU 1.05e-13, A100 1.67e-13
+            compare("imbh_cusp_pn", s, o, 0.05, 7.3e-13, 1e300, 1e300);   // dv CPU 1.05e-13, A100 1.67e-13, A100 without FMA 5.57e-13 (team reduction order: round-off)
             o.team_max = 0;
             compare("imbh_cusp_pn_st", s, o, 0.05, 2.2e-13, 1e300, 1e300);
         }
@@ -520,7 +520,7 @@ int main(int argc, char** argv) {
             const double dE = E(M.pos, M.vel) - E0, dE_pn = -M.pn_dB;
             std::printf("pn_ledger: dE/E0 %.3e, PN part %.3e, rest (integration error) %.3e\n", dE / std::fabs(E0),
                         dE_pn / std::fabs(E0), (dE - dE_pn) / std::fabs(E0));
-            check("pn_ledger", "|dE - dE_pn| / |E0|", std::fabs(dE - dE_pn) / std::fabs(E0), 1.5e-13);   // CPU 6.46e-14, A100 1.15e-13
+            check("pn_ledger", "|dE - dE_pn| / |E0|", std::fabs(dE - dE_pn) / std::fabs(E0), 2.6e-13);   // CPU 6.46e-14, A100 1.15e-13, A100 without FMA 2.02e-13
             check("pn_ledger", "|E0| / |dE_pn| (PN visible)", std::fabs(E0) / std::fmax(std::fabs(dE_pn), 1e-300), 1e7);
         }
         if (want(argc, argv, "stop_collision")) {
@@ -567,10 +567,14 @@ int main(int argc, char** argv) {
             for (int i = 0; i < 4; i++) o.radius[i] = 0.001;
             // state, collision times and energies differ by the step-end recording of the collisions: bounds 1.3x the largest
             // Kokkos-vs-C or C-vs-C difference of collision_tolscan (CPU: x 7.1e-8, dt 9.2e-4, ddE 1.0e-8; A100 at 1e-10:
-            // 4.6e-8, 6.7e-4, 6.6e-9); |dE/E| CPU 1.0e-13 / 6.2e-14, A100 6.7e-15
-            compare("star_collisions", s, o, 0.1, 9.3e-8, 1.4e-13, 1.4e-13, 1.2e-3, 1.3e-8);
+            // 4.6e-8, 6.7e-4, 6.6e-9); |dE/E| C 1.0e-13, CPU 6.2e-14, A100 6.7e-15, A100 without FMA 5.0e-13: it follows
+            // the step sequence at the 1e-12 level (C over tolerances 1e-8..1e-13: 3.7e-14..1.2e-12), bound 1.3x that
+            compare("star_collisions", s, o, 0.1, 9.3e-8, 1.4e-13, 1.55e-12, 1.2e-3, 1.3e-8);
             o.calls = 10;
-            compare("star_collisions_10", s, o, 0.1, 1.1e-9, 4.1e-14, 4.1e-14, 9.2e-5, 2.2e-10);   // dv CPU 5.1e-10 A100 8.7e-10, dt 4.0e-5 / 7.1e-5, ddE 1.0e-10 / 1.7e-10; |dE/E| CPU 3.1e-14, A100 2.7e-14
+            // in 10 calls the step sequences diverge as in one (A100 without FMA: dv 5.7e-9, dt 4.0e-4, ddE 1.4e-9, |dE/E|
+            // 8.8e-14; CPU 5.1e-10, 4.0e-5, 1.0e-10, 3.1e-14; A100 8.7e-10, 7.1e-5, 1.7e-10, 2.7e-14): the bounds of the
+            // single call
+            compare("star_collisions_10", s, o, 0.1, 9.3e-8, 4.1e-14, 1.55e-12, 1.2e-3, 1.3e-8);
         }
         if (want(argc, argv, "coll_tide_soft")) {
             // a collision during the run with star_star_softening and the external tide. Well-conditioned set-up:
@@ -634,18 +638,18 @@ int main(int argc, char** argv) {
                 // A100 (Kokkos / C 0.47 / 0.12). Bounds 1.3x the A100 values
                 segment_compare(tol > 1e-12 ? "softening_segments_1e-11" : "softening_segments_1e-13", s, o, 20, 80,
                                 tol > 1e-12 ? 1.5e-6 : 9.7e-7);
-                // (b) ensembles over 128 initial states (x_0 + q 1e-9). Measured (CPU, C = Kokkos): max |dE/E| 1.99e-12
-                // (1e-11), 6.84e-13 (1e-13); without landing 7.95e-7 / 8.10e-6
+                // (b) ensembles over 128 initial states (x_0 + q 1e-9). Measured (CPU, C = Kokkos): max |dE/E| 1.04e-12
+                // (1e-11), 6.70e-13 (1e-13); without landing 7.95e-7 / 8.10e-6
                 double mc, pc, mk, pk;
                 energy_ensemble(tol > 1e-12 ? "softening_ensemble_1e-11" : "softening_ensemble_1e-13", s, o, 20, &mc, &pc, &mk, &pk);
                 check("softening_ens", "Kokkos / C median |dE/E| (128)", mk / mc, 3.0);
                 check("softening_ens", "Kokkos / C p90 |dE/E| (128)", pk / pc, 3.0);
-                check("softening_ens", "max |dE/E| C (128)", g_ens_max_c, tol > 1e-12 ? 2.6e-12 : 8.9e-13);
-                check("softening_ens", "max |dE/E| Kokkos (128)", g_ens_max_k, tol > 1e-12 ? 2.6e-12 : 8.9e-13);
+                check("softening_ens", "max |dE/E| C (128)", g_ens_max_c, tol > 1e-12 ? 1.35e-12 : 8.7e-13);
+                check("softening_ens", "max |dE/E| Kokkos (128)", g_ens_max_k, tol > 1e-12 ? 1.35e-12 : 8.7e-13);
                 Opt off = o;
                 off.kink = false;
                 energy_ensemble(tol > 1e-12 ? "softening_ensemble_off_1e-11" : "softening_ensemble_off_1e-13", s, off, 20, &mc, &pc, &mk, &pk);
-                check("softening_ens", "landing off: max C (lower)", g_ens_max_c, 1e3 * (tol > 1e-12 ? 2.6e-12 : 8.9e-13), true);
+                check("softening_ens", "landing off: max C (lower)", g_ens_max_c, 1e3 * (tol > 1e-12 ? 1.35e-12 : 8.7e-13), true);
             }
         }
         if (want(argc, argv, "collision_tolscan")) {
@@ -686,8 +690,9 @@ int main(int argc, char** argv) {
             o.radius.assign(50, 0.0);
             o.radius[0] = o.radius[1] = 0.001;
             // bounds 1.3x the C-vs-C spread of collision_tolscan (x 3.9e-7, dt 2.8e-4, ddE 3.7e-9; CPU Kokkos at 1e-10: 6.6e-9,
-            // 6.9e-6, 6.7e-11 (nearly the same step sequence); A100 3.4e-7, 2.6e-4, 3.2e-9); |dE/E| C 6.0e-14, CPU 5.2e-14, A100 4.6e-14
-            compare("external_tide_coll", s, o, 0.25, 5.0e-7, 7.8e-14, 7.8e-14, 3.7e-4, 4.8e-9);
+            // 6.9e-6, 6.7e-11 (nearly the same step sequence); A100 3.4e-7, 2.6e-4, 3.2e-9); |dE/E| C 6.0e-14, CPU 5.2e-14,
+            // A100 4.6e-14, A100 without FMA 1.5e-13 (Kokkos over tolerances 1e-8..1e-13: 4.6e-15..6.5e-12): bound 2.0e-13
+            compare("external_tide_coll", s, o, 0.25, 5.0e-7, 7.8e-14, 2.0e-13, 3.7e-4, 4.8e-9);
         }
         if (want(argc, argv, "softening")) {
             // star_star_softening (GADGET spline between non-PN particles): a 100-body core with h = 0.05, and the
@@ -696,7 +701,7 @@ int main(int argc, char** argv) {
             Opt o;
             o.tol = 1e-10;
             o.soft = 0.05;
-            compare("softening_core", s, o, 0.25, 6.4e-11, 1.5e-12, 1.5e-12);   // with landing: |dE/E| C 1.1e-12, CPU 4.9e-13 (without: C 5.0e-12, CPU 3.1e-12, A100 3.9e-12); dv bound from the A100 without landing (4.9e-11)
+            compare("softening_core", s, o, 0.25, 6.4e-11, 1.5e-12, 1.5e-12);   // with landing: |dE/E| C 1.3e-14, CPU 3.0e-15 (without: C 5.0e-12, CPU 3.1e-12, A100 3.9e-12); dv bound from the A100 without landing (4.9e-11)
             Sys c = plummer(62, 2, 7, 0.05);
             c.x[0] = 0.02; c.x[3] = -0.02;
             const double vb = std::sqrt(0.1 / 0.04) / 2;
