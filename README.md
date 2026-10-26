@@ -1,214 +1,183 @@
-# Ketju-integrator (MSTAR)
-
-A highly parallel regularized N-body integrator library.
-
-This code forms the core of the KETJU project, which adds detailed small-scale
-modelling of supermassive black hole dynamics to galactic simulation codes such as
-GADGET-4.
-See the [KETJU project website] for more details on KETJU.
-In addition to being used in our GADGET-based KETJU codes,
-this integrator code is designed to be easily used in other codes as well.
-To help with this, the repository includes both a simple example `nbody` program written in C,
-as well as bindings that allow the integrator to be called from Python.
-
-The MSTAR integrator is based on algorithmic regularization together with a
-minimum spanning tree -based relative coordinate system to allow accurate integration
-of even collisional orbits while reducing the impact of rounding errors.
-The code also includes post-Newtonian corrections for modelling black hole dynamics and their mergers.
-Good scaling behaviour to systems of several thousands of particles on hundreds of CPU cores
-is achieved through MPI parallelization of both the calculation of gravitational interactions
-and the Gragg–Bulirsch–Stoer extrapolation algorithm.
-For more detail on the technical aspects of the integrator, see the [code paper] as well
-as comments within the code.
-
-When publishing work utilizing this code, please cite the [code paper].
-
-If you encounter issues when using the code, you can report them using the [issue tracker].
-
-[code paper]: https://ui.adsabs.harvard.edu/abs/2020MNRAS.492.4131R
-[KETJU project website]: https://www.mv.helsinki.fi/home/phjohans/ketju
-[GADGET4-KETJU repository]: https://bitbucket.org/helsinkiextragalacticgroup/gadget4-ketju
-[issue tracker]: https://bitbucket.org/helsinkiextragalacticgroup/ketju-integrator/issues 
-
-## C++/Kokkos version (GPU)
+# MSTAR in C++ with Kokkos (GPU)
 
 C++ rewrite of the MSTAR regularised integrator (Rantala et al. 2020; public KETJU integrator, Mannerkoski et al.
-2023) with Kokkos support for GPUs, by Ulrich Steinwandel: the library `mstar::mstar` in [`kokkos/`](kokkos/README.md),
-with the same physics and options as the C library here (including the GIZMO additions: contact collisions,
-their energy booking with tide and softening, the pericentre guard, the external tide). The C library stays the
-reference implementation. Build it with `cmake .. -DKETJU_KOKKOS=ON -DKokkos_ROOT=<kokkos install>` (add
-`-DKETJU_SERIAL_MPI=ON` to build the C library without MPI); see [`kokkos/README.md`](kokkos/README.md) for the
-API, the tests (C vs Kokkos comparisons) and the citations (Rantala et al. 2020, MNRAS 492, 4131 is required).
+2023) with Kokkos support for GPUs, by Ulrich Steinwandel.
 
-## License
+The library has the same physics and options as the C library, and runs on any Kokkos execution space (CUDA, HIP,
+OpenMP, Serial). Every feature of the C library is here, including the GIZMO additions (contact collisions of non-PN particles with
+`collision_radius`, their energy booking with the external tide and softening, the pericentre guard, the external
+tide, star-star softening).
 
-This software is licensed under the GPLv3 license:
-you are free to modify and distribute it under certain conditions,
-and it comes without any warranty.
-See [LICENSE.md](LICENSE.md) for details.
+The C version of the integrator (KETJU's MSTAR library with the GIZMO additions, the reference implementation, with
+its `nbody` example, Python bindings and unit tests) is on the branch `ketju-c` of this repository.
 
-The code included in the `thirdparty` directory is distributed under the licenses specified there.
+## Citation
 
+Cite, when you publish results obtained with this library:
 
-## Building
-The code requires an MPI library/environment (e.g. OpenMPI) to be installed before building.
+* **required** (KETJU's README asks for it): A. Rantala, P. Pihajoki, M. Mannerkoski, P. H. Johansson & T. Naab,
+  *MSTAR - a fast parallelised algorithmically regularised integrator with minimum spanning tree coordinates*,
+  MNRAS 492, 4131 (2020), arXiv:2001.03180;
+* **recommended** for the released version (PN corrections, BH mergers and recoil, softening, dynamic order
+  control): M. Mannerkoski et al., *KETJU - resolving small-scale supermassive black hole dynamics in GADGET-4*,
+  MNRAS 524, 4062 (2023), arXiv:2306.04963;
+* the physics the code uses: L. Blanchet, Living Rev. Relativ. 17, 2 (2014) (2-3.5PN); K. G. Arun et al., PRD 77,
+  064035 (2008) (3PN gauge transformation); K. S. Thorne & J. B. Hartle, PRD 31, 1815 (1985) (1PN N-body and spin
+  terms); Y. Zlochower & C. O. Lousto, PRD 92, 024022 (2015) (merger remnants); E. Hairer, S. P. Norsett &
+  G. Wanner, *Solving Ordinary Differential Equations I*, ch. II.9 (GBS extrapolation and order control).
 
-To build the integrator library, first configure the CMake build system by running  
+## Licence, origin and modifications
 
-```
-mkdir build
-cd build
-cmake .. [CMAKE_OPTIONS]
-```
+GPLv3, as the whole repository (`LICENSE.md`). The library is derived from the KETJU integrator library (MSTAR),
+Copyright (C) 2019-2022 Antti Rantala, Matias Mannerkoski, and contributors: this repository (the fork
+https://github.com/Ulli1991/ketju-integrator of https://bitbucket.org/helsinkiextragalacticgroup/ketju-integrator),
+for the extra forces the experimental branch `extra-force` (b60d16e, Mannerkoski 2022). Every ported file keeps the
+KETJU header and states below it: *Modified by Ulrich Steinwandel, 2026: rewritten in C++ with Kokkos support (GPU).
+Copyright (C) 2026 Ulrich Steinwandel. Licensed under the GPLv3 license.* The tests are
+Copyright (C) 2026 Ulrich Steinwandel, GPLv3; the stored results of the C library in `tests/reference_data` were
+generated by the C library of branch `ketju-c` (the extra-force ones by the b60d16e patch forward-ported onto eb96fd0). The library
+was developed as the optional GPLv3 module `src/mstar` of RUMI++; `docs/` keeps its notes from there.
 
-Configuration options such as specific compiler optimization flags can then be
-changed by editing the `CMakeCache.txt` file either directly or using e.g. `ccmake`,
-but doing this is not typically required.
+## Layout
 
-After configuration, the library and other included components can be
-built by running `make` in the build directory.
-The `nbody` executable is then found under `bin/`.
-See the [`nbody` README](nbody/README.md) for details on using it.
+| path | content |
+|---|---|
+| `include/mstar/mstar.hpp` | public API (namespace `mstar`; no Kokkos in the header) |
+| `src/engine.cpp` | integrator (from `integration.c`, `mst.c`, `pn.c`): GBS rows, forces, PN, MST, step control, collisions |
+| `src/mergers.{hpp,cpp}` | BH mergers (`bh_mergers.c`, PN c.o.m. velocity of `pn.c`), contact collisions with energy booking |
+| `src/kernels.hpp` | host/device helpers: softening kernels, osculating pericentre test, stop-collision rule |
+| `examples/mstar_driver.cpp` | standalone driver (KETJU's `nbody` IC format, the counterpart of the C `nbody` example) |
+| `examples/mstar_bench.cpp` | scaling benchmark (Plummer N = 16 .. 4096), launch latency |
+| `tests/` | comparisons with the C library's stored results (`reference_data/`), KETJU's unit tests and GIZMO's additions, extra forces, embedded tide |
+| `docs/` | RUMI++ notes on the module (copies) |
 
-## Usage in other codes
+## Build
 
-The integrator is easiest to use from programs written in C or C++,
-or through the included Python wrapper.
-For use from other languages,
-you may need to write a small wrapper for the library using C first.
-You also need to include the MPI library in your code and perform the necessary
-initialization for it before calling the integrator.
-
-Examples of using the integrator in C and C++ can be found in the included `nbody`
-code as well in the [GADGET4-KETJU repository].
-
-### Use in C or C++
-
-The public interface of the library is included in the file 
-`include/ketju_integrator/ketju_integrator.h`,
-so in your C or C++ code add  
-`#include <ketju_integrator/ketju_integrator.h>`  
-to use the definitions.
-Details of the interface are also explained in the comments included in that header file.
-
-The general outline of using the integrator looks something like this:
-
-```C++
-// Set up your MPI environment etc. with mpi_communicator being a communicator
-// over the tasks you want to use for the integration (can be MPI_COMM_WORLD).
-// All the tasks on this communicator must call the following functions and
-// modify the integrator setting and initial state in the same way.
-
-// Create the integrator data structures
-// num_pn_particles is the number of particles (usually black holes)
-// with PN terms enabled (depending on options).
-// num_other_particles is the number of particles (usually stars)
-// using only Newtonian gravity, possibly with softening.
-struct ketju_system R;
-ketju_create_system(&R, num_pn_particles, num_other_particles, mpi_communicator);
-
-// Set the configuration in R.options and R.constants if you want to change the defaults.
-// Initialize values in R.physical_state:
-//   Set mass, pos, vel for R.num_particles (= num_pn_particles + num_other_particles) entries.
-//   Set spins for the first num_pn_particles.
-...
-
-// Optional:
-// If the initial data you just set is far from the center-of-mass frame of the system,
-// you may benefit from shifting the system to its CoM frame using
-double CoM_pos[3], CoM_vel[3];
-ketju_into_CoM_frame(&R, CoM_pos, CoM_vel);
-// to maintain the best numerical resolution for the system coordinates during the integration.
-// CoM_pos and CoM_vel give the original coordinates of the CoM for later processing.
-
-// Repeat as desired:
-// Run the integration
-ketju_run_integrator(&R, integration_time);
-// Read the resulting state from R.physical_state and process it
-...
-
-// Finally free the allocated memory and communicators
-ketju_free_system(&R);
-```
-
-You can have multiple independent integrator systems within your program at the same time,
-as all of the integrator state is contained within the `ketju_system` struct.
-
-#### Error handling
-
-At the moment the integrator implements only simple error handling by calling an
-internal `terminate()` function to print an error message and 
-kill the program (by calling `MPI_Abort`)
-in case the code ends up in an unrecoverable situation, likely due to an error in
-the inputs or a bug in the code, or due to exceeding the number of steps given
-by `max_step_count`.
-A dump of the integrator state is also produced for some of these errors to help
-with debugging.
-These state dumps can be loaded for analysis using the `ketju_debug_read_integrator_state` function,
-e.g. inside `gdb`, or through the `load_state_dump` function in the python bindings.
-
-Otherwise, if the `ketju_run_integrator()` call returns, the integration has completed without errors.
-
-### Building your code and linking the library
-
-Finally, to build your code that uses the integrator, you need to make some changes to
-your build system.
-If you're building your code with `cmake`, you can use the following commands
-in your `CMakeLists.txt` to add the necessary include and linker flags:  
-
-```cmake
-set(ketju-integrator_DIR "/path/to/ketju-integrator/") 
-find_package(ketju-integrator 1.0 REQUIRED)  
-add_executable(nbody "main.c") # using the nbody program as an example  
-target_link_libraries(nbody ketju-integrator)
-```
-
-Otherwise, simply add (assuming gcc/clang)   
-`-I/path/to/ketju-integrator/include/`  
-to your compiler flags and    
-`-L/path/to/ketju-integrator/lib -lketju-integrator`  
-to your linker flags.
-naturally you will also need to include the necessary MPI flags or use the 
-MPI compiler wrapper to compile your code to link the necessary MPI library.
-
-
-
-### Python bindings
-
-Simple Python 3 bindings depending only on the standard library and NumPy are
-included as the `ketju_integrator` module under `python_bindings`.
-
-They function via a small C library shim and allow parallel integration by
-running the integrator in subprocesses with MPI, or by running python directly with MPI.
-Examples of using the bindings are given in
-`python_bindings/examples/`.
-After building the library as described above,
-you can install the python bindings with `pip` by running 
+Kokkos (4.x or later, C++17) is found with `find_package(Kokkos)`; the library uses the default execution space
+(the device one in GPU builds) and the default host execution space.
 
 ```
-python3 -m pip install --user ./python_bindings/
+cmake -S . -B build -DKokkos_ROOT=<kokkos install>       # CUDA: -DCMAKE_CXX_COMPILER=<kokkos>/bin/nvcc_wrapper
+cmake --build build -j 4 && (cd build && ctest)
+cmake --install build --prefix <prefix>                   # then find_package(mstar) -> mstar::mstar
 ```
 
-(you can omit `--user` if in a venv), you may need to first upgrade `pip` with
-`python3 -m pip install --upgrade pip`.
+`MSTAR_TESTS=OFF` builds only the library and the driver.
 
-The [`ketju_utils` package](https://bitbucket.org/helsinkiextragalacticgroup/ketju-utils)
-provides some utilities for analysing BH orbits with post-Newtonian corrections,
-and an example utilizing it is included.
+## API
 
-## Test suite
+```cpp
+#include <mstar/mstar.hpp>
+mstar::ScopeGuard guard(argc, argv);       // or Kokkos::ScopeGuard / Kokkos::initialize by the host code
+mstar::System S(num_pn, num_other);        // ketju_create_system; PN particles (BHs) first
+S.constants.G = 1; S.constants.c = 1;      // ketju_natural_constants (defaults: KETJU's GADGET units)
+S.options.PN_flags = mstar::PN_ALL;        // ketju_integration_options, same names and defaults
+S.mass[i] = ...; S.pos[3*i+k] = ...; S.vel[3*i+k] = ...; S.spin[3*i+k] = ...;   // physical state
+S.collision_radius = {...};                // optional: contact collisions of non-PN particles (GIZMO)
+S.options.enable_external_tide = true;     // optional: a = T x (GIZMO)
+bool ok = S.run(dt);                       // ketju_run_integrator; false: max_step_count exceeded
+S.mergers;                                 // ketju_bh_merger_info (BH mergers and collisions, dE_collision)
+S.perf.relative_energy_error;              // ketju_performance_counters
+```
 
-If you are making changes to the integrator code itself, it is useful to also
-build and run the included test suite.
-This can be useful also for checking that the code functions correctly on your system.
-To build the test suite, run `git submodule update --init`
-to pull in the unit test libraries required for building the tests.
-Then set `UNIT_TESTS=ON` in the CMake configuration and run the build as normal.
+| KETJU C | `mstar::` |
+|---|---|
+| `ketju_create_system` / `ketju_free_system` | `System(num_pn, num_other)` / destructor; `reset()` reuses device buffers |
+| `R->physical_state->{time, mass, pos, vel, spin}` | `S.time`, `S.mass`, `S.pos`, `S.vel`, `S.spin` (flat xyz arrays) |
+| `num_particles`, `num_pn_particles` | the same names (shrink on mergers) |
+| `particle_extra_data` | `S.extra_index` (caller indices, permuted as KETJU permutes the extra data) |
+| `collision_radius` | `S.collision_radius` (empty: off) |
+| `R->options`, `R->constants`, `R->perf` | `S.options`, `S.constants`, `S.perf` |
+| `merger_infos` / `num_mergers` | `S.mergers` |
+| `ketju_run_integrator` | `S.run(dt)` |
+| `ketju_into_CoM_frame` | `S.into_com_frame(x, v)` |
+| `ketju_do_star_collisions`, `ketju_pair_rv` | `mstar::do_star_collisions`, `mstar::pair_rv` |
+| extra-force branch callbacks | `S.options.extra` (`ExtraForces`: linear field, static point masses, `a = D v`) |
 
-The tests can be run using `make run-unit-tests` or by running the test binary
-found under `bin/` directly.
-Note that some of the are currently somewhat sensitive to rounding errors caused
-by different compilers and optimizations, so in case the tests fail inspect the
-output to see if the errors in the results are only slightly over the assigned tolerances.
+Additions for host codes (RUMI++): `S.stop_collisions` (a collision rule with BH flags, TDE and ISCO distances that
+stops the call at the colliding step instead of merging inside), `S.perturbers` (bodies with predicted motion
+`x + v t + a t^2 / 2` acting inside the call), `ExtraForces::remove_mean`, the work ledger `S.pn_dB` / `S.ext_work`,
+`options.host_engine` (run a small group on the host execution space in a GPU build), `S.energy()`.
 
+## Differences from the C library
 
+* All GBS rows (substep divisions 2, 4, ..., 2k) of a step run concurrently on the device in lockstep: per substep
+  stage one force launch over the active rows (one team per row and body) and one kick+drift launch; small groups run
+  every row inside one team (`team_rows_max_n`). The same engine runs on the device and on the host.
+* Vertex coordinates are rebuilt from the tree by root-to-vertex path sums in KETJU's floating-point order; reductions
+  are deterministic. Results agree with the C library to round-off (bitwise for few bodies on the CPU) and are
+  reproducible run to run.
+* One device-to-host copy per GBS step; the extrapolated state, its energies and the collision test are computed on
+  the device. Contact collisions are detected on the device and merged on the host (only on a hit).
+* The MST is built by dense O(N^2) Prim (KETJU's tree), on the host or in one device team (`device_tree_min_n`).
+* B is carried as an extra GBS variable outside the error control, giving the work of the PN and extra forces
+  (`pn_dB`, `ext_work`). B follows the work of velocity-independent extra forces (`track_work`, default; the branch
+  leaves B blind to it, which put a binary in a static field 1e-2 off after a few orbits).
+* `MergerInfo::t_merger` is the absolute time (KETJU: since the start of the run call); `extra_index1/2` are caller
+  indices (`S.extra_index`) rather than slots of the extra-data array.
+* Not ported: the divide-and-conquer MST (`mst_algorithm`), the MPI parallelisation (`ketju_create_system`'s
+  communicator), the debug state dumps. `gbs_kmax` is 4..16, `max_tree_distance` <= 8.
+
+## Tests (ctest)
+
+* `mstar_unit_tests`: KETJU's unit tests on this library (`tests/unit_tests_kokkos.cpp`: the old-integrator
+  comparisons, units, 3-body terms, mergers and merger indexing; the MST construction test of the C library checks
+  internals that are not exposed, here random stars with the host and the team tree), the 8 GIZMO-addition tests
+  (`gizmo_additions_kokkos.cpp`, + a collision during a run with tide and softening) and the softening-landing tests
+  (`softening_kink_kokkos.cpp`), on the GoogleTest stand-in `tests/gtest_shim`.
+* `mstar_compare_c`: this library against the stored results of the C library (`tests/reference_data/compare_c.txt`,
+  keyed by a hash of the inputs, header: generating commit), same options and state: Kepler e = 0.9 (and the analytic
+  orbit), Pythagorean three-body, 100-body Plummer core (team and staged paths), host vs device MST, PN + spin binary,
+  two BHs in a 60-star cusp with all PN terms, PN work ledger, stop-rule collisions, contact collisions (head-on and
+  pericentre-decided, in one and ten calls), collision with tide and softening, external tide, softening, no
+  star-star gravity, head-on and orbital BH mergers.
+  Each comparison also checks momentum and angular momentum (Kokkos within 2x of C or at the round-off floor).
+  `collision_tolscan` tabulates collision times and energies against the GBS tolerance and `softening_ensemble`
+  compares energy errors over 16 perturbed initial states (below).
+* `mstar_extra_force`: the extra forces against the branch patch forward-ported onto eb96fd0 (stored results, `extra_force.txt`) and against RK4.
+* `mstar_embedded_tide`: an embedded group, impulsive member kicks against c.o.m. kicks + continuous tide.
+* `mstar_driver`: the driver on `examples/nbody_sample_ic.txt`.
+* `mstar-bench [N_max] [steps] [-] [team_N]`: scaling (not a ctest).
+
+Results (CPU: gcc 15, Kokkos OpenMP, 1 thread; A100: CUDA 13.2) are noted at each case in `tests/compare_c.cpp`.
+
+## Accuracy notes (both libraries)
+
+* **Collision times are resolved to one GBS step.** Both libraries detect a contact collision on the accepted state
+  at the end of a step and merge there, without landing on the contact. The recorded time and the collision energy
+  (the pair is already inside contact by a step-dependent amount) therefore follow the step sequence and do not
+  converge with the GBS tolerance: in `collision_tolscan` the C library's own collision times at tolerances
+  1e-8 .. 1e-13 differ by up to 6e-4 T, and its collision energies by up to 6e-8 relative. Kokkos (CPU and A100)
+  differs from C by the same amounts; the energy including the booked collision energies is conserved to the
+  tolerance level in every case, and so are momentum and angular momentum (minus the pair's internal angular momentum,
+  which a merger at the CoM removes in both libraries).
+* **Softening kinks: steps landed on the kernel's break points (both libraries).** The GADGET spline
+  (`star_star_softening`, unchanged) has a jump in the 4th derivative of its force at u = r / h = 0.5 and 1. A GBS
+  step across such a point loses the smoothness the extrapolation and its error estimate assume (Hairer, Norsett &
+  Wanner I, II.6; Gear & Osterby 1984: locate the discontinuity and restart there). Before, |dE/E| reached 1e2 - 1e6 x
+  the tolerance and did not converge with it (128 states of the stella collision set-up: max 8e-7 at tolerance
+  1e-11, 8e-6 at 1e-13). Now (`softening_kink_landing`, default on) every accepted step is checked: r^2 of each
+  softened pair over the step is the cubic Hermite interpolant of its end values and slopes, its first crossing of
+  (0.5 h)^2 or h^2 is located, and if it lies inside the step (more than `softening_kink_eta` = 5e-4 of the step from
+  either end) and its estimated local error J dt^6 / 6! (J = G M / h^2 [f^(4)] (v_r / h)^4, the jump of the 4th time
+  derivative of the relative acceleration) exceeds `softening_kink_error_ratio` (1) x the tolerance on the
+  separation, the step is repeated ending on the crossing. A passage can also hide between a step's ends (a turning
+  point of r inside the step, which algorithmic regularisation takes in few steps): near the softened region (an
+  end inside 2 h, or a Keplerian pericentre below 2 h) such a step is shortened until the pair moves at most h / 4.
+  Result, identical in C and Kokkos on the CPU: max |dE/E| 1.0e-12 (1e-11) and 6.7e-13 (1e-13) over the 128 states;
+  a softened two-body orbit converges with the tolerance (median 2.2e-10 at 1e-11, 1.2e-12 at 1e-13; without landing
+  max 1.2e-5 at 1e-13; the remaining maxima, 6e-10 / 8.5e-10, come from single steps deep in the smooth core where the
+  GBS error estimate misses, no kink involved). Cost in attempted GBS steps (CPU, C library): the three-body set-up
+  1.4-1.5x; 100-body Plummer core h = 0.01: 1.4x (|dE/E| 1.5e-11 -> 5.5e-15), h = 0.05: 1.7x (2.9e-10 -> 1.2e-14);
+  400 bodies, h = 0.01: 1.4x (2.0e-13 -> 2.1e-15), h = 0.05 (many pairs inside h): 2.4x (2.0e-13 -> 9.8e-14);
+  `softening_kink_error_ratio` > 1 trades accuracy for cost. Tests: `tests/softening_kink_kokkos.cpp`, `softening_ensemble` in `mstar_compare_c`.
+* **FMA on the GPU.** nvcc contracts multiply-adds (FMA, the default, kept on); the CPU build does not. In smooth
+  problems this is round-off. In the softened and collision cases FMA rounding changes a step size; at the softening
+  kernel's kinks, or where a collision is recorded at a step end, the step sequence then diverges within a few steps.
+  In `mstar_compare_c`'s segment test (both libraries restarted from the same C state 80 times) the A100 states
+  differ from C by up to 1.1e-6 per segment in these cases (CPU 2e-14). Collisions match and the summed energy error
+  is no larger (A100 / C 0.47, 0.12). A CUDA build without FMA (`-DCMAKE_CXX_FLAGS=--fmad=false`, run as a variant
+  in the GPU test job) agrees to the CPU bounds. Smooth cases keep the strict bounds.
+* GPU (A100) results differ from the CPU ones by floating-point round-off (FMA contraction, team reduction order).
+  The step sequence amplifies that round-off, which explains the different step counts and collision times; the
+  measured CPU and A100 values are noted at each case in `tests/compare_c.cpp`.
