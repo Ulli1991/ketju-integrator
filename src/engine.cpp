@@ -1684,6 +1684,7 @@ bool run_on(System& S, Engine<Exec>& im, double time_interval) {
         perf.t_total += wall() - tw0;
         return true;
     }
+    const double initial_collision_dE = collision_dE;
     const double U_tide0 = S.external_tide_potential();
     im.allocate();
     Kokkos::deep_copy(im.d.accvd, 0.0);   // bodies without velocity-dependent forces keep zero
@@ -1699,7 +1700,9 @@ bool run_on(System& S, Engine<Exec>& im, double time_interval) {
     };
     double U = read_scal(im.bslot, S_U);
     const double initial_B = read_scal(im.bslot, S_B);
-    const double initial_E = -initial_B - U_tide0;   // T - U - U_tide
+    // The uploaded state is already after any contacts present at entry. Recover the energy before those
+    // collisions: their work remains included in collision_dE below, exactly once over the whole run call.
+    const double initial_E = -initial_B - U_tide0 - initial_collision_dE;   // T - U - U_tide at entry
     auto take_collision = [&]() {
         const long kq = (long)im.h_res(7);
         sc.i = (int)(kq / S.num_particles);
@@ -1873,7 +1876,7 @@ bool run_on(System& S, Engine<Exec>& im, double time_interval) {
         } else if (!converged) {
             perf.failed_steps += 1;
         }
-        if (opt.max_step_count > 0 && perf.failed_steps + perf.successful_steps > opt.max_step_count) {
+        if (!finished && opt.max_step_count > 0 && perf.failed_steps + perf.successful_steps >= opt.max_step_count) {
             ok = false;
             break;
         }

@@ -66,7 +66,7 @@ if(MSTAR_TESTS)
 
     # KETJU's unit tests (integration, mergers, MST) and GIZMO's additions (contact collisions, collision energy with
     # tide and softening, pericentre guard, tide, collision_radius, softening kink) on a GoogleTest stand-in
-    add_executable(mstar-unit-tests ${T}/gizmo_additions_kokkos.cpp ${T}/softening_kink_kokkos.cpp ${T}/unit_tests_kokkos.cpp)
+    add_executable(mstar-unit-tests ${T}/gizmo_additions_kokkos.cpp ${T}/softening_kink_kokkos.cpp ${T}/unit_tests_kokkos.cpp ${T}/library_audit_kokkos.cpp)
     target_include_directories(mstar-unit-tests PRIVATE ${T}/gtest_shim)
     target_link_libraries(mstar-unit-tests mstar::mstar)
     add_test(NAME mstar_unit_tests COMMAND mstar-unit-tests)
