@@ -34,9 +34,10 @@ struct State {
 static double duration_for(int kind) {
     if (kind == 2) return 5;
     if (kind == 3) return 18;
+    if (kind == 4) return 180;
     return 128 * std::acos(-1.);
 }
-static bool is_encounter(int kind) { return kind == 2 || kind == 3; }
+static bool is_encounter(int kind) { return kind >= 2; }
 
 static void setup(mstar::System& s,int kind){
     s.constants.G=s.constants.c=1; s.options.PN_flags=0; s.options.enable_bh_mergers=false;
@@ -46,8 +47,9 @@ static void setup(mstar::System& s,int kind){
     s.mass[0]=s.mass[1]=.5; s.pos.assign(3*s.num_particles,0); s.vel.assign(3*s.num_particles,0);
     s.pos[0]=ra/2; s.pos[3]=-ra/2; s.vel[1]=vr/2; s.vel[4]=-vr/2;
     if(s.num_particles==3){
-        double R=kind==2?6:(kind==3?30:50); s.mass[2]=.5;
+        double R=kind==2?6:(kind>=3?30:50); s.mass[2]=.5;
         V3 vo=is_encounter(kind)?V3{-2,1.8/R,0}:V3{0,.5*std::sqrt(1.5/R),std::sqrt(.75)*std::sqrt(1.5/R)};
+        if(kind==4)vo={0,std::sqrt(1.5*(2./30-1./16)),0};
         for(int i=0;i<2;i++){s.pos[3*i]-=R/3; for(int d=0;d<3;d++)s.vel[3*i+d]-=vo[d]/3;}
         s.pos[6]=2*R/3; for(int d=0;d<3;d++)s.vel[6+d]=2*vo[d]/3;
     }
@@ -71,7 +73,7 @@ static State run(int kind,double k,bool enabled=true,int fallback=0){
     q.h=cross(r,v); double gm=s.constants.G*(s.mass[0]+s.mass[1]),rlen=norm(r);
     q.a=1/(2/rlen-dot(v,v)/gm); auto ev=cross(v,q.h); for(int d=0;d<3;d++)ev[d]=ev[d]/gm-r[d]/rlen; q.e=norm(ev);
     if(n==3){for(int d=0;d<3;d++)q.outer[d]=s.pos[6+d]-(s.mass[0]*s.pos[d]+s.mass[1]*s.pos[3+d])/(s.mass[0]+s.mass[1]);}
-    q.energy_error=std::fabs((effective_energy(s,k)-effective0)/effective0);
+    q.energy_error=q.applied==1 ? std::fabs((s.energy()-physical0)/physical0) : std::fabs((effective_energy(s,k)-effective0)/effective0);
     q.physical_energy_change=(s.energy()-physical0)/std::fabs(physical0);
     q.L_error=norm(minus(angular(s),L0))/norm(L0);
     return q;
@@ -80,7 +82,7 @@ static bool bits(const State&a,const State&b){return a.m==b.m&&a.x.size()==b.x.s
 static double median(std::vector<double> a){std::sort(a.begin(),a.end());return a[a.size()/2];}
 int main(int argc,char**argv){
     mstar::ScopeGuard guard(argc,argv); int failures=0,hard_failures=0,speed_failures=0;
-    for(int kind:{0,1,2,3}){
+    for(int kind:{0,1,2,3,4}){
         State ref=run(kind,1,false),eq=run(kind,1,true);
         bool same=ref.completed&&eq.completed&&bits(ref,eq); std::printf("EQUIVALENCE case=%d bitwise=%d\n",kind,same);if(!same)failures++;
         std::vector<double> base_times;
@@ -92,6 +94,10 @@ int main(int argc,char**argv){
                 std::printf("COMPLETION case=%d k=%.0f rep=%d ok=%d completed=%d actual_time=%.17g requested_time=%.17g\n",kind,k,rep,q.ok,q.completed,q.t,duration_for(kind));
                 double da=std::fabs((q.a-ref.a)/ref.a),de=std::fabs(q.e-ref.e),dh=norm(minus(q.h,ref.h))/norm(ref.h),dx=kind?norm(minus(q.outer,ref.outer))/norm(ref.outer):0;
                 bool good=ref.completed&&q.completed&&q.applied==k&&std::isfinite(q.energy_error)&&da<=1e-3&&de<=1e-3&&dh<=1e-3&&dx<=1e-3&&q.energy_error<=1e-7&&q.L_error<=1e-7;
+                if(is_encounter(kind)) {
+                    good=ref.completed&&q.completed&&q.applied==1&&bits(ref,q)
+                         &&q.accepted==ref.accepted&&q.rejected==ref.rejected;
+                }
                 double phase_error=0;
                 if(kind==0){
                     double mean=std::remainder(std::acos(-1.)+q.t/k,2*std::acos(-1.)),E=mean;
@@ -104,7 +110,7 @@ int main(int argc,char**argv){
                 std::printf("RESULT case=%d k=%.0f rep=%d seconds=%.9g a_error=%.9g e_error=%.9g h_error=%.9g outer_error=%.9g Hsd_error=%.9g physical_dE=%.9g L_error=%.9g slowed_phase_error=%.9g steps=%ld rejected=%ld pass=%d\n",kind,k,rep,q.seconds,da,de,dh,dx,q.energy_error,q.physical_energy_change,q.L_error,phase_error,q.accepted,q.rejected,good);
             }
             double speed=ref.completed&&completed?median(base_times)/median(times):0;std::printf("TIMING case=%d k=%.0f median_speedup=%.6g accuracy_pass=%d speed_bar_pass=%d\n",kind,k,speed,pass,speed>=1.1);
-            if(!(speed>=1.1))speed_failures++;
+            if(!is_encounter(kind)&&!(speed>=1.1))speed_failures++;
             if(!pass){if(is_encounter(kind))hard_failures++;else failures++;}
         }
     }

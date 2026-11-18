@@ -934,6 +934,46 @@ struct Engine {
 
     explicit Engine(System& owner) : o(owner) {}
 
+    // Experimental entry screen for an isolated binary or a hierarchical triple.
+    // Osculating elements describe the entry state and can evolve during a call.
+    bool slowdown_clearance(int i, int j) const {
+        const auto& m = o.mass;
+        const double gm = o.constants.G * (m[i] + m[j]);
+        auto elements = [](const double* r, const double* v, double mu, double& peri, double& apo) {
+            double r2 = 0, v2 = 0, rv = 0;
+            for (int k = 0; k < 3; ++k) {
+                r2 += r[k] * r[k]; v2 += v[k] * v[k]; rv += r[k] * v[k];
+            }
+            if (!(mu > 0 && r2 > 0)) return false;
+            const double binding = 2 / std::sqrt(r2) - v2 / mu;
+            const double p = (r2 * v2 - rv * rv) / mu;
+            if (!(binding > 0 && p > 0)) return false;
+            const double e2 = 1 - p * binding;
+            if (!(e2 >= -1e-12 && e2 < 1)) return false;
+            const double e = std::sqrt(std::max(0., e2));
+            peri = p / (1 + e);
+            apo = (1 + e) / binding;
+            return std::isfinite(peri) && std::isfinite(apo);
+        };
+        double r[3], v[3], peri, apo;
+        for (int k = 0; k < 3; ++k) {
+            r[k] = o.pos[3*j+k] - o.pos[3*i+k];
+            v[k] = o.vel[3*j+k] - o.vel[3*i+k];
+        }
+        if (o.num_particles > 3 || !elements(r, v, gm, peri, apo)) return false;
+        if (o.num_particles == 2) return true;
+        const int third = 3 - i - j;
+        if (!(m[third] > 0)) return false;
+        const double fraction = m[j] / (m[i] + m[j]);
+        for (int k = 0; k < 3; ++k) {
+            r[k] = (o.pos[3*third+k] - o.pos[3*i+k]) - fraction * r[k];
+            v[k] = (o.vel[3*third+k] - o.vel[3*i+k]) - fraction * v[k];
+        }
+        double outer_peri, outer_apo;
+        return elements(r, v, gm + o.constants.G*m[third], outer_peri, outer_apo)
+            && outer_peri > 10 * apo;
+    }
+
     void allocate() {
         const int N = o.num_particles, Npn = o.num_pn_particles, K = o.options.gbs_kmax;
         if (K > MAX_K || K < 4) throw std::runtime_error("MSTAR: gbs_kmax must be in 4..16");
@@ -967,8 +1007,10 @@ struct Engine {
                 const int i = o.options.slowdown_i, j = o.options.slowdown_j;
                 if (i < 0 || j < 0 || i >= N || j >= N || i == j || !(o.mass[i] > 0) || !(o.mass[j] > 0))
                     throw std::invalid_argument("MSTAR: slowdown needs two distinct positive-mass particles");
-                d.sd_i = i; d.sd_j = j; d.sd_inv = 1 / f;
-                o.perf.applied_slowdown_factor = f;
+                if (slowdown_clearance(i, j)) {
+                    d.sd_i = i; d.sd_j = j; d.sd_inv = 1 / f;
+                    o.perf.applied_slowdown_factor = f;
+                }
             }
         }
         d.no_ss = o.options.no_star_star_gravity;
