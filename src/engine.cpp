@@ -115,10 +115,21 @@ struct DevT {
     int sd_i = -1, sd_j = -1;                       // nominated binary, valid only when sd_inv < 1
     double sd_inv = 1;                              // constant 1/kappa during the call
 
+    // Use the stored relative coordinate when the nominated pair is close in the MST.
+    // Subtracting Cartesian velocities loses small components in a moving binary.
+    KOKKOS_INLINE_FUNCTION double slowdown_relative_velocity(int s, int k) const {
+        int path[MAX_ND], sign[MAX_ND], distance = 0;
+        if (prox(sd_i, sd_j, distance, path, sign)) {
+            double v = 0;
+            for (int l = 0; l < distance; ++l) v += sign[l] * evel(s, path[l], k);
+            return v;
+        }
+        return vel(s, sd_i, k) - vel(s, sd_j, k);
+    }
     KOKKOS_INLINE_FUNCTION double slowdown_drift_correction(int s, int i, int k) const {
         if (sd_inv == 1 || (i != sd_i && i != sd_j)) return 0;
         const double mi = mass(sd_i), mj = mass(sd_j);
-        const double rel = vel(s, sd_i, k) - vel(s, sd_j, k);
+        const double rel = slowdown_relative_velocity(s, k);
         return (sd_inv - 1) * (i == sd_i ? mj : -mi) / (mi + mj) * rel;
     }
     int cmode = 0;                                  // collisions: 0 off, 1 stop rule, 2 contact merging (in run)
@@ -331,7 +342,7 @@ struct DevT {
         if (sd_inv != 1) {
             double rel2 = 0;
             for (int k = 0; k < 3; k++) {
-                const double dv = vel(s, sd_i, k) - vel(s, sd_j, k);
+                const double dv = slowdown_relative_velocity(s, k);
                 rel2 += dv * dv;
             }
             const double mi = mass(sd_i), mj = mass(sd_j);
@@ -355,7 +366,15 @@ struct DevT {
         Kokkos::parallel_for(Kokkos::TeamThreadRange(t, E), [&](int e) {
             for (int k = 0; k < 3; k++) {
                 double v = evel(s, e, k);
-                if (sd_inv != 1) v += slowdown_drift_correction(s, ehi(e), k) - slowdown_drift_correction(s, elo(e), k);
+                if (sd_inv != 1) {
+                    const int hi = ehi(e), lo = elo(e);
+                    // For an internal binary edge, compute v/kappa directly. The
+                    // subtractive form cancels nearly equal Cartesian quantities.
+                    if ((hi == sd_i && lo == sd_j) || (hi == sd_j && lo == sd_i))
+                        v *= sd_inv;
+                    else
+                        v += slowdown_drift_correction(s, hi, k) - slowdown_drift_correction(s, lo, k);
+                }
                 epos(s, e, k) += dt * v;
             }
         });

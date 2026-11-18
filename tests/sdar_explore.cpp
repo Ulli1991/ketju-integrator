@@ -28,7 +28,7 @@ struct State {
     double t=0,seconds=0,a=0,e=0,energy_error=0,physical_energy_change=0,L_error=0,applied=1;
     V3 h{},outer{};
     long accepted=0,rejected=0;
-    bool ok=false;
+    bool ok=false, completed=false;
 };
 static void setup(mstar::System& s,int kind){
     s.constants.G=s.constants.c=1; s.options.PN_flags=0; s.options.enable_bh_mergers=false;
@@ -57,7 +57,7 @@ static State run(int kind,double k,bool enabled=true,int fallback=0){
     double effective0=effective_energy(s,k),physical0=s.energy(); V3 L0=angular(s);
     auto start=std::chrono::steady_clock::now(); bool ok=s.run(duration);
     State q; q.ok=ok; q.seconds=std::chrono::duration<double>(std::chrono::steady_clock::now()-start).count();
-    q.t=s.time; q.m=s.mass;q.x=s.pos;q.v=s.vel; q.applied=s.perf.applied_slowdown_factor;
+    q.t=s.time; q.completed=ok&&std::fabs(q.t-duration)<=std::max(1e-15,1e-12*duration); q.m=s.mass;q.x=s.pos;q.v=s.vel; q.applied=s.perf.applied_slowdown_factor;
     q.accepted=s.perf.successful_steps;q.rejected=s.perf.failed_steps;
     V3 r=minus(val(s.pos,1),val(s.pos,0)),v=minus(val(s.vel,1),val(s.vel,0));
     q.h=cross(r,v); double gm=s.constants.G*(s.mass[0]+s.mass[1]),rlen=norm(r);
@@ -71,18 +71,19 @@ static State run(int kind,double k,bool enabled=true,int fallback=0){
 static bool bits(const State&a,const State&b){return a.m==b.m&&a.x.size()==b.x.size()&&a.v.size()==b.v.size()&&std::memcmp(a.x.data(),b.x.data(),a.x.size()*sizeof(double))==0&&std::memcmp(a.v.data(),b.v.data(),a.v.size()*sizeof(double))==0&&a.t==b.t;}
 static double median(std::vector<double> a){std::sort(a.begin(),a.end());return a[a.size()/2];}
 int main(int argc,char**argv){
-    mstar::ScopeGuard guard(argc,argv); int failures=0,hard_failures=0;
+    mstar::ScopeGuard guard(argc,argv); int failures=0,hard_failures=0,speed_failures=0;
     for(int kind:{0,1,2}){
         State ref=run(kind,1,false),eq=run(kind,1,true);
-        bool same=bits(ref,eq); std::printf("EQUIVALENCE case=%d bitwise=%d\n",kind,same);if(!same)failures++;
+        bool same=ref.completed&&eq.completed&&bits(ref,eq); std::printf("EQUIVALENCE case=%d bitwise=%d\n",kind,same);if(!same)failures++;
         std::vector<double> base_times;
-        for(int rep=0;rep<3;rep++){auto b=run(kind,1,false);base_times.push_back(b.seconds);std::printf("BASE case=%d rep=%d seconds=%.9g steps=%ld rejected=%ld\n",kind,rep,b.seconds,b.accepted,b.rejected);}
+        for(int rep=0;rep<3;rep++){auto b=run(kind,1,false);base_times.push_back(b.seconds);if(!b.completed)failures++;std::printf("BASE case=%d rep=%d seconds=%.9g steps=%ld rejected=%ld\n",kind,rep,b.seconds,b.accepted,b.rejected);}
         for(double k:{4.,16.}){
-            std::vector<double> times; bool pass=true;
+            std::vector<double> times; bool pass=true, completed=true;
             for(int rep=0;rep<3;rep++){
-                State q=run(kind,k);times.push_back(q.seconds);
+                State q=run(kind,k);times.push_back(q.seconds);completed=completed&&q.completed;
+                std::printf("COMPLETION case=%d k=%.0f rep=%d ok=%d completed=%d actual_time=%.17g requested_time=%.17g\n",kind,k,rep,q.ok,q.completed,q.t,kind==2?5.:128*std::acos(-1.));
                 double da=std::fabs((q.a-ref.a)/ref.a),de=std::fabs(q.e-ref.e),dh=norm(minus(q.h,ref.h))/norm(ref.h),dx=kind?norm(minus(q.outer,ref.outer))/norm(ref.outer):0;
-                bool good=q.ok&&q.applied==k&&std::isfinite(q.energy_error)&&da<=1e-3&&de<=1e-3&&dh<=1e-3&&dx<=1e-3&&q.energy_error<=1e-7&&q.L_error<=1e-7;
+                bool good=ref.completed&&q.completed&&q.applied==k&&std::isfinite(q.energy_error)&&da<=1e-3&&de<=1e-3&&dh<=1e-3&&dx<=1e-3&&q.energy_error<=1e-7&&q.L_error<=1e-7;
                 double phase_error=0;
                 if(kind==0){
                     double mean=std::remainder(std::acos(-1.)+q.t/k,2*std::acos(-1.)),E=mean;
@@ -94,14 +95,15 @@ int main(int argc,char**argv){
                 pass=pass&&good;
                 std::printf("RESULT case=%d k=%.0f rep=%d seconds=%.9g a_error=%.9g e_error=%.9g h_error=%.9g outer_error=%.9g Hsd_error=%.9g physical_dE=%.9g L_error=%.9g slowed_phase_error=%.9g steps=%ld rejected=%ld pass=%d\n",kind,k,rep,q.seconds,da,de,dh,dx,q.energy_error,q.physical_energy_change,q.L_error,phase_error,q.accepted,q.rejected,good);
             }
-            double speed=median(base_times)/median(times);std::printf("TIMING case=%d k=%.0f median_speedup=%.6g accuracy_pass=%d speed_bar_pass=%d\n",kind,k,speed,pass,speed>=1.1);
+            double speed=ref.completed&&completed?median(base_times)/median(times):0;std::printf("TIMING case=%d k=%.0f median_speedup=%.6g accuracy_pass=%d speed_bar_pass=%d\n",kind,k,speed,pass,speed>=1.1);
+            if(!(speed>=1.1))speed_failures++;
             if(!pass){if(kind==2)hard_failures++;else failures++;}
         }
     }
     for(int feature=1;feature<=6;feature++){
-        State ref=run(0,1,false,feature),q=run(0,16,true,feature);bool pass=q.applied==1&&bits(ref,q);
+        State ref=run(0,1,false,feature),q=run(0,16,true,feature);bool pass=ref.completed&&q.completed&&q.applied==1&&bits(ref,q);
         std::printf("FALLBACK feature=%d applied=%.1f bitwise=%d pass=%d\n",feature,q.applied,bits(ref,q),pass);if(!pass)failures++;
     }
-    std::printf("SUMMARY correctness_failures=%d strong_encounter_failures=%d production_acceptable=%d\n",failures,hard_failures,failures==0&&hard_failures==0);
-    return failures||hard_failures?1:0;
+    std::printf("SUMMARY correctness_failures=%d strong_encounter_failures=%d speed_failures=%d phase1_pass=%d production_acceptable=0\n",failures,hard_failures,speed_failures,failures==0&&hard_failures==0&&speed_failures==0);
+    return failures||hard_failures||speed_failures?1:0;
 }
