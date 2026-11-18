@@ -106,6 +106,8 @@ TEST(Gizmo_star_collisions, head_on_contact) {
         EXPECT_EQ(S.extra_index[0], 1);
         EXPECT_EQ(S.mass[0], 1.5);
         const double x = 1 / r0, t_contact = std::sqrt(r0 * r0 * r0 / (2 * 1.5)) * (std::sqrt(x * (1 - x)) + std::acos(std::sqrt(x)));
+        std::printf("  head_on_contact: t_merger - t_contact %.3e (t_contact %.6f, r = 0 at %.6f), contact landings %ld\n",
+                    mi.t_merger - t_contact, t_contact, 0.5 * M_PI * std::sqrt(r0 * r0 * r0 / (2 * 1.5)), S.perf.contact_landings);
         EXPECT_GE(mi.t_merger, t_contact * (1 - 1e-9));
         EXPECT_LE(mi.t_merger, 0.5 * M_PI * std::sqrt(r0 * r0 * r0 / (2 * 1.5)) * (1 + 1e-9)); // before r = 0
         EXPECT_NEAR(P(S, 0)[0], 0, 1e-10);

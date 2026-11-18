@@ -75,6 +75,9 @@ struct Options {
     double softening_kink_eta = 5e-4;               // a crossing within this fraction of a step from an end is accepted
     double softening_kink_error_ratio = 1;          // crossings with an estimated local error (J dt^6 / 6!) below this
                                                     // ratio x the tolerance on the separation are not landed
+    bool contact_landing = true;                    // collision_radius: land GBS steps on the first contact r = R1 + R2
+                                                    // of a pair (event location, same eta as the kink landing) and merge
+                                                    // there; false: the C library's rule, contact found at step ends only
     bool no_star_star_gravity = false;              // no forces between non-PN particles
     bool enable_bh_mergers = true;
     double bh_merger_distance_in_Rs = 12;
@@ -106,6 +109,7 @@ struct PerformanceCounters {
     long successful_steps = 0, failed_steps = 0;
     double applied_slowdown_factor = 1; // actual factor of the last run, 1 for the ordinary/fallback path
     long kink_landings = 0;             // steps repeated to land on a softening-kernel break point
+    long contact_landings = 0;          // steps repeated to land on a contact (Options::contact_landing)
     double total_work = 0;              // ~ number of force evaluations (KETJU's step_total_work sum)
     double relative_energy_error = 0;   // experimental slowdown: conserved H_sd, not physical energy; otherwise
                                         // over the last run(): energy T - U - U_tide (U softened as integrated), the

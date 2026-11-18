@@ -51,6 +51,8 @@ bool bh_merger_due(const System& S);
 // ketju_do_star_collisions on the host state: rv_prev(i, j) = r.v of the pair at the last check, dt_check the time
 // since (nullptr: contact only); dE accumulates the booked collision energies
 int star_collisions(System& S, const std::function<double(int, int)>* rv_prev, double dt_check, double* dE);
+// a contact located inside a step (Options::contact_landing): merge pair i < j at the current state, booking *dE
+void merge_contact_pair(System& S, int i, int j, double* dE);
 
 }  // namespace detail
 }  // namespace mstar

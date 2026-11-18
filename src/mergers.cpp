@@ -427,6 +427,13 @@ int do_bh_mergers(System& o) {
     return num_merged;
 }
 
+// contact collision of the non-PN pair i < j located by the engine's contact landing (Options::contact_landing): merged
+// at the current state, its energy change added to *dE
+void merge_contact_pair(System& o, int i, int j, double* dE) {
+    merge_stars(o, i, j);
+    if (dE) *dE += o.mergers.back().dE_collision;
+}
+
 int star_collisions(System& o, const std::function<double(int, int)>* rv_prev, double dt_check, double* dE) {
     if ((int)o.collision_radius.size() != o.num_particles) return 0;
     int num_merged = 0;

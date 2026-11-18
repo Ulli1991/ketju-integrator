@@ -920,13 +920,17 @@ struct Engine {
     bool work_on = false;   // B carries non-Newtonian work (PN, extra forces): the ledger pn_dB is kept
     // per-step result read back to the host: 0 T, 1 U, 2 time, 3 e0, 4 e1, 5 bad, 6 extrapolated B, 7 collision
     // pair key i N + j (-1: none), 8 r_sep, 9 r_coll, 10 type, 11 extra work, 12 first softening-kernel crossing
-    // (fraction of the step, 2: none); from RES_PN the PN positions
-    static constexpr int RES_PN = 13;
+    // (fraction of the step, 2: none), 13 first contact crossing (fraction of the step, 2: none), 14 its pair key;
+    // from RES_PN the PN positions
+    static constexpr int RES_PN = 15;
     V<double*> res;
     Kokkos::View<long, Mem> ckey;
     Kokkos::View<double, Mem> kink;   // first crossing of a softening-kernel break point in the candidate step
     bool kink_on = false;
     bool coll_on = false;
+    Kokkos::View<double, Mem> cth;    // first contact crossing r = R1 + R2 of a pair in the candidate step
+    Kokkos::View<long, Mem> cthkey;   // its pair key i N + j
+    bool cland_on = false;
     Kokkos::View<double*, Kokkos::HostSpace> h_res;
     V<double*> tmin;                // initial time step reduction
     // host tree
@@ -1051,6 +1055,8 @@ struct Engine {
         h_res = Kokkos::View<double*, Kokkos::HostSpace>("mstar_hres", RES_PN + 3 * P);
         ckey = Kokkos::View<long, Mem>("mstar_ckey");
         kink = Kokkos::View<double, Mem>("mstar_kink");
+        cth = Kokkos::View<double, Mem>("mstar_cth");
+        cthkey = Kokkos::View<long, Mem>("mstar_cthkey");
         tmin = V<double*>("mstar_tmin", 1);
         errview = Kokkos::View<ErrVal, Mem>("mstar_err");
         bslot = K; cslot = K + 1;
@@ -1177,6 +1183,7 @@ struct Engine {
         const bool stop_on = (int)o.stop_collisions.radius.size() == N;
         if (merge_on && stop_on) throw std::runtime_error("MSTAR: collision_radius and stop_collisions are exclusive");
         coll_on = merge_on || stop_on;
+        cland_on = merge_on && o.options.contact_landing;
         d.cmode = merge_on ? 2 : (stop_on ? 1 : 0);
         d.cc = o.stop_collisions.c;
         d.cmax1 = o.stop_collisions.bh_max_single;
@@ -1465,6 +1472,43 @@ struct Engine {
         o.perf.launches++;
     }
 
+    // First contact crossing (fraction of the step, 2: none) of a non-PN pair with collision radii between slot s_prev
+    // (step start) and slot s (step end), and its pair key: r^2 over the step is the cubic Hermite interpolant of the end
+    // values and slopes (as for the softening kink), so a contact inside the step (also a grazing passage that leaves
+    // contact again before the step ends) is located instead of being found only at the step end
+    void launch_contact_theta(int s, int s_prev) {
+        const Dev dd = d;
+        const int N = d.N;
+        const Kokkos::View<double, Mem> th = cth;
+        const Kokkos::View<long, Mem> key = cthkey;
+        if (!cland_on) return;
+        auto theta_of = [=] KOKKOS_FUNCTION (int i, int j) -> double {
+            if (i < dd.Npn || !(dd.crad(i) > 0) || !(dd.crad(j) > 0)) return 2.0;
+            detail::HermiteR2 p{0, 0, 0, 0};
+            const double dt = dd.scal(s, S_TIME) - dd.scal(s_prev, S_TIME);
+            for (int k = 0; k < 3; k++) {
+                const double r0 = dd.pos(s_prev, j, k) - dd.pos(s_prev, i, k), v0 = dd.vel(s_prev, j, k) - dd.vel(s_prev, i, k);
+                const double r1 = dd.pos(s, j, k) - dd.pos(s, i, k), v1 = dd.vel(s, j, k) - dd.vel(s, i, k);
+                p.g0 += r0 * r0; p.g1 += r1 * r1; p.d0 += r0 * v0; p.d1 += r1 * v1;
+            }
+            p.d0 *= 2 * dt;
+            p.d1 *= 2 * dt;
+            const double rc = dd.crad(i) + dd.crad(j);
+            if (!(p.g0 > rc * rc)) return 2.0;   // the start is already in contact: the step-end rule handles it
+            return p.first_crossing(rc * rc);
+        };
+        Kokkos::parallel_reduce("mstar_cth", Kokkos::RangePolicy<Exec>(0, N), KOKKOS_LAMBDA(int i, double& mn) {
+            for (int j = i + 1; j < N; j++) { const double t = theta_of(i, j); if (t < mn) mn = t; }
+        }, Kokkos::Min<double, Mem>(th));
+        Kokkos::parallel_reduce("mstar_cthkey", Kokkos::RangePolicy<Exec>(0, N), KOKKOS_LAMBDA(int i, long& mn) {
+            const double tmin = th();
+            if (!(tmin < 2.0)) return;
+            for (int j = i + 1; j < N; j++)
+                if (theta_of(i, j) <= tmin) { const long kq = (long)i * N + j; if (kq < mn) mn = kq; break; }
+        }, Kokkos::Min<long, Mem>(key));
+        o.perf.launches += 2;
+    }
+
     // estimate_initial_timestep on slot s
     double initial_timestep(int s) {
         const Dev dd = d;
@@ -1594,8 +1638,12 @@ struct Engine {
             launch_collision(cs, bs);
             launch_collision_res(cs, bs);
             launch_kink(cs, bs);
+            launch_contact_theta(cs, bs);
             const Kokkos::View<double, Mem> th = kink;
             const bool kon = kink_on;
+            const Kokkos::View<double, Mem> cthv = cth;
+            const Kokkos::View<long, Mem> cthk = cthkey;
+            const bool clon = cland_on;
             const V<double*> r = res;
             const int Npn = d.Npn;
             Kokkos::parallel_for("mstar_res", Kokkos::RangePolicy<Exec>(0, 1), KOKKOS_LAMBDA(int) {
@@ -1608,6 +1656,8 @@ struct Engine {
                 r(6) = dd.data(KR, nv);
                 r(11) = dd.data(KR, nv + 1);
                 r(12) = kon && th() < 2.0 ? th() : 2.0;
+                r(13) = clon && cthv() < 2.0 ? cthv() : 2.0;
+                r(14) = clon && cthv() < 2.0 ? (double)cthk() : -1.0;
                 for (int i = 0; i < Npn; i++)
                     for (int q = 0; q < 3; q++) r(RES_PN + 3 * i + q) = dd.pos(cs, i, q);
             });
@@ -1799,6 +1849,7 @@ bool run_on(System& S, Engine<Exec>& im, double time_interval) {
     bool finished = false, ok = true;
     double B_now = initial_B;
     int kink_retries = 0;   // consecutive landing retries of the current step
+    int contact_retries = 0;   // consecutive contact-landing retries of the current step
     std::vector<double> xp, vp;   // previous accepted state (collision pericentre test)
     do {
         if (opt.enable_bh_mergers && Hstep > 0 && detail::bh_merger_due(S)) {
@@ -1872,7 +1923,42 @@ bool run_on(System& S, Engine<Exec>& im, double time_interval) {
             }
         }
         if (converged && !kink_retry) kink_retries = 0;
-        if (converged && !kink_retry) {
+        // contact collisions (collision_radius, contact_landing): a pair reaching r = R1 + R2 inside the converged step
+        // repeats it ending on the contact (the kink rule and eta); a contact within eta of the step start merges the
+        // pair at the accepted start state, so the collision happens at contact and not up to a step later
+        bool contact_retry = false;
+        long contact_key = -1;
+        if (converged && !kink_retry && im.cland_on) {
+            const double theta = im.h_res(13), eta = opt.softening_kink_eta;
+            if (theta < 2.0 && im.h_res(14) >= 0) {
+                if (theta < eta) contact_key = (long)im.h_res(14);
+                else if (theta < 1 - eta && contact_retries < 20) {
+                    contact_retry = true;
+                    contact_retries += 1;
+                    perf.contact_landings += 1;
+                    Hstep = theta * Hstep_attempted;
+                }
+            }
+        }
+        if (converged && !kink_retry && !contact_retry) contact_retries = 0;
+        if (contact_key >= 0) {
+            const int N = im.d.N, i = (int)(contact_key / N), j = (int)(contact_key % N);
+            double t_now;
+            im.download_state(im.bslot, t_now);
+            S.time = t_start + t_now;
+            detail::merge_contact_pair(S, i, j, &collision_dE);
+            S.time = t_now;
+            if (S.num_particles < 2) {
+                trivial_propagation(S, time_interval - t_now);
+                S.time = time_interval;
+                break;
+            }
+            reupload(t_now);
+            B_now = read_scal(im.bslot, S_B);
+            Hstep = Hstep_attempted;
+            continue;
+        }
+        if (converged && !kink_retry && !contact_retry) {
             std::swap(im.bslot, im.cslot);
             if (im.work_on) S.pn_dB += im.h_res(6) - B_now;   // work of the non-Newtonian forces
             if (im.d.track_vi) S.ext_work += im.h_res(11);     // of the velocity-independent extra forces

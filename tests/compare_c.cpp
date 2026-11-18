@@ -197,6 +197,7 @@ Run run_k(const Sys& sy, const Opt& o, double T, mstar::PerformanceCounters* per
     mstar::System M(sy.npn, sy.n - sy.npn);
     unit_constants(M);
     if (g_device_tree) { M.options.device_tree_everywhere = true; M.options.device_tree_min_n = 0; }
+    M.options.contact_landing = false;   // the C library finds contacts at step ends only: compare the same rule
     if (std::getenv("MSTAR_TEST_HOST_ENGINE")) M.options.host_engine = true;   // diagnostics: the host engine in GPU builds
     M.constants.G = o.G;
     M.constants.c = o.c;
