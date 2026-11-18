@@ -112,6 +112,15 @@ struct DevT {
     double soft = 0;                                // star_star_softening
     bool no_ss = false;                             // no_star_star_gravity
     bool ss_mod = false;                            // soft > 0 or no_ss: star-star pairs differ
+    int sd_i = -1, sd_j = -1;                       // nominated binary, valid only when sd_inv < 1
+    double sd_inv = 1;                              // constant 1/kappa during the call
+
+    KOKKOS_INLINE_FUNCTION double slowdown_drift_correction(int s, int i, int k) const {
+        if (sd_inv == 1 || (i != sd_i && i != sd_j)) return 0;
+        const double mi = mass(sd_i), mj = mass(sd_j);
+        const double rel = vel(s, sd_i, k) - vel(s, sd_j, k);
+        return (sd_inv - 1) * (i == sd_i ? mj : -mi) / (mi + mj) * rel;
+    }
     int cmode = 0;                                  // collisions: 0 off, 1 stop rule, 2 contact merging (in run)
     bool vdep_on = false;                           // the auxiliary-velocity scheme is used (PN pairs or ex.vdep)
     V<double*> crad;                                // collision radius per body (stop rule or collision_radius)
@@ -201,6 +210,10 @@ struct DevT {
         }
         invr = 1. / sqrt(r2);
         Ginvr3 = G * invr * invr * invr;
+        if (sd_inv != 1 && ((i == sd_i && j == sd_j) || (i == sd_j && j == sd_i))) {
+            invr *= sd_inv;
+            Ginvr3 *= sd_inv;
+        }
         return true;
     }
 
@@ -315,6 +328,15 @@ struct DevT {
             for (int k = 0; k < 3; k++) v2 += vel(s, i, k) * vel(s, i, k);
             sum += 0.5 * mass(i) * v2;
         }, T);
+        if (sd_inv != 1) {
+            double rel2 = 0;
+            for (int k = 0; k < 3; k++) {
+                const double dv = vel(s, sd_i, k) - vel(s, sd_j, k);
+                rel2 += dv * dv;
+            }
+            const double mi = mass(sd_i), mj = mass(sd_j);
+            T += (sd_inv - 1) * 0.5 * mi * mj / (mi + mj) * rel2;
+        }
         return T;
     }
     KOKKOS_INLINE_FUNCTION void team_drift(const Team& t, int s, double ds) const {
@@ -324,10 +346,18 @@ struct DevT {
         Kokkos::single(Kokkos::PerTeam(t), [&]() {
             scal(s, S_T) = T;
             scal(s, S_TIME) += dt;
-            for (int k = 0; k < 3; k++) root_s(s, R_POS + k) += dt * root_s(s, R_VEL + k);
+            for (int k = 0; k < 3; k++) {
+                double v = root_s(s, R_VEL + k);
+                if (sd_inv != 1) v += slowdown_drift_correction(s, root, k);
+                root_s(s, R_POS + k) += dt * v;
+            }
         });
         Kokkos::parallel_for(Kokkos::TeamThreadRange(t, E), [&](int e) {
-            for (int k = 0; k < 3; k++) epos(s, e, k) += dt * evel(s, e, k);
+            for (int k = 0; k < 3; k++) {
+                double v = evel(s, e, k);
+                if (sd_inv != 1) v += slowdown_drift_correction(s, ehi(e), k) - slowdown_drift_correction(s, elo(e), k);
+                epos(s, e, k) += dt * v;
+            }
         });
         t.team_barrier();
         Kokkos::parallel_for(Kokkos::TeamThreadRange(t, N), [&](int v) { vertex_pos(s, v); });
@@ -906,6 +936,22 @@ struct Engine {
         d.vi_on = d.ex.vindep || d.tide;
         d.track_vi = (d.ex.vindep && d.ex.track_work) || d.tide;
         d.soft = o.options.star_star_softening;
+        d.sd_inv = 1; d.sd_i = d.sd_j = -1;
+        o.perf.applied_slowdown_factor = 1;
+        if (o.options.experimental_slowdown) {
+            const double f = o.options.slowdown_factor;
+            if (!std::isfinite(f) || f < 1) throw std::invalid_argument("MSTAR: slowdown_factor must be finite and >= 1");
+            const bool supported = Npn == 0 && o.options.star_star_softening == 0 && !o.options.no_star_star_gravity
+                && !o.options.enable_external_tide && !d.ex.vindep && !d.ex.vdep && d.n_pert == 0
+                && o.collision_radius.empty() && o.stop_collisions.radius.empty();
+            if (f > 1 && supported) {
+                const int i = o.options.slowdown_i, j = o.options.slowdown_j;
+                if (i < 0 || j < 0 || i >= N || j >= N || i == j || !(o.mass[i] > 0) || !(o.mass[j] > 0))
+                    throw std::invalid_argument("MSTAR: slowdown needs two distinct positive-mass particles");
+                d.sd_i = i; d.sd_j = j; d.sd_inv = 1 / f;
+                o.perf.applied_slowdown_factor = f;
+            }
+        }
         d.no_ss = o.options.no_star_star_gravity;
         d.ss_mod = d.no_ss || d.soft > 0;
         work_on = d.vdep_on || d.track_vi;

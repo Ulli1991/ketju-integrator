@@ -89,6 +89,11 @@ struct Options {
     int team_rows_max_n_device = 0;                 // device engine: the same (A100: the staged path is faster)
     int device_tree_min_n = 256;                    // device engine: the MST on the device from this size
     bool device_tree_everywhere = false;            // tests: the team MST on the host engine too
+    // Experimental constant-factor SDAR for one nominated Newtonian binary. Off by default; no automatic
+    // binary discovery or changing-factor prescription. Unsupported force/collision models retain factor 1.
+    bool experimental_slowdown = false;
+    int slowdown_i = 0, slowdown_j = 1;
+    double slowdown_factor = 1;
 };
 
 // ketju_natural_constants, with KETJU's defaults (ketju_default_natural_constants: GADGET units, 1e10 Msun, kpc, km/s)
@@ -99,9 +104,11 @@ struct Constants {
 // ketju_performance_counters (+ timers of this library)
 struct PerformanceCounters {
     long successful_steps = 0, failed_steps = 0;
+    double applied_slowdown_factor = 1; // actual factor of the last run, 1 for the ordinary/fallback path
     long kink_landings = 0;             // steps repeated to land on a softening-kernel break point
     double total_work = 0;              // ~ number of force evaluations (KETJU's step_total_work sum)
-    double relative_energy_error = 0;   // over the last run(): energy T - U - U_tide (U softened as integrated), the
+    double relative_energy_error = 0;   // experimental slowdown: conserved H_sd, not physical energy; otherwise
+                                        // over the last run(): energy T - U - U_tide (U softened as integrated), the
                                         // collision energies dE_collision removed; not the error with PN forces, extra
                                         // forces other than the tide, or after BH mergers
     double t_mst = 0, t_total = 0, t_sync = 0;   // wall seconds

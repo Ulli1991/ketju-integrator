@@ -181,3 +181,17 @@ Results (CPU: gcc 15, Kokkos OpenMP, 1 thread; A100: CUDA 13.2) are noted at eac
 * GPU (A100) results differ from the CPU ones by floating-point round-off (FMA contraction, team reduction order).
   The step sequence amplifies that round-off, which explains the different step counts and collision times; the
   measured CPU and A100 values are noted at each case in `tests/compare_c.cpp`.
+
+## Experimental fixed-factor slowdown
+
+`Options::experimental_slowdown` (default `false`) enables a controlled SDAR+GBS experiment for the nominated
+`slowdown_i`, `slowdown_j` binary at constant `slowdown_factor >= 1`. The internal two-body Hamiltonian is scaled
+by `1/kappa`; its centre of mass and other interactions are unchanged. This intentionally changes rapid orbital
+phase and is not an exact fast version of the original trajectory. `PerformanceCounters::applied_slowdown_factor`
+reports the actual factor. The energy-error diagnostic then refers to the effective slowdown Hamiltonian;
+`System::energy()` still reports physical Newtonian energy.
+
+PN particles, softening, excluded star-star forces, collision rules, tides, extra forces and external perturber
+records retain ordinary integration (actual factor 1). Factor 1 takes the original arithmetic path. Automatic binary
+discovery, perturbation-limited factors, changing-factor bookkeeping and safe encounter switching are not implemented.
+This is an exploration option, not a production-ready SDAR port. No speed or accuracy improvement has been established.

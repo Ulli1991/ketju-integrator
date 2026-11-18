@@ -97,6 +97,11 @@ if(MSTAR_TESTS)
     add_test(NAME mstar_embedded_tide COMMAND mstar-embedded-tide)
     set_tests_properties(mstar_embedded_tide PROPERTIES ENVIRONMENT "${_env}")
 
+    # Explicit scientific exploration executable; strong-encounter failures must remain visible in its output.
+    # Not a default CTest: fixed-factor slowdown is not intended to pass arbitrary encounter trajectories.
+    add_executable(mstar-sdar-explore ${T}/sdar_explore.cpp)
+    target_link_libraries(mstar-sdar-explore mstar::mstar)
+
     # the standalone driver on KETJU's sample IC (smoke test)
     add_test(NAME mstar_driver COMMAND mstar-driver ${CMAKE_CURRENT_SOURCE_DIR}/examples/nbody_sample_ic.txt 1e-6 4)
     set_tests_properties(mstar_driver PROPERTIES ENVIRONMENT "${_env}")
