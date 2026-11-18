@@ -77,6 +77,13 @@ if(MSTAR_TESTS)
     add_executable(mstar-compare-c ${T}/compare_c.cpp)
     target_include_directories(mstar-compare-c PRIVATE ${T})
     target_compile_definitions(mstar-compare-c PRIVATE ${MSTAR_REF_DEFS})
+    # The stored C results are keyed by a hash of the exact initial state, which the test generates (Plummer spheres:
+    # pow, sin, cos). FMA contraction and GCC's fusion of sin and cos into sincos change its last bits with the compiler
+    # and -march, so the key named the build, not the problem: generate it with plain IEEE operations in every build
+    # (the stored references were generated that way).
+    if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+        target_compile_options(mstar-compare-c PRIVATE -ffp-contract=off -fno-builtin-sin -fno-builtin-cos)
+    endif()
     target_link_libraries(mstar-compare-c mstar::mstar)
     add_test(NAME mstar_compare_c COMMAND mstar-compare-c)
     set_tests_properties(mstar_compare_c PROPERTIES ENVIRONMENT "${_env}")
