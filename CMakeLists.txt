@@ -26,6 +26,15 @@ find_package(Kokkos REQUIRED)
 
 add_library(mstar ${CMAKE_CURRENT_SOURCE_DIR}/src/engine.cpp ${CMAKE_CURRENT_SOURCE_DIR}/src/mergers.cpp)
 add_library(mstar::mstar ALIAS mstar)
+# No floating-point contraction (FMA) in the library, host and device alike. The GBS extrapolation and the softening
+# kink landing assume the force, energy and crossing arithmetic of the reference C library: with contraction (e.g. from
+# -march=znver4 via Kokkos_ARCH_ZEN4, or clang's HIP default) the softened two-body ensemble of
+# Softening_kink.two_body_orbit_converges stops converging with the tolerance (median |dE/E| 1.4e-10 at 1e-13 against
+# 1.2e-12 without), and the PN, extra-force and C comparisons lose their round-off agreement. The contraction-sensitive
+# code is the softened kernels and the kink locator of src/kernels.hpp and their callers.
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(mstar PRIVATE -ffp-contract=off)
+endif()
 target_include_directories(mstar
     PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include> $<INSTALL_INTERFACE:include>
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
