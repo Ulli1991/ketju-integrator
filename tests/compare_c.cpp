@@ -67,6 +67,8 @@ struct Opt {
     std::vector<double> radius;      // collision_radius (empty: off)
     int calls = 1;                   // the interval in this many run calls
     bool kink = true;                // softening_kink_landing
+    double dP_step = 0;              // > 0: derived RMS momentum round-off per accepted step (see core100); the |dP| bar
+                                     // is then 1.5 dP_step sqrt(steps) for the C and the Kokkos run alike
 };
 
 void unit_constants(mstar::System& M) {
@@ -310,7 +312,12 @@ Diff compare(const char* name, const Sys& sy, const Opt& o, double T, double bou
         pl_drift(sy, a, pa, la);
         pl_drift(sy, b, pb, lb);
         std::printf("  dP C %.2e K %.2e, dL C %.2e K %.2e\n", pa, pb, la, lb);
-        check(name, "|dP| Kokkos (<= 2 C, 1.5e-13)", pb, std::fmax(2 * pa, 1.5e-13));
+        if (o.dP_step > 0) {   // derived round-off bar, each run with its own number of accepted steps
+            check(name, "|dP| C (<= 1.5 dP_step sqrt(steps))", pa, 1.5 * o.dP_step * std::sqrt((double)a.steps));
+            check(name, "|dP| Kokkos (<= 1.5 dP_step sqrt(steps))", pb, 1.5 * o.dP_step * std::sqrt((double)b.steps));
+        } else {
+            check(name, "|dP| Kokkos (<= 2 C, 1.5e-13)", pb, std::fmax(2 * pa, 1.5e-13));
+        }
         check(name, "|dL| Kokkos (<= 2 C, 1.5e-13)", lb, std::fmax(2 * la, 1.5e-13));
     }
     check(name, "merger count C - K", std::fabs((double)a.merges.size() - (double)b.merges.size()), 0.0);
@@ -507,16 +514,32 @@ int main(int argc, char** argv) {
             o.tol = 1e-12;
             compare("pythagorean", s, o, 10.0, 2.4e-10, 1.8e-12, 5.6e-12);   // dv CPU 1.27e-10, A100 1.84e-10; dE A100 4.3e-12
         }
+        // Momentum round-off of the Plummer cores (derived, host and device alike). MSTAR keeps the root body's velocity
+        // and the relative velocities w_e of the MST edges; a kick adds dt (a_hi - a_lo) to each w_e, rounded relative to
+        // |w_e| (round to nearest, u = 2^-53: error uniform in +-u|w|, variance u^2 |w|^2 / 3), and an error in w_e moves
+        // every body below the edge, so it enters P weighted by the subtree mass M_e. Per kick
+        //   var(dP) = u^2 / 3 (sum_e M_e^2 |w_e|^2 + M^2 |v_root|^2) = u^2 / 3 Q_e.
+        // An accepted GBS step of order k extrapolates rows of n_j = 2 j kicks with weights c_j (Aitken-Neville in
+        // h^2, x_j = 1 / n_j^2): var = u^2 / 3 Q_e sum_j c_j^2 n_j; over S accepted steps the variances add, and
+        // |dP| / sum m|v| (pl_drift) is compared. Force-sum order (device team reductions vs sequential host sums)
+        // does not enter: the force round-off is relative to dt a, far below |w_e|. Evaluated per accepted step on
+        // this state (instrumented build, ketju_stress/diag_src): RMS per step dP_step = 3.48e-14 (device, 34 steps)
+        // and 3.36e-14 (host, 33 steps); the larger is used. Spread: |dP| / prediction over 33 Plummer seeds (N = 100,
+        // T = 0.25, tol 1e-10) on the device and the host engine: mean 0.57 / 0.54, largest 1.11 / 1.01 (device
+        // results bitwise reproducible). Bar 1.5 x prediction: 1.35 x the largest of the 66 measured ratios.
+        // C reference: 8.95e-14 in 35 steps (bar 3.1e-13); device 2.13e-13 in 34 steps (bar 3.0e-13).
         if (want(argc, argv, "core100")) {
             Sys s = plummer(100, 0, 42);
             Opt o;
             o.tol = 1e-10;
+            o.dP_step = 3.48e-14;
             compare("core100", s, o, 0.25, 1.3e-12, 1.3e-13, 1.3e-13);   // measured dx 5.4e-14, dv 9.9e-13, dE 7.9e-15 / 9.9e-14
         }
         if (want(argc, argv, "core100_staged")) {
             Sys s = plummer(100, 0, 42);
             Opt o;
             o.tol = 1e-10;
+            o.dP_step = 3.48e-14;   // as core100 (same state and steps)
             o.team_max = 0;   // staged path (separate force / kick-drift launches)
             compare("core100_staged", s, o, 0.25, 1.3e-12, 1.3e-13, 1.3e-13);
         }
