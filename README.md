@@ -10,6 +10,7 @@ tide, star-star softening).
 
 The C version of the integrator (KETJU's MSTAR library with the GIZMO additions, the reference implementation, with
 its `nbody` example, Python bindings and unit tests) is on the branch `ketju-c` of this repository.
+The C interface header `include/ketju_integrator/ketju_integrator.h` (the structs and option defaults of the C library, byte for byte that of `ketju-c` e70b815) is kept here as well: callers that hold their data in the C structs and call this library (GIZMO's KETJU coupling) need nothing from `ketju-c`. The functions it declares are not defined by this library.
 
 ## Citation
 
