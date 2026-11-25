@@ -92,6 +92,12 @@ struct Options {
     int team_rows_max_n_device = 0;                 // device engine: the same (A100: the staged path is faster)
     int device_tree_min_n = 256;                    // device engine: the MST on the device from this size
     bool device_tree_everywhere = false;            // tests: the team MST on the host engine too
+    int gbs_error_norm = 0;                         // GBS error of a variable relative to 0: its own magnitude (the C
+                                                    // library's rule: a component near zero at the step end sets the
+                                                    // error), 1: the norm of its 3-vector (root / edge position or
+                                                    // velocity, spin)
+    bool gbs_error_diag = false;                    // count the failed steps the other rule would have accepted
+                                                    // (PerformanceCounters::failed_steps_other_norm)
     int mpi_min_n = -1;                             // MPI builds, System with a communicator: systems with at least this
                                                     // many particles at entry share their O(N^2) loops over the tasks
                                                     // (< 0: the library default, 128; see set_mpi_fcomm)
@@ -110,6 +116,8 @@ struct Constants {
 // ketju_performance_counters (+ timers of this library)
 struct PerformanceCounters {
     long successful_steps = 0, failed_steps = 0;
+    long failed_steps_other_norm = 0;   // Options::gbs_error_diag: failed steps within tolerance by the other
+                                        // gbs_error_norm rule
     double applied_slowdown_factor = 1; // actual factor of the last run, 1 for the ordinary/fallback path
     long kink_landings = 0;             // steps repeated to land on a softening-kernel break point
     long contact_landings = 0;          // steps repeated to land on a contact (Options::contact_landing)

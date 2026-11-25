@@ -70,6 +70,20 @@ struct ErrVal {
         return *this;
     }
 };
+// both error measures of a step: c relative to each component, v relative to the norm of its 3-vector
+struct ErrVal2 {
+    double c0, c1, v0, v1;
+    int bad;
+    KOKKOS_INLINE_FUNCTION ErrVal2() : c0(0), c1(0), v0(0), v1(0), bad(0) {}
+    KOKKOS_INLINE_FUNCTION ErrVal2& operator+=(const ErrVal2& o) {
+        c0 = c0 > o.c0 ? c0 : o.c0;
+        c1 = c1 > o.c1 ? c1 : o.c1;
+        v0 = v0 > o.v0 ? v0 : o.v0;
+        v1 = v1 > o.v1 ? v1 : o.v1;
+        bad |= o.bad;
+        return *this;
+    }
+};
 
 }  // namespace
 }  // namespace mstar
@@ -80,6 +94,9 @@ template <> struct reduction_identity<mstar::Acc4> {
 };
 template <> struct reduction_identity<mstar::ErrVal> {
     KOKKOS_FORCEINLINE_FUNCTION static mstar::ErrVal sum() { return mstar::ErrVal(); }
+};
+template <> struct reduction_identity<mstar::ErrVal2> {
+    KOKKOS_FORCEINLINE_FUNCTION static mstar::ErrVal2 sum() { return mstar::ErrVal2(); }
 };
 }  // namespace Kokkos
 
@@ -1820,6 +1837,58 @@ struct Engine {
         const double atol = o.options.gbs_absolute_tolerance, otol = o.options.output_time_absolute_tolerance;
         const int KR = d.kmax;
         const int nv = d.nvars;
+        other_norm_ok = false;
+        if (o.options.gbs_error_norm != 0 || o.options.gbs_error_diag) {
+            // the same extrapolation by 3-vector (variable 0, the time, alone; then root position, root velocity,
+            // edge positions, edge velocities, spins; last B and W), with both error measures
+            const int ngroups = 1 + (nv - 1) / 3 + 1;
+            ErrVal2 e2;
+            Kokkos::parallel_reduce("mstar_extrap_vec", Kokkos::RangePolicy<Exec>(0, ngroups),
+                                    KOKKOS_LAMBDA(int g, ErrVal2& e) {
+                const int v0 = g == 0 ? 0 : (g == ngroups - 1 ? nv : 1 + 3 * (g - 1));
+                const int nc = g == 0 ? 1 : (g == ngroups - 1 ? 2 : 3);
+                double res[3], raw[3], dr[3], dl[3], norm2 = 0;   // raw: the last row, the scale of the C rule
+                for (int c = 0; c < nc; c++) {
+                    const int v = v0 + c;
+                    double tt[MAX_K];
+                    for (int j = 0; j < k; j++) tt[j] = dd.data(j, v);
+                    raw[c] = tt[k - 1];
+                    for (int j = 0; j < k - 1; j++) {
+                        for (int i = k - 1; i >= j + 1; i--) {
+                            const double ratio = (double)(2 * (i + 1)) / (double)(2 * (i - j));
+                            const double nterm = ratio * ratio;
+                            tt[i] = (nterm * tt[i] - tt[i - 1]) / (nterm - 1.0);
+                        }
+                    }
+                    res[c] = tt[k - 1];
+                    dr[c] = fabs(tt[k - 1] - tt[k - 2]);
+                    dl[c] = fabs(tt[k - 2] - tt[k - 3]);
+                    norm2 += raw[c] * raw[c];
+                    if (v >= nv || Kokkos::isfinite(res[c])) dd.data(KR, v) = res[c];
+                }
+                if (v0 >= nv) return;   // B, W: extrapolated, not error controlled
+                for (int c = 0; c < nc; c++)
+                    if (!Kokkos::isfinite(res[c])) { e.bad = 1; return; }
+                double vscal = sqrt(norm2) + atol;
+                if (g == 0) vscal += otol;
+                for (int c = 0; c < nc; c++) {
+                    double yscal = fabs(raw[c]) + atol;
+                    if (g == 0) yscal += otol;
+                    if (dr[c] / yscal > e.c0) e.c0 = dr[c] / yscal;
+                    if (dl[c] / yscal > e.c1) e.c1 = dl[c] / yscal;
+                    if (dr[c] / vscal > e.v0) e.v0 = dr[c] / vscal;
+                    if (dl[c] / vscal > e.v1) e.v1 = dl[c] / vscal;
+                }
+            }, Kokkos::Sum<ErrVal2>(e2));
+            const bool vec = o.options.gbs_error_norm != 0;
+            ErrVal use;
+            use.e0 = vec ? e2.v0 : e2.c0;
+            use.e1 = vec ? e2.v1 : e2.c1;
+            use.bad = e2.bad;
+            Kokkos::deep_copy(errv, use);
+            other_norm_ok = !e2.bad && (vec ? e2.c0 : e2.v0) < o.options.gbs_relative_tolerance;
+            o.perf.launches++;
+        } else
         Kokkos::parallel_reduce("mstar_extrap", Kokkos::RangePolicy<Exec>(0, d.nvars + 2),
                                 KOKKOS_LAMBDA(int v, ErrVal& e) {
             double tt[MAX_K];
@@ -1897,6 +1966,7 @@ struct Engine {
 #endif
     }
     ErrVal last_err;
+    bool other_norm_ok = false;   // gbs_error_diag: the last step is within tolerance by the other error rule
     Kokkos::View<ErrVal, Mem> errview;
 };
 
@@ -2296,6 +2366,7 @@ bool run_on(System& S, Engine<Exec>& im, double time_interval) {
             }
         } else if (!converged) {
             perf.failed_steps += 1;
+            if (im.other_norm_ok) perf.failed_steps_other_norm += 1;
         }
         if (!finished && opt.max_step_count > 0 && perf.failed_steps + perf.successful_steps >= opt.max_step_count) {
             ok = false;
