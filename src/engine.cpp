@@ -125,6 +125,8 @@ struct DevT {
     V<double***> spin, aspin, sder;                 // (slots, max(Npn, 1), 3)
     V<double***> accvd, pnv;                        // (slots, N, 3): velocity-dependent acceleration, velocities
     V<double***> aext;                              // (slots, N, 3): extra velocity-independent acceleration
+    V<double***> vtmp;                              // (slots, N, 3): new vertex velocities of a sweep
+    bool sweep = false;                             // Options::tree_sweep
     V<double**> pert;                               // (n_pert, 10): perturbers m, x0, v, a (x0 + v t + a t^2 / 2)
     int n_pert = 0;
     ExtraForces ex;                                 // extra forces (port of KETJU's extra-force branch)
@@ -329,6 +331,25 @@ struct DevT {
         for (int k = 0; k < 3; k++) out[k] = x[k];
     }
 
+    // The vertex coordinates of vertex_pos / vertex_vel for all vertices by one sweep over the edges, which are in
+    // Prim order (the lower end elo of an edge is the root or the upper end of an earlier edge): x_v = x_parent + edge
+    // repeats the additions of the root-to-vertex path sum in the same order, so the values are bitwise the same.
+    // Serial (one member of the team): O(N) instead of O(N depth).
+    KOKKOS_INLINE_FUNCTION void sweep_pos(int s) const {
+        for (int k = 0; k < 3; k++) pos(s, root, k) = root_s(s, R_POS + k);
+        for (int e = 0; e < E; e++) {
+            const int v = ehi(e), q = elo(e);
+            for (int k = 0; k < 3; k++) pos(s, v, k) = pos(s, q, k) + epos(s, e, k);
+        }
+    }
+    KOKKOS_INLINE_FUNCTION void sweep_vel(int s, const V<double***>& out) const {
+        for (int k = 0; k < 3; k++) out(s, root, k) = root_s(s, R_VEL + k);
+        for (int e = 0; e < E; e++) {
+            const int v = ehi(e), q = elo(e);
+            for (int k = 0; k < 3; k++) out(s, v, k) = out(s, q, k) + evel(s, e, k);
+        }
+    }
+
     // ---- team building blocks ----
     KOKKOS_INLINE_FUNCTION void team_copy(const Team& t, int from, int to) const {
         Kokkos::parallel_for(Kokkos::TeamThreadRange(t, (int)NSCAL), [&](int q) { scal(to, q) = scal(from, q); });
@@ -402,7 +423,8 @@ struct DevT {
             }
         });
         t.team_barrier();
-        Kokkos::parallel_for(Kokkos::TeamThreadRange(t, N), [&](int v) { vertex_pos(s, v); });
+        if (sweep) Kokkos::single(Kokkos::PerTeam(t), [&]() { sweep_pos(s); });
+        else Kokkos::parallel_for(Kokkos::TeamThreadRange(t, N), [&](int v) { vertex_pos(s, v); });
         t.team_barrier();
     }
     // forces of slot s inside one team (small N): acc and u_i = sum_{j>i} m_j / r_ij, U = G sum_i m_i u_i
@@ -568,9 +590,14 @@ struct DevT {
             // (the exact kinetic-energy change of their kick), so that T + B = U stays consistent (KETJU's branch
             // leaves B unchanged: the time transformation then drifts from U with the external work)
             double w = 0;
+            if (sweep) {
+                Kokkos::single(Kokkos::PerTeam(t), [&]() { sweep_vel(s, vtmp); });
+                t.team_barrier();
+            }
             Kokkos::parallel_reduce(Kokkos::TeamThreadRange(t, N), [&](int v, double& sum) {
                 double x[3];
-                vertex_vel(s, v, R_VEL, x);
+                if (sweep) { for (int k = 0; k < 3; k++) x[k] = vtmp(s, v, k); }
+                else vertex_vel(s, v, R_VEL, x);
                 for (int k = 0; k < 3; k++) {
                     sum += mass(v) * 0.5 * (vel(s, v, k) + x[k]) * (aext(s, v, k) - am[k]);
                     vel(s, v, k) = x[k];
@@ -581,7 +608,8 @@ struct DevT {
             t.team_barrier();
             return;
         }
-        Kokkos::parallel_for(Kokkos::TeamThreadRange(t, N), [&](int v) {
+        if (sweep) Kokkos::single(Kokkos::PerTeam(t), [&]() { sweep_vel(s, vel); });
+        else Kokkos::parallel_for(Kokkos::TeamThreadRange(t, N), [&](int v) {
             double x[3];
             vertex_vel(s, v, R_VEL, x);
             for (int k = 0; k < 3; k++) vel(s, v, k) = x[k];
@@ -623,7 +651,8 @@ struct DevT {
             for (int k = 0; k < 3; k++) spin(s, i, k) = data(row, 7 + 6 * E + 3 * i + k);
         });
         t.team_barrier();
-        Kokkos::parallel_for(Kokkos::TeamThreadRange(t, N), [&](int v) {
+        if (sweep) Kokkos::single(Kokkos::PerTeam(t), [&]() { sweep_pos(s); sweep_vel(s, vel); });
+        else Kokkos::parallel_for(Kokkos::TeamThreadRange(t, N), [&](int v) {
             vertex_pos(s, v);
             double x[3];
             vertex_vel(s, v, R_VEL, x);
@@ -1045,6 +1074,7 @@ struct Engine {
         work_on = d.vdep_on || d.track_vi;
         kink_on = o.options.softening_kink_landing && d.soft > 0 && !d.no_ss;
         d.nvars = 1 + 3 + 3 + 6 * (N - 1) + 3 * Npn;
+        d.sweep = o.options.tree_sweep;
         if (N == cap_N && Npn == cap_pn && K == cap_k) return;
         cap_N = N; cap_pn = Npn; cap_k = K;
         slots = K + 2;
@@ -1073,6 +1103,7 @@ struct Engine {
         d.sder = V<double***>("mstar_sder", slots, P, 3);
         d.pnv = V<double***>("mstar_pnv", slots, N, 3);
         d.aext = V<double***>("mstar_aext", slots, N, 3);
+        d.vtmp = V<double***>("mstar_vtmp", slots, N, 3);
         d.data = V<double**>("mstar_data", K + 1, d.nvars + 2);
         res = V<double*>("mstar_res", RES_PN + 3 * P);
         h_res = Kokkos::View<double*, Kokkos::HostSpace>("mstar_hres", RES_PN + 3 * P);
@@ -1443,7 +1474,8 @@ struct Engine {
                            q.softening_kink_landing, q.contact_landing, q.no_star_star_gravity, q.enable_bh_mergers,
                            q.enable_bh_merger_kicks, q.enable_external_tide, q.device_tree_everywhere, q.device_tree_min_n,
                            q.experimental_slowdown, q.slowdown_i, q.slowdown_j, q.extra.vindep, q.extra.n_pm, q.extra.track_work,
-                           q.extra.remove_mean, q.extra.vdep, o.stop_collisions.bh_max_single};
+                           q.extra.remove_mean, q.extra.vdep, o.stop_collisions.bh_max_single,
+                           q.tree_sweep, q.gbs_error_norm, q.gbs_error_diag, q.team_rows_max_n};
         h = fnv(h, od, sizeof(od));
         h = fnv(h, oi, sizeof(oi));
         h = fnv(h, q.external_tidal_tensor, sizeof(q.external_tidal_tensor));
