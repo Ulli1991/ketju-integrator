@@ -61,6 +61,7 @@ int main(int argc, char** argv) {
         std::printf("Usage:\nmstar-driver ic_file integration_time substeps [tolerance=1e-9] [host|device] [G c]\n");
         return 2;
     }
+    mstar::MpiSession mpi_session(argc, argv);   // MPI builds: the driver runs on several tasks
     mstar::ScopeGuard guard(argc, argv);
     int rc = 0;
     {

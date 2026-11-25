@@ -478,6 +478,7 @@ int main(int argc, char** argv) {
 #ifdef MSTAR_REF_GENERATE
     MPI_Init(&argc, &argv);   // KETJU needs MPI (or the serial stand-in)
 #endif
+    mstar::MpiSession mpi_session(argc, argv);   // MPI builds: the tests run on several tasks
     Kokkos::initialize(argc, argv);
     {
 #ifdef MSTAR_REF_GENERATE

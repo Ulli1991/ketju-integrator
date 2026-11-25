@@ -332,6 +332,7 @@ int main(int argc, char** argv) {
 #else
     if (!g_ref.load(MSTAR_REF_DATA "/extra_force.txt")) { std::printf("FAIL: cannot read extra_force.txt\n"); return 2; }
 #endif
+    mstar::MpiSession mpi_session(argc, argv);   // MPI builds: the tests run on several tasks
     Kokkos::initialize(argc, argv);
     {
         // forward port, same algorithm: round-off for a moderate field (measured 2.9e-15 at 1e5); the example's

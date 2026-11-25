@@ -23,6 +23,12 @@ set(LIBRARY_OUTPUT_PATH ${CMAKE_CURRENT_BINARY_DIR})
 
 set(MSTAR_VERSION 1.0.0)
 find_package(Kokkos REQUIRED)
+# MPI sharing of large systems over the tasks of a communicator (System::set_mpi_fcomm). Off: no MPI dependency, the
+# library is the serial one.
+option(MSTAR_ENABLE_MPI "Share the O(N^2) loops of large systems over MPI tasks" OFF)
+if(MSTAR_ENABLE_MPI)
+    find_package(MPI REQUIRED COMPONENTS CXX)
+endif()
 
 add_library(mstar ${CMAKE_CURRENT_SOURCE_DIR}/src/engine.cpp ${CMAKE_CURRENT_SOURCE_DIR}/src/mergers.cpp)
 add_library(mstar::mstar ALIAS mstar)
@@ -39,6 +45,11 @@ target_include_directories(mstar
     PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include> $<INSTALL_INTERFACE:include>
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_link_libraries(mstar PUBLIC Kokkos::kokkos)
+if(MSTAR_ENABLE_MPI)
+    target_link_libraries(mstar PUBLIC MPI::MPI_CXX)
+    target_compile_definitions(mstar PRIVATE MSTAR_HAVE_MPI)
+    set(_mstar_mpi_dep "find_dependency(MPI COMPONENTS CXX)\n")
+endif()
 target_compile_features(mstar PUBLIC cxx_std_17)
 set_target_properties(mstar PROPERTIES POSITION_INDEPENDENT_CODE ON VERSION ${MSTAR_VERSION})
 
@@ -51,7 +62,7 @@ install(TARGETS mstar EXPORT mstarTargets
 install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 install(EXPORT mstarTargets NAMESPACE mstar:: DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/mstar)
 file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/mstarConfig.cmake.in
-     "@PACKAGE_INIT@\ninclude(CMakeFindDependencyMacro)\nfind_dependency(Kokkos)\n"
+     "@PACKAGE_INIT@\ninclude(CMakeFindDependencyMacro)\nfind_dependency(Kokkos)\n${_mstar_mpi_dep}"
      "include(\"\${CMAKE_CURRENT_LIST_DIR}/mstarTargets.cmake\")\n")
 configure_package_config_file(${CMAKE_CURRENT_BINARY_DIR}/mstarConfig.cmake.in
                               ${CMAKE_CURRENT_BINARY_DIR}/mstarConfig.cmake
@@ -65,6 +76,8 @@ add_executable(mstar-driver ${CMAKE_CURRENT_SOURCE_DIR}/examples/mstar_driver.cp
 target_link_libraries(mstar-driver mstar::mstar)
 add_executable(mstar-bench ${CMAKE_CURRENT_SOURCE_DIR}/examples/mstar_bench.cpp)
 target_link_libraries(mstar-bench mstar::mstar)
+add_executable(mstar-mpi-bench ${CMAKE_CURRENT_SOURCE_DIR}/examples/mstar_mpi_bench.cpp)
+target_link_libraries(mstar-mpi-bench mstar::mstar)
 
 option(MSTAR_TESTS "Build the tests of the MSTAR library" ON)
 if(MSTAR_TESTS)
@@ -121,4 +134,33 @@ if(MSTAR_TESTS)
     # the standalone driver on KETJU's sample IC (smoke test)
     add_test(NAME mstar_driver COMMAND mstar-driver ${CMAKE_CURRENT_SOURCE_DIR}/examples/nbody_sample_ic.txt 1e-6 4)
     set_tests_properties(mstar_driver PROPERTIES ENVIRONMENT "${_env}")
+
+    # MPI sharing: shared and unshared runs of the same systems agree bit for bit (trivially so without MPI or on 1 task)
+    add_executable(mstar-mpi-share ${T}/mpi_share.cpp)
+    target_link_libraries(mstar-mpi-share mstar::mstar)
+    add_test(NAME mstar_mpi_share COMMAND mstar-mpi-share)
+    set_tests_properties(mstar_mpi_share PROPERTIES ENVIRONMENT "${_env}")
+    if(MSTAR_ENABLE_MPI)
+        # every test on 1, 2 and 4 tasks: with the default sharing threshold (the tests' small systems are then
+        # integrated by every task on its own) and, suffix _all, with every system shared (MSTAR_MPI_MIN_N=2)
+        function(mstar_mpi_tests name)
+            foreach(np 1 2 4)
+                foreach(mode "" "_all")
+                    add_test(NAME ${name}_np${np}${mode}
+                             COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} ${np} ${MPIEXEC_PREFLAGS} ${ARGN})
+                    set(_e "${_env}")
+                    if(mode)
+                        set(_e "${_env};MSTAR_MPI_MIN_N=2")
+                    endif()
+                    set_tests_properties(${name}_np${np}${mode} PROPERTIES ENVIRONMENT "${_e}" PROCESSORS ${np})
+                endforeach()
+            endforeach()
+        endfunction()
+        mstar_mpi_tests(mstar_unit_tests $<TARGET_FILE:mstar-unit-tests>)
+        mstar_mpi_tests(mstar_compare_c $<TARGET_FILE:mstar-compare-c>)
+        mstar_mpi_tests(mstar_extra_force $<TARGET_FILE:mstar-extra-force>)
+        mstar_mpi_tests(mstar_embedded_tide $<TARGET_FILE:mstar-embedded-tide>)
+        mstar_mpi_tests(mstar_driver $<TARGET_FILE:mstar-driver> ${CMAKE_CURRENT_SOURCE_DIR}/examples/nbody_sample_ic.txt 1e-6 4)
+        mstar_mpi_tests(mstar_mpi_share $<TARGET_FILE:mstar-mpi-share>)
+    endif()
 endif()

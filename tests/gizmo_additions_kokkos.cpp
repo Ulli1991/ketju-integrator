@@ -351,6 +351,7 @@ TEST(Gizmo_collision_energy, run_with_tide_and_softening) {
 }
 
 int main(int argc, char **argv) {
+    mstar::MpiSession mpi_session(argc, argv);   // MPI builds: the tests run on several tasks
     mstar::ScopeGuard guard(argc, argv);
     int run = 0, failed = 0;
     for (auto &t : testing::registry()) {

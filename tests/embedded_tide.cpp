@@ -128,6 +128,7 @@ void diff(const Group& a, const Group& b, double& d_int, double& d_com) {
 }  // namespace
 
 int main(int argc, char** argv) {
+    mstar::MpiSession mpi_session(argc, argv);   // MPI builds: the tests run on several tasks
     Kokkos::initialize(argc, argv);
     {
         const double T = 0.01;

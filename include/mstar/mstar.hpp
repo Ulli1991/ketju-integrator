@@ -92,6 +92,9 @@ struct Options {
     int team_rows_max_n_device = 0;                 // device engine: the same (A100: the staged path is faster)
     int device_tree_min_n = 256;                    // device engine: the MST on the device from this size
     bool device_tree_everywhere = false;            // tests: the team MST on the host engine too
+    int mpi_min_n = -1;                             // MPI builds, System with a communicator: systems with at least this
+                                                    // many particles at entry share their O(N^2) loops over the tasks
+                                                    // (< 0: the library default, 128; see set_mpi_fcomm)
     // Experimental constant-factor SDAR for one nominated Newtonian binary. Off by default; no automatic
     // binary discovery or changing-factor prescription. Unsupported force/collision models retain factor 1.
     bool experimental_slowdown = false;
@@ -117,6 +120,9 @@ struct PerformanceCounters {
                                         // forces other than the tide, or after BH mergers
     double t_mst = 0, t_total = 0, t_sync = 0;   // wall seconds
     long launches = 0;                  // kernel launches issued
+    double t_force = 0, t_comm = 0;     // wall seconds in the force launches (messages included) and in MPI messages
+    double mean_tree_depth = 0;         // mean number of edges from the root, last tree built
+    int mpi_tasks = 1;                  // tasks that shared the last run() (1: not shared)
 };
 
 // ketju_bh_merger_info. BH mergers and (with collision_radius) contact collisions of non-PN particles.
@@ -193,6 +199,18 @@ class System {
     // the last accepted step).
     bool run(double time_interval);
 
+    // MPI (library built with MSTAR_ENABLE_MPI; otherwise set_mpi_fcomm throws): the communicator as a Fortran handle
+    // (MPI_Comm_c2f), so this header needs no mpi.h. With a communicator of more than one task, run() is collective:
+    // every task calls it on a System with the same state and options. Each task runs the whole integration; for
+    // systems of at least Options::mpi_min_n particles the O(N^2) loops (forces, collision / contact / kink searches,
+    // initial time step) are divided over the tasks, each particle's force sum computed by one task in the serial
+    // order, so the result is bitwise that of one task for every task count (same Kokkos threads per task). Smaller
+    // systems are integrated by every task on its own without messages. The tasks compare their inputs at entry, the
+    // step result after every GBS step and the final state; a difference throws std::runtime_error on every task.
+    // Host memory spaces only (device engines do not share).
+    void set_mpi_fcomm(int fortran_comm);
+    void clear_mpi_comm();              // back to the default communicator (none, or MpiSession's)
+
     // ---- helpers
     void set_particle(int i, double m, const double x[3], const double v[3]);
     // ketju_into_CoM_frame: shift to the CoM frame, returning its position and velocity
@@ -212,6 +230,20 @@ class System {
 // (ketju_pair_rv).
 int do_star_collisions(System& S, double* rv_prev);
 void pair_rv(const System& S, double* rv);
+
+// MPI helpers. mpi_enabled: the library was built with MSTAR_ENABLE_MPI. MpiSession (tests, drivers; first object
+// in main, before Kokkos starts): calls MPI_Init / MPI_Finalize unless MPI is already running, and makes
+// MPI_COMM_WORLD the communicator of every System without its own; the environment variable MSTAR_MPI_MIN_N sets the
+// library default of Options::mpi_min_n. Without MPI support it does nothing (rank 0, size 1).
+bool mpi_enabled();
+struct MpiSession {
+    MpiSession(int& argc, char**& argv);
+    ~MpiSession();
+    MpiSession(const MpiSession&) = delete;
+    MpiSession& operator=(const MpiSession&) = delete;
+    int rank = 0, size = 1;
+    bool owns_ = false;
+};
 
 // Kokkos lifetime helpers (the caller may use Kokkos directly instead)
 void initialize(int& argc, char** argv);
