@@ -3,7 +3,8 @@
 // MPI sharing of one system over the tasks of a communicator (System::set_mpi_fcomm, Options::mpi_min_n): every case
 // is integrated twice by every task, once without sharing (each task on its own) and once with the O(N^2) loops
 // divided over the tasks, and the two results must agree bit for bit (state, time, step counts, merger records,
-// energy error, work ledgers). As the unshared run does not depend on the task count, this is also the statement
+// energy error, work ledgers). The same holds for Options::tree_sweep (vertex coordinates by a parents-first sweep
+// instead of path sums), alone and together with sharing. As the unshared run does not depend on the task count, this is also the statement
 // that results do not depend on the task count. Run on 1, 2 and 4 tasks (1 task: sharing is off, the test is then
 // only a repeatability check). Rank 0 prints a hash of each final state for comparison between task counts.
 
@@ -79,13 +80,14 @@ struct Result {
 
 using Setup = std::function<void(mstar::System&)>;
 
-Result integrate(int npn, int nother, const Setup& setup, double T, int min_n, int team_rows_max_n) {
+Result integrate(int npn, int nother, const Setup& setup, double T, int min_n, int team_rows_max_n, bool sweep) {
     mstar::System S(npn, nother);
     S.constants.G = 1;
     S.constants.c = 1e3;
     S.options.PN_flags = mstar::PN_NONE;
     setup(S);
     S.options.mpi_min_n = min_n;
+    S.options.tree_sweep = sweep;
     if (team_rows_max_n >= 0) S.options.team_rows_max_n = team_rows_max_n;
     const bool ok = S.run(T);
     Result r;
@@ -111,15 +113,18 @@ int g_fail = 0;
 // the default, i.e. the path a serial run takes); expect: checks on the outcome (collisions happened, ...)
 void check(const mstar::MpiSession& mpi, const char* name, int npn, int nother, const Setup& setup, double T, int team_alone,
            const std::function<bool(const Result&)>& expect) {
-    const Result a = integrate(npn, nother, setup, T, 1 << 30, team_alone);
-    const Result b = integrate(npn, nother, setup, T, 2, -1);
+    const Result a = integrate(npn, nother, setup, T, 1 << 30, team_alone, false);
+    const Result b = integrate(npn, nother, setup, T, 2, -1, false);
+    const Result c = integrate(npn, nother, setup, T, 1 << 30, team_alone, true);   // sweep, unshared
+    const Result d = integrate(npn, nother, setup, T, 2, -1, true);                 // sweep, shared
     const bool shared = !mstar::mpi_enabled() || mpi.size == 1 ? b.tasks == 1 : b.tasks == mpi.size;
-    const bool ok = a.same(b) && a.tasks == 1 && shared && expect(a);
+    const bool ok = a.same(b) && a.same(c) && a.same(d) && a.tasks == 1 && shared && d.tasks == b.tasks && expect(a);
     if (!ok) g_fail++;
     if (mpi.rank == 0 || !ok)
-        std::printf("[%s] rank %d %-14s N %d steps %ld + %ld failed, mergers %ld, kink %ld, contact %ld, tasks %d, bitwise %s, HASH %s %016llx\n",
+        std::printf("[%s] rank %d %-14s N %d steps %ld + %ld failed, mergers %ld, kink %ld, contact %ld, tasks %d, bitwise shared %s, sweep %s, both %s, HASH %s %016llx\n",
                     ok ? "  OK  " : "FAILED", mpi.rank, name, npn + nother, a.l[3], a.l[4], a.l[7], a.l[5], a.l[6], b.tasks,
-                    a.same(b) ? "equal" : "DIFFERENT", name, (unsigned long long)a.hash());
+                    a.same(b) ? "equal" : "DIFFERENT", a.same(c) ? "equal" : "DIFFERENT", a.same(d) ? "equal" : "DIFFERENT", name,
+                    (unsigned long long)a.hash());
     std::fflush(stdout);
 }
 

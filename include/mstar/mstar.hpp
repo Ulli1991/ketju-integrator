@@ -98,6 +98,10 @@ struct Options {
                                                     // velocity, spin)
     bool gbs_error_diag = false;                    // count the failed steps the other rule would have accepted
                                                     // (PerformanceCounters::failed_steps_other_norm)
+    bool tree_sweep = false;                        // vertex positions and velocities from the tree by a parents-first
+                                                    // sweep, x_v = x_parent + edge: the additions of the root-to-vertex
+                                                    // path sum in the same order (bitwise the same result), O(N) on one
+                                                    // thread instead of O(N depth) over the team's threads
     int mpi_min_n = -1;                             // MPI builds, System with a communicator: systems with at least this
                                                     // many particles at entry share their O(N^2) loops over the tasks
                                                     // (< 0: the library default, 128; see set_mpi_fcomm)

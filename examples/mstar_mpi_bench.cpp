@@ -3,7 +3,7 @@
 // Wall time per GBS step of one large system with a hard binary, shared over the MPI tasks the program is started on
 // (1 task: the serial library). Contact collisions are on (radii too small to collide), tolerance 1e-9.
 //   mstar-mpi-bench [N = 770] [GBS step attempts = 200] [binary semi-major axis / cluster radius = 1e-4]
-//                   [gbs_error_norm = 0] [gbs_error_diag = 0] [time interval = 0: until the step limit; > 0: no step limit]
+//                   [gbs_error_norm = 0] [gbs_error_diag = 0] [time interval = 0: until the step limit; > 0: no step limit] [tree_sweep = 0]
 // Rank 0 prints: tasks, N, steps (accepted + failed), wall s, ms per step, share of the force launches and of the MPI
 // messages in the wall time, mean tree depth, and a hash of the final state (the same for every task count).
 
@@ -32,6 +32,7 @@ int main(int argc, char** argv) {
         S.options.max_step_count = T > 0 ? -1 : steps;
         S.options.gbs_error_norm = norm;
         S.options.gbs_error_diag = diag != 0;
+        S.options.tree_sweep = argc > 7 && std::atoi(argv[7]) != 0;
         S.options.mpi_min_n = 2;
         std::uint64_t seed = 4242;
         auto u = [&]() {
