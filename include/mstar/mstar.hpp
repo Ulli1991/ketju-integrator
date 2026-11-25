@@ -102,6 +102,7 @@ struct Options {
                                                     // sweep, x_v = x_parent + edge: the additions of the root-to-vertex
                                                     // path sum in the same order (bitwise the same result), O(N) on one
                                                     // thread instead of O(N depth) over the team's threads
+    bool log_steps = false;                         // diagnostics: System::step_log gets every GBS step attempt
     int mpi_min_n = -1;                             // MPI builds, System with a communicator: systems with at least this
                                                     // many particles at entry share their O(N^2) loops over the tasks
                                                     // (< 0: the library default, 128; see set_mpi_fcomm)
@@ -206,6 +207,9 @@ class System {
     // velocity-independent extra forces together; ext_work is the work of the velocity-independent extra forces (the
     // external tide and the perturbers included) alone. Zero without such forces.
     double pn_dB = 0, ext_work = 0;
+    // Options::log_steps: per GBS step attempt of the last run() 5 values: order k, fictitious step H, error / tolerance
+    // (e0 of the rule in use), accepted (1 / 0), the order chosen for the next step
+    std::vector<double> step_log;
 
     // ketju_run_integrator: advance by time_interval. Returns false if max_step_count was exceeded (state left at
     // the last accepted step).

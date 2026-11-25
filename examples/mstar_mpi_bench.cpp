@@ -3,7 +3,7 @@
 // Wall time per GBS step of one large system with a hard binary, shared over the MPI tasks the program is started on
 // (1 task: the serial library). Contact collisions are on (radii too small to collide), tolerance 1e-9.
 //   mstar-mpi-bench [N = 770] [GBS step attempts = 200] [binary semi-major axis / cluster radius = 1e-4]
-//                   [gbs_error_norm = 0] [gbs_error_diag = 0] [time interval = 0: until the step limit; > 0: no step limit] [tree_sweep = 0]
+//                   [gbs_error_norm = 0] [gbs_error_diag = 0] [time interval = 0: until the step limit; > 0: no step limit] [tree_sweep = 0] [step statistics = 0]
 // Rank 0 prints: tasks, N, steps (accepted + failed), wall s, ms per step, share of the force launches and of the MPI
 // messages in the wall time, mean tree depth, and a hash of the final state (the same for every task count).
 
@@ -15,6 +15,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <vector>
 
 int main(int argc, char** argv) {
     mstar::MpiSession mpi(argc, argv);
@@ -33,6 +34,7 @@ int main(int argc, char** argv) {
         S.options.gbs_error_norm = norm;
         S.options.gbs_error_diag = diag != 0;
         S.options.tree_sweep = argc > 7 && std::atoi(argv[7]) != 0;
+        S.options.log_steps = argc > 8 && std::atoi(argv[8]) != 0;
         S.options.mpi_min_n = 2;
         std::uint64_t seed = 4242;
         auto u = [&]() {
@@ -68,6 +70,37 @@ int main(int argc, char** argv) {
                         "tree depth %.1f, t %.6e, norm %d, failed that the other norm accepts %ld, dE/E %.3e, hash %016llx\n",
                         mpi.size, S.perf.mpi_tasks, n, S.perf.successful_steps, S.perf.failed_steps, wall, 1e3 * wall / (st > 0 ? st : 1),
                         100 * S.perf.t_force / wall, 100 * S.perf.t_comm / wall, S.perf.mean_tree_depth, S.time, norm, S.perf.failed_steps_other_norm, S.perf.relative_energy_error, (unsigned long long)h);
+        if (mpi.rank == 0 && S.options.log_steps) {
+            // what the failed steps look like: order, how far above the tolerance, and what preceded them
+            const std::vector<double>& L = S.step_log;
+            const long n = (long)L.size() / 5;
+            long nk[17] = {}, fk[17] = {}, fail = 0, f2 = 0, f10 = 0, f100 = 0, after_ok = 0, after_ok_grown = 0, after_fail = 0, after_order = 0;
+            long ok_grown = 0, ok_after_ok = 0;
+            double sum_growth_fail = 0, sum_growth_ok = 0;
+            for (long q = 0; q < n; q++) {
+                const int k = (int)L[5 * q];
+                const bool ok = L[5 * q + 3] != 0;
+                nk[k]++;
+                const bool prev = q > 0, prev_ok = prev && L[5 * (q - 1) + 3] != 0;
+                const double growth = prev ? std::fabs(L[5 * q + 1] / L[5 * (q - 1) + 1]) : 1;
+                if (!ok) {
+                    fk[k]++; fail++;
+                    const double er = L[5 * q + 2];
+                    if (er < 2) f2++;
+                    if (er < 10) f10++;
+                    if (!(er < 100)) f100++;
+                    if (prev_ok) { after_ok++; sum_growth_fail += growth; if (growth > 1) after_ok_grown++; if ((int)L[5 * (q - 1)] != k) after_order++; }
+                    else if (prev) after_fail++;
+                } else if (prev_ok) { ok_after_ok++; sum_growth_ok += growth; if (growth > 1) ok_grown++; }
+            }
+            std::printf("STEPS attempts %ld failed %ld (%.1f%%); error / tolerance of the failed: < 2: %ld, < 10: %ld, >= 100: %ld; failed after an accepted step %ld "
+                        "(step had grown: %ld, mean step ratio %.2f, order had changed: %ld), failed after a failed step %ld; accepted after accepted %ld (grown: %ld, mean ratio %.2f)\n",
+                        n, fail, n ? 100.0 * fail / n : 0, f2, f10, f100, after_ok, after_ok_grown, after_ok ? sum_growth_fail / after_ok : 0, after_order, after_fail,
+                        ok_after_ok, ok_grown, ok_after_ok ? sum_growth_ok / ok_after_ok : 0);
+            std::printf("STEPS by order k: attempts (failed):");
+            for (int k = 4; k <= 16; k++) if (nk[k]) std::printf(" %d: %ld (%ld)", k, nk[k], fk[k]);
+            std::printf("\n");
+        }
     }
     return 0;
 }

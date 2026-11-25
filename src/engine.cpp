@@ -2156,6 +2156,7 @@ bool run_on(System& S, Engine<Exec>& im, double time_interval) {
     const double t_start = S.time;
     S.pn_dB = 0;
     S.ext_work = 0;
+    S.step_log.clear();
     auto& sc = S.stop_collisions;
     sc.i = sc.j = -1;
     sc.type = 0;
@@ -2279,6 +2280,10 @@ bool run_on(System& S, Engine<Exec>& im, double time_interval) {
             if (f < 1e-3) f = 1e-3;
             Hstep *= f;
             Hstep_new_k = Hstep;
+        }
+        if (opt.log_steps) {
+            const double rec[5] = {(double)k, Hstep_attempted, scaled_err, converged ? 1.0 : 0.0, (double)new_k};
+            S.step_log.insert(S.step_log.end(), rec, rec + 5);
         }
         // step_total_work
         {
