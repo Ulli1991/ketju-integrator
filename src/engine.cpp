@@ -12,18 +12,24 @@
 #include "mstar/mstar.hpp"
 
 #include <Kokkos_Core.hpp>
+#ifdef MSTAR_HAVE_MPI
+#include <mpi.h>
+#endif
 
 #include <algorithm>
 #include <cfloat>
 #include <chrono>
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <functional>
 #include <limits>
 #include <stdexcept>
+#include <string>
 #include <type_traits>
+#include <vector>
 
 #include "kernels.hpp"
 #include "mergers.hpp"
@@ -1120,6 +1126,7 @@ struct Engine {
         h_off.assign(N + 1, 0);
         for (int v = 0; v < N; v++) h_off[v + 1] = h_off[v] + h_level[v];
         h_pe.assign(std::max(h_off[N], 1), 0);
+        o.perf.mean_tree_depth = (double)h_off[N] / N;
         for (int cnum = 0; cnum < N - 1; cnum++) {
             const int v = h_ehi[cnum], p = h_elo[cnum];
             for (int q = 0; q < h_level[p]; q++) h_pe[h_off[v] + q] = h_pe[h_off[p] + q];
@@ -1336,6 +1343,7 @@ struct Engine {
             if (hl(v) == 0) d.root = v;
         }
         h_pe.assign(std::max(h_off[N], 1), 0);
+        o.perf.mean_tree_depth = (double)h_off[N] / N;
         for (int cnum = 0; cnum < N - 1; cnum++) {
             const int v = hh(cnum), p = hp(v);
             for (int q = 0; q < hl(p); q++) h_pe[h_off[v] + q] = h_pe[h_off[p] + q];
@@ -1351,8 +1359,157 @@ struct Engine {
         o.perf.t_mst += wall() - t0;
     }
 
+#ifdef MSTAR_HAVE_MPI
+    // ---- MPI sharing (System::set_mpi_fcomm). Every task runs the whole integration; with share set, the O(N^2)
+    // loops are divided over the tasks of comm. No floating-point sum is divided: a body's force sum is computed by
+    // one task in the serial order, the searches are minima, so the result is bitwise that of one task.
+    MPI_Comm comm = MPI_COMM_NULL;
+    int mrank = 0, msize = 1;
+    bool share = false;
+    Kokkos::View<double*, Mem> fbuf;   // 4 doubles per (slot, i): Newtonian acc, u
+    std::vector<int> fcnt, fdsp;
+    static std::uint64_t fnv(std::uint64_t h, const void* q, size_t n) {
+        const unsigned char* c = (const unsigned char*)q;
+        for (size_t b = 0; b < n; b++) { h ^= c[b]; h *= 1099511628211ULL; }
+        return h;
+    }
+    template <class T> static std::uint64_t fnv_vec(std::uint64_t h, const std::vector<T>& v) {
+        const std::uint64_t n = v.size();
+        h = fnv(h, &n, sizeof(n));
+        return v.empty() ? h : fnv(h, v.data(), v.size() * sizeof(T));
+    }
+    // all tasks hold the same value, or every task throws
+    void verify_same(const char* what, std::uint64_t h) {
+        const double t0 = wall();
+        std::int64_t b[2] = {(std::int64_t)h, ~(std::int64_t)h};
+        MPI_Allreduce(MPI_IN_PLACE, b, 2, MPI_INT64_T, MPI_MIN, comm);
+        o.perf.t_comm += wall() - t0;
+        if (b[0] != ~b[1]) throw std::runtime_error(std::string("MSTAR MPI: the tasks disagree on ") + what);
+    }
+    std::uint64_t state_hash() const {
+        std::uint64_t h = 1469598103934665603ULL;
+        const int nn[2] = {o.num_particles, o.num_pn_particles};
+        h = fnv(h, nn, sizeof(nn));
+        h = fnv(h, &o.time, sizeof(double));
+        h = fnv_vec(h, o.mass); h = fnv_vec(h, o.pos); h = fnv_vec(h, o.vel); h = fnv_vec(h, o.spin);
+        h = fnv_vec(h, o.collision_radius);
+        return h;
+    }
+    // call entry: sharing is decided here from the particle number and stays for the call (mergers do not change it)
+    void mpi_begin(MPI_Comm c, int min_n, double time_interval) {
+        share = false;
+        o.perf.mpi_tasks = 1;
+        if (c == MPI_COMM_NULL || !Kokkos::SpaceAccessibility<Kokkos::HostSpace, Mem>::accessible) return;
+        int size = 1;
+        MPI_Comm_size(c, &size);
+        if (size < 2 || o.num_particles < min_n || o.num_particles < 2) return;
+        comm = c;
+        msize = size;
+        MPI_Comm_rank(c, &mrank);
+        share = true;
+        o.perf.mpi_tasks = size;
+        fcnt.assign(size, 0);
+        fdsp.assign(size, 0);
+        const size_t need = (size_t)4 * (o.options.gbs_kmax + 2) * o.num_particles;
+        if (fbuf.extent(0) < need) fbuf = Kokkos::View<double*, Mem>("mstar_fbuf", need);
+        // same input and same thread count (the force sum is a team reduction: its order follows the team size)
+        const Options& q = o.options;
+        std::uint64_t h = state_hash();
+        const int threads = Exec().concurrency();
+        h = fnv(h, &threads, sizeof(int));
+        h = fnv(h, &time_interval, sizeof(double));
+        const double od[] = {q.gbs_relative_tolerance, q.gbs_absolute_tolerance, q.output_time_relative_tolerance,
+                             q.output_time_absolute_tolerance, q.star_star_softening, q.softening_kink_eta,
+                             q.softening_kink_error_ratio, q.bh_merger_distance_in_Rs, q.slowdown_factor, o.constants.G,
+                             o.constants.c, q.extra.pm_eps2, o.stop_collisions.c};
+        const long oi[] = {q.gbs_kmax, (long)q.PN_flags, q.steps_between_mst_reconstruction, q.max_tree_distance, q.max_step_count,
+                           q.softening_kink_landing, q.contact_landing, q.no_star_star_gravity, q.enable_bh_mergers,
+                           q.enable_bh_merger_kicks, q.enable_external_tide, q.device_tree_everywhere, q.device_tree_min_n,
+                           q.experimental_slowdown, q.slowdown_i, q.slowdown_j, q.extra.vindep, q.extra.n_pm, q.extra.track_work,
+                           q.extra.remove_mean, q.extra.vdep, o.stop_collisions.bh_max_single};
+        h = fnv(h, od, sizeof(od));
+        h = fnv(h, oi, sizeof(oi));
+        h = fnv(h, q.external_tidal_tensor, sizeof(q.external_tidal_tensor));
+        h = fnv(h, q.extra.A, sizeof(q.extra.A)); h = fnv(h, q.extra.x0, sizeof(q.extra.x0));
+        h = fnv(h, q.extra.pm_m, sizeof(q.extra.pm_m)); h = fnv(h, q.extra.pm_x, sizeof(q.extra.pm_x));
+        h = fnv(h, q.extra.D, sizeof(q.extra.D));
+        h = fnv_vec(h, o.perturbers); h = fnv_vec(h, o.stop_collisions.radius); h = fnv_vec(h, o.stop_collisions.is_bh);
+        verify_same("the input of run() (state, options, Kokkos threads)", h);
+    }
+    void mpi_end() {
+        if (!share) return;
+        share = false;
+        verify_same("the final state", state_hash());
+    }
+    // this task's part of the index range [begin, end), by stride: begin + mrank, + msize, ...
+    int stride_count(int begin, int end) const { return begin + mrank < end ? (end - begin - mrank + msize - 1) / msize : 0; }
+    template <class T> void all_min(T& v, MPI_Datatype type) {
+        const double t0 = wall();
+        MPI_Allreduce(MPI_IN_PLACE, &v, 1, type, MPI_MIN, comm);
+        o.perf.t_comm += wall() - t0;
+    }
+
+    // launch_force with the (slot, i) list cut into one contiguous block per task; the Newtonian sums are exchanged
+    // and every task applies the extra accelerations (they also fill aext) to all bodies itself
+    void launch_force_shared(int slot0, int nslots) {
+        const Dev dd = d;
+        const int N = d.N;
+        const long L = (long)nslots * N;
+        const long L0 = L * mrank / msize, L1 = L * (mrank + 1) / msize;
+        const Kokkos::View<double*, Mem> fb = fbuf;
+        if (L1 > L0) {
+            Kokkos::parallel_for("mstar_force_share", Kokkos::TeamPolicy<Exec>((int)(L1 - L0), Kokkos::AUTO),
+                                 KOKKOS_LAMBDA(const Team& t) {
+                const long lr = L0 + t.league_rank();
+                const int s = slot0 + (int)(lr / N), i = (int)(lr % N);
+                Acc4 a;
+                Kokkos::parallel_reduce(Kokkos::TeamThreadRange(t, N), [&](int j, Acc4& sum) {
+                    if (j == i) return;
+                    double dr[3];
+                    const double r2 = dd.separation(s, i, j, dr);
+                    double invr, Ginvr3;
+                    if (!dd.pair_kernel(i, j, r2, invr, Ginvr3)) return;
+                    const double mj = dd.mass(j);
+                    if (j > i) sum.u += mj * invr;
+                    sum.x += mj * (dr[0] * Ginvr3);
+                    sum.y += mj * (dr[1] * Ginvr3);
+                    sum.z += mj * (dr[2] * Ginvr3);
+                }, Kokkos::Sum<Acc4>(a));
+                Kokkos::single(Kokkos::PerTeam(t), [&]() {
+                    fb(4 * lr) = a.x; fb(4 * lr + 1) = a.y; fb(4 * lr + 2) = a.z; fb(4 * lr + 3) = a.u;
+                });
+            });
+        }
+        Kokkos::fence();
+        for (int q = 0; q < msize; q++) {
+            const long a0 = L * q / msize, a1 = L * (q + 1) / msize;
+            fcnt[q] = (int)(4 * (a1 - a0));
+            fdsp[q] = (int)(4 * a0);
+        }
+        const double t0 = wall();
+        MPI_Allgatherv(MPI_IN_PLACE, 0, MPI_DATATYPE_NULL, fb.data(), fcnt.data(), fdsp.data(), MPI_DOUBLE, comm);
+        o.perf.t_comm += wall() - t0;
+        Kokkos::parallel_for("mstar_force_fill", Kokkos::RangePolicy<Exec>(0, (int)L), KOKKOS_LAMBDA(int lr) {
+            const int s = slot0 + lr / N, i = lr % N;
+            double ai[3] = {fb(4 * lr), fb(4 * lr + 1), fb(4 * lr + 2)};
+            dd.extra_vindep(s, i, ai);
+            dd.acc(s, i, 0) = ai[0]; dd.acc(s, i, 1) = ai[1]; dd.acc(s, i, 2) = ai[2];
+            dd.u(s, i) = fb(4 * lr + 3);
+        });
+        o.perf.launches += 2;
+    }
+#endif
+
     // Forces (acc, u) of nslots consecutive slots from slot0: one team per (slot, i)
     void launch_force(int slot0, int nslots) {
+        const double tf0 = wall();
+#ifdef MSTAR_HAVE_MPI
+        if (share) {
+            launch_force_shared(slot0, nslots);
+            o.perf.t_force += wall() - tf0;
+            return;
+        }
+#endif
         const Dev dd = d;
         const int N = d.N;
         // one team per (slot, i), the j loop a team reduction (A100: 3.3 ms per GBS step at N = 1024 against 18.5 ms
@@ -1381,6 +1538,7 @@ struct Engine {
             });
         });
         o.perf.launches++;
+        o.perf.t_force += wall() - tf0;
     }
     // T, U (from u), B = U - T of slot s, and the result vector
     void launch_energy(int s) {
@@ -1412,7 +1570,7 @@ struct Engine {
             o.perf.launches++;
             return;
         }
-        Kokkos::parallel_reduce("mstar_coll", Kokkos::RangePolicy<Exec>(0, N), KOKKOS_LAMBDA(int i, long& mn) {
+        const auto body = KOKKOS_LAMBDA(int i, long& mn) {
             const double dts = s_prev >= 0 ? dd.scal(s, S_TIME) - dd.scal(s_prev, S_TIME) : 0.0;
             for (int j = i + 1; j < N; j++) {
                 double rsep, rc;
@@ -1423,7 +1581,20 @@ struct Engine {
                     break;
                 }
             }
-        }, Kokkos::Min<long, Mem>(key));
+        };
+#ifdef MSTAR_HAVE_MPI
+        if (share) {
+            const int i0 = mrank, st = msize;
+            long loc = Kokkos::reduction_identity<long>::min();
+            Kokkos::parallel_reduce("mstar_coll_share", Kokkos::RangePolicy<Exec>(0, stride_count(0, N)),
+                                    KOKKOS_LAMBDA(int q, long& mn) { body(i0 + q * st, mn); }, Kokkos::Min<long>(loc));
+            all_min(loc, MPI_LONG);
+            Kokkos::deep_copy(key, loc);
+            o.perf.launches++;
+            return;
+        }
+#endif
+        Kokkos::parallel_reduce("mstar_coll", Kokkos::RangePolicy<Exec>(0, N), body, Kokkos::Min<long, Mem>(key));
         o.perf.launches++;
     }
     // collision result of slot s into res(7..10)
@@ -1454,7 +1625,7 @@ struct Engine {
         const Kokkos::View<double, Mem> th = kink;
         if (!kink_on) return;
         const double tol = o.options.gbs_relative_tolerance * o.options.softening_kink_error_ratio;
-        Kokkos::parallel_reduce("mstar_kink", Kokkos::RangePolicy<Exec>(dd.Npn, N), KOKKOS_LAMBDA(int i, double& mn) {
+        const auto body = KOKKOS_LAMBDA(int i, double& mn) {
             const double dt = dd.scal(s, S_TIME) - dd.scal(s_prev, S_TIME);
             for (int j = i + 1; j < N; j++) {
                 double dr0[3], dv0[3], dr1[3], dv1[3];
@@ -1468,7 +1639,20 @@ struct Engine {
                 const double t = detail::softening_kink_theta(dr0, dv0, dr1, dv1, dt, dd.soft, GM, tol);
                 if (t < mn) mn = t;
             }
-        }, Kokkos::Min<double, Mem>(th));
+        };
+#ifdef MSTAR_HAVE_MPI
+        if (share) {
+            const int i0 = dd.Npn + mrank, st = msize;
+            double loc = Kokkos::reduction_identity<double>::min();
+            Kokkos::parallel_reduce("mstar_kink_share", Kokkos::RangePolicy<Exec>(0, stride_count(dd.Npn, N)),
+                                    KOKKOS_LAMBDA(int q, double& mn) { body(i0 + q * st, mn); }, Kokkos::Min<double>(loc));
+            all_min(loc, MPI_DOUBLE);
+            Kokkos::deep_copy(th, loc);
+            o.perf.launches++;
+            return;
+        }
+#endif
+        Kokkos::parallel_reduce("mstar_kink", Kokkos::RangePolicy<Exec>(dd.Npn, N), body, Kokkos::Min<double, Mem>(th));
         o.perf.launches++;
     }
 
@@ -1497,15 +1681,34 @@ struct Engine {
             if (!(p.g0 > rc * rc)) return 2.0;   // the start is already in contact: the step-end rule handles it
             return p.first_crossing(rc * rc);
         };
-        Kokkos::parallel_reduce("mstar_cth", Kokkos::RangePolicy<Exec>(0, N), KOKKOS_LAMBDA(int i, double& mn) {
+        const auto body_th = KOKKOS_LAMBDA(int i, double& mn) {
             for (int j = i + 1; j < N; j++) { const double t = theta_of(i, j); if (t < mn) mn = t; }
-        }, Kokkos::Min<double, Mem>(th));
-        Kokkos::parallel_reduce("mstar_cthkey", Kokkos::RangePolicy<Exec>(0, N), KOKKOS_LAMBDA(int i, long& mn) {
+        };
+        const auto body_key = KOKKOS_LAMBDA(int i, long& mn) {
             const double tmin = th();
             if (!(tmin < 2.0)) return;
             for (int j = i + 1; j < N; j++)
                 if (theta_of(i, j) <= tmin) { const long kq = (long)i * N + j; if (kq < mn) mn = kq; break; }
-        }, Kokkos::Min<long, Mem>(key));
+        };
+#ifdef MSTAR_HAVE_MPI
+        if (share) {
+            const int i0 = mrank, st = msize, n = stride_count(0, N);
+            double loc = Kokkos::reduction_identity<double>::min();
+            Kokkos::parallel_reduce("mstar_cth_share", Kokkos::RangePolicy<Exec>(0, n),
+                                    KOKKOS_LAMBDA(int q, double& mn) { body_th(i0 + q * st, mn); }, Kokkos::Min<double>(loc));
+            all_min(loc, MPI_DOUBLE);
+            Kokkos::deep_copy(th, loc);   // the pair search below needs the earliest crossing of all tasks
+            long lock = Kokkos::reduction_identity<long>::min();
+            Kokkos::parallel_reduce("mstar_cthkey_share", Kokkos::RangePolicy<Exec>(0, n),
+                                    KOKKOS_LAMBDA(int q, long& mn) { body_key(i0 + q * st, mn); }, Kokkos::Min<long>(lock));
+            all_min(lock, MPI_LONG);
+            Kokkos::deep_copy(key, lock);
+            o.perf.launches += 2;
+            return;
+        }
+#endif
+        Kokkos::parallel_reduce("mstar_cth", Kokkos::RangePolicy<Exec>(0, N), body_th, Kokkos::Min<double, Mem>(th));
+        Kokkos::parallel_reduce("mstar_cthkey", Kokkos::RangePolicy<Exec>(0, N), body_key, Kokkos::Min<long, Mem>(key));
         o.perf.launches += 2;
     }
 
@@ -1514,7 +1717,7 @@ struct Engine {
         const Dev dd = d;
         double t2min = DBL_MAX;
         const int N = d.N;
-        Kokkos::parallel_reduce("mstar_dt0", Kokkos::RangePolicy<Exec>(0, N), KOKKOS_LAMBDA(int i, double& mn) {
+        const auto body = KOKKOS_LAMBDA(int i, double& mn) {
             const double mi = dd.mass(i);
             const int Li = dd.level(i);
             for (int j = i + 1; j < N; j++) {
@@ -1547,7 +1750,16 @@ struct Engine {
                 const double t2 = 1. / (invr * (invr * v2 + dd.G * (mi + mj)));
                 mn = t2 < mn ? t2 : mn;
             }
-        }, Kokkos::Min<double>(t2min));
+        };
+#ifdef MSTAR_HAVE_MPI
+        if (share) {
+            const int i0 = mrank, st = msize;
+            Kokkos::parallel_reduce("mstar_dt0_share", Kokkos::RangePolicy<Exec>(0, stride_count(0, N)),
+                                    KOKKOS_LAMBDA(int q, double& mn) { body(i0 + q * st, mn); }, Kokkos::Min<double>(t2min));
+            all_min(t2min, MPI_DOUBLE);
+        } else
+#endif
+        Kokkos::parallel_reduce("mstar_dt0", Kokkos::RangePolicy<Exec>(0, N), body, Kokkos::Min<double>(t2min));
         o.perf.launches++;
         return 0.05 * std::sqrt(t2min);
     }
@@ -1557,7 +1769,11 @@ struct Engine {
     void gbs_step(double H) {
         const int k = gbs_k, N = d.N, bs = bslot;
         const Dev dd = d;
-        if (N <= (std::is_same<Exec, HostExecSpace>::value ? o.options.team_rows_max_n : o.options.team_rows_max_n_device)) {
+        bool team_rows = N <= (std::is_same<Exec, HostExecSpace>::value ? o.options.team_rows_max_n : o.options.team_rows_max_n_device);
+#ifdef MSTAR_HAVE_MPI
+        if (share) team_rows = false;   // the shared force launches belong to the staged path
+#endif
+        if (team_rows) {
             Kokkos::parallel_for("mstar_rows_team", Kokkos::TeamPolicy<Exec>(k, Kokkos::AUTO),
                                  KOKKOS_LAMBDA(const Team& t) {
                 const int ri = t.league_rank(), s = ri, nsub = 2 * (ri + 1);
@@ -1669,6 +1885,16 @@ struct Engine {
         last_err.e0 = h_res(3);
         last_err.e1 = h_res(4);
         last_err.bad = h_res(5) != 0;
+#ifdef MSTAR_HAVE_MPI
+        if (share) {   // a task that differs here would take another order or step next and stall the others
+            std::uint64_t h = fnv(1469598103934665603ULL, &k, sizeof(int));
+            h = fnv(h, &H, sizeof(double));
+            h = fnv(h, h_res.data(), 8 * sizeof(double));
+            if (h_res(7) >= 0) h = fnv(h, h_res.data() + 8, 3 * sizeof(double));   // 8..10 are set with a collision only
+            h = fnv(h, h_res.data() + 11, (h_res.extent(0) - 11) * sizeof(double));
+            verify_same("the result of a GBS step", h);
+        }
+#endif
     }
     ErrVal last_err;
     Kokkos::View<ErrVal, Mem> errview;
@@ -1679,7 +1905,55 @@ struct Engine {
 struct System::Impl {
     Engine<ExecSpace>* dev = nullptr;       // device engine (the default execution space)
     Engine<HostExecSpace>* host = nullptr;  // host engine (small groups; the only one in host builds)
+#ifdef MSTAR_HAVE_MPI
+    MPI_Comm comm = MPI_COMM_NULL;          // set_mpi_fcomm
+    bool own_comm = false;
+#endif
 };
+
+#ifdef MSTAR_HAVE_MPI
+namespace {
+MPI_Comm g_default_comm = MPI_COMM_NULL;   // MpiSession: communicator of Systems without their own
+int g_default_min_n = 128;                 // Options::mpi_min_n < 0
+// run_on between the entry and exit checks of the sharing tasks
+template <class Exec>
+bool run_shared(System& S, Engine<Exec>& im, double time_interval, MPI_Comm comm);
+}  // namespace
+void System::set_mpi_fcomm(int fortran_comm) {
+    impl_->comm = MPI_Comm_f2c((MPI_Fint)fortran_comm);
+    impl_->own_comm = true;
+}
+void System::clear_mpi_comm() {
+    impl_->comm = MPI_COMM_NULL;
+    impl_->own_comm = false;
+}
+bool mpi_enabled() { return true; }
+MpiSession::MpiSession(int& argc, char**& argv) {
+    int on = 0;
+    MPI_Initialized(&on);
+    if (!on) {
+        MPI_Init(&argc, &argv);
+        owns_ = true;
+    }
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    MPI_Comm_size(MPI_COMM_WORLD, &size);
+    g_default_comm = MPI_COMM_WORLD;
+    if (const char* e = std::getenv("MSTAR_MPI_MIN_N")) g_default_min_n = std::atoi(e);
+}
+MpiSession::~MpiSession() {
+    g_default_comm = MPI_COMM_NULL;
+    g_default_min_n = 128;
+    int off = 0;
+    MPI_Finalized(&off);
+    if (owns_ && !off) MPI_Finalize();
+}
+#else
+void System::set_mpi_fcomm(int) { throw std::runtime_error("MSTAR: built without MPI (MSTAR_ENABLE_MPI)"); }
+void System::clear_mpi_comm() {}
+bool mpi_enabled() { return false; }
+MpiSession::MpiSession(int&, char**&) {}
+MpiSession::~MpiSession() {}
+#endif
 
 System::System(int num_pn, int num_other) : impl_(new Impl) { reset(num_pn, num_other); }
 System::~System() {
@@ -2049,13 +2323,41 @@ bool System::run(double time_interval) {
         throw std::invalid_argument("MSTAR: state arrays do not match num_particles / num_pn_particles");
     if (!collision_radius.empty() && (int)collision_radius.size() != num_particles)
         throw std::invalid_argument("MSTAR: collision_radius must be empty or have num_particles entries");
+#ifdef MSTAR_HAVE_MPI
+    const MPI_Comm comm = impl_->own_comm ? impl_->comm : g_default_comm;
+    if (options.host_engine || std::is_same<ExecSpace, HostExecSpace>::value) {
+        if (!impl_->host) impl_->host = new Engine<HostExecSpace>(*this);
+        return run_shared(*this, *impl_->host, time_interval, comm);
+    }
+    if (!impl_->dev) impl_->dev = new Engine<ExecSpace>(*this);
+    return run_shared(*this, *impl_->dev, time_interval, comm);
+#else
     if (options.host_engine || std::is_same<ExecSpace, HostExecSpace>::value) {
         if (!impl_->host) impl_->host = new Engine<HostExecSpace>(*this);
         return run_on(*this, *impl_->host, time_interval);
     }
     if (!impl_->dev) impl_->dev = new Engine<ExecSpace>(*this);
     return run_on(*this, *impl_->dev, time_interval);
+#endif
 }
+
+#ifdef MSTAR_HAVE_MPI
+namespace {
+template <class Exec>
+bool run_shared(System& S, Engine<Exec>& im, double time_interval, MPI_Comm comm) {
+    im.mpi_begin(comm, S.options.mpi_min_n >= 0 ? S.options.mpi_min_n : g_default_min_n, time_interval);
+    bool ok = false;
+    try {
+        ok = run_on(S, im, time_interval);
+    } catch (...) {
+        im.share = false;
+        throw;
+    }
+    im.mpi_end();
+    return ok;
+}
+}  // namespace
+#endif
 
 void measure_launch_latency(int reps, double& us_launch_fence, double& us_reduce_readback, double& us_async_launch) {
     Kokkos::View<double*, ExecSpace::memory_space> v("lat", 1);
