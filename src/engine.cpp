@@ -1469,13 +1469,13 @@ struct Engine {
         const double od[] = {q.gbs_relative_tolerance, q.gbs_absolute_tolerance, q.output_time_relative_tolerance,
                              q.output_time_absolute_tolerance, q.star_star_softening, q.softening_kink_eta,
                              q.softening_kink_error_ratio, q.bh_merger_distance_in_Rs, q.slowdown_factor, o.constants.G,
-                             o.constants.c, q.extra.pm_eps2, o.stop_collisions.c};
+                             o.constants.c, q.extra.pm_eps2, o.stop_collisions.c, q.gbs_growth_fac1};
         const long oi[] = {q.gbs_kmax, (long)q.PN_flags, q.steps_between_mst_reconstruction, q.max_tree_distance, q.max_step_count,
                            q.softening_kink_landing, q.contact_landing, q.no_star_star_gravity, q.enable_bh_mergers,
                            q.enable_bh_merger_kicks, q.enable_external_tide, q.device_tree_everywhere, q.device_tree_min_n,
                            q.experimental_slowdown, q.slowdown_i, q.slowdown_j, q.extra.vindep, q.extra.n_pm, q.extra.track_work,
                            q.extra.remove_mean, q.extra.vdep, o.stop_collisions.bh_max_single,
-                           q.tree_sweep, q.gbs_error_norm, q.gbs_error_diag, q.team_rows_max_n};
+                           q.tree_sweep, q.gbs_error_norm, q.gbs_error_diag, q.team_rows_max_n, q.gbs_growth_limit};
         h = fnv(h, od, sizeof(od));
         h = fnv(h, oi, sizeof(oi));
         h = fnv(h, q.external_tidal_tensor, sizeof(q.external_tidal_tensor));
@@ -2269,6 +2269,17 @@ bool run_on(System& S, Engine<Exec>& im, double time_interval) {
             } else if (W_km1 / W_k < 0.9 && k > 4) {
                 new_k = k - 1;
                 Hnext = H_km1;
+            }
+            if (opt.gbs_growth_limit == 1) {
+                // ODEX: a small error estimate is not trusted to predict a much larger step
+                const double gk = std::pow(1.0 / opt.gbs_growth_fac1, 1.0 / (2 * k - 1));
+                const double gkm1 = std::pow(1.0 / opt.gbs_growth_fac1, 1.0 / (2 * (k - 1) - 1));
+                const double Hk_cap = std::fabs(H_k / Hstep) > gk ? gk * Hstep : H_k;
+                const double Hkm1_cap = std::fabs(H_km1 / Hstep) > gkm1 ? gkm1 * Hstep : H_km1;
+                if (new_k == k + 1) Hnext = (Hk_cap * gbs_total_cost(k + 1)) / A_k;
+                else if (new_k == k - 1) Hnext = Hkm1_cap;
+                else Hnext = Hk_cap;
+                H_k = Hk_cap;
             }
             if (Hnext / Hstep > 5.0) Hnext = 5.0 * Hstep;
             if (H_k / Hstep > 5.0) H_k = 5.0 * Hstep;

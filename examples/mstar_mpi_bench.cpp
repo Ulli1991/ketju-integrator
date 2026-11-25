@@ -3,7 +3,7 @@
 // Wall time per GBS step of one large system with a hard binary, shared over the MPI tasks the program is started on
 // (1 task: the serial library). Contact collisions are on (radii too small to collide), tolerance 1e-9.
 //   mstar-mpi-bench [N = 770] [GBS step attempts = 200] [binary semi-major axis / cluster radius = 1e-4]
-//                   [gbs_error_norm = 0] [gbs_error_diag = 0] [time interval = 0: until the step limit; > 0: no step limit] [tree_sweep = 0] [step statistics = 0]
+//                   [gbs_error_norm = 0] [gbs_error_diag = 0] [time interval = 0: until the step limit; > 0: no step limit] [tree_sweep = 0] [step statistics = 0] [gbs_growth_limit = 0] [gbs_growth_fac1 = 0.02]
 // Rank 0 prints: tasks, N, steps (accepted + failed), wall s, ms per step, share of the force launches and of the MPI
 // messages in the wall time, mean tree depth, and a hash of the final state (the same for every task count).
 
@@ -35,6 +35,8 @@ int main(int argc, char** argv) {
         S.options.gbs_error_diag = diag != 0;
         S.options.tree_sweep = argc > 7 && std::atoi(argv[7]) != 0;
         S.options.log_steps = argc > 8 && std::atoi(argv[8]) != 0;
+        S.options.gbs_growth_limit = argc > 9 ? std::atoi(argv[9]) : 0;
+        if (argc > 10) S.options.gbs_growth_fac1 = std::atof(argv[10]);
         S.options.mpi_min_n = 2;
         std::uint64_t seed = 4242;
         auto u = [&]() {
@@ -67,9 +69,9 @@ int main(int argc, char** argv) {
         const long st = S.perf.successful_steps + S.perf.failed_steps;
         if (mpi.rank == 0)
             std::printf("BENCH tasks %d (shared by %d) N %d steps %ld + %ld failed wall %.3f s, %.3f ms/step, force %.1f%%, messages %.1f%%, "
-                        "tree depth %.1f, t %.6e, norm %d, failed that the other norm accepts %ld, dE/E %.3e, hash %016llx\n",
+                        "tree depth %.1f, t %.6e, growth %d, work %.4e, norm %d, failed that the other norm accepts %ld, dE/E %.3e, hash %016llx\n",
                         mpi.size, S.perf.mpi_tasks, n, S.perf.successful_steps, S.perf.failed_steps, wall, 1e3 * wall / (st > 0 ? st : 1),
-                        100 * S.perf.t_force / wall, 100 * S.perf.t_comm / wall, S.perf.mean_tree_depth, S.time, norm, S.perf.failed_steps_other_norm, S.perf.relative_energy_error, (unsigned long long)h);
+                        100 * S.perf.t_force / wall, 100 * S.perf.t_comm / wall, S.perf.mean_tree_depth, S.time, S.options.gbs_growth_limit, S.perf.total_work, norm, S.perf.failed_steps_other_norm, S.perf.relative_energy_error, (unsigned long long)h);
         if (mpi.rank == 0 && S.options.log_steps) {
             // what the failed steps look like: order, how far above the tolerance, and what preceded them
             const std::vector<double>& L = S.step_log;

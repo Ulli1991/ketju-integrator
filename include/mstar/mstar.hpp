@@ -102,6 +102,11 @@ struct Options {
                                                     // sweep, x_v = x_parent + edge: the additions of the root-to-vertex
                                                     // path sum in the same order (bitwise the same result), O(N) on one
                                                     // thread instead of O(N depth) over the team's threads
+    int gbs_growth_limit = 0;                       // largest growth of the step after an accepted step: 0: 5 x (the C
+                                                    // library), 1: (1 / gbs_growth_fac1)^(1 / (2 k - 1)), the limit of
+                                                    // Hairer's extrapolation code ODEX (1.35 at k = 7 with 0.02); the
+                                                    // work ratio of an order increase comes on top as there
+    double gbs_growth_fac1 = 0.02;
     bool log_steps = false;                         // diagnostics: System::step_log gets every GBS step attempt
     int mpi_min_n = -1;                             // MPI builds, System with a communicator: systems with at least this
                                                     // many particles at entry share their O(N^2) loops over the tasks
