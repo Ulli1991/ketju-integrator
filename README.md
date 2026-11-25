@@ -196,3 +196,18 @@ PN particles, softening, excluded star-star forces, collision rules, tides, extr
 records retain ordinary integration (actual factor 1). Factor 1 takes the original arithmetic path. Automatic binary
 discovery, perturbation-limited factors, changing-factor bookkeeping and safe encounter switching are not implemented.
 This is an exploration option, not a production-ready SDAR port. No speed or accuracy improvement has been established.
+
+## MPI sharing of large systems
+
+Built with `-DMSTAR_ENABLE_MPI=ON` and given a communicator (`System::set_mpi_fcomm`), `run()` is collective: every task
+integrates the same system, and for systems of at least `Options::mpi_min_n` (128) bodies the O(N^2) loops are divided
+over the tasks. A body's force sum is computed by one task in the serial order and the searches are minima, so the
+result is bitwise that of one task for every task count (same Kokkos threads per task); the tasks compare their inputs,
+every step result and the final state. `Options::tree_sweep` computes the vertex coordinates parents-first (the same
+additions as the path sums, O(N)). Use one Kokkos thread per MPI task when the tasks fill the cores.
+
+- Tests: `mstar_mpi_share` (shared = unshared bit for bit), every ctest on 1, 2 and 4 tasks, `mstar_mpi_speed_np4`
+  (N = 512 shared by 4 tasks at least 2 x faster than one task).
+- Benchmark: `sbatch -p <partition> scripts/bench_mpi_scan.sh <build> <output>` then
+  `scripts/bench_mpi_table.py <output>`: time per GBS step over N = 8 .. 1500 and 1 .. 112 tasks, with and without a
+  hard binary; bar: with the default threshold no point is slower than one task by more than 2 %.

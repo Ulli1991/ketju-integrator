@@ -108,6 +108,9 @@ struct Options {
                                                     // work ratio of an order increase comes on top as there
     double gbs_growth_fac1 = 0.02;
     bool log_steps = false;                         // diagnostics: System::step_log gets every GBS step attempt
+    bool mpi_time_detail = false;                   // diagnostics: a barrier before every force exchange, so that
+                                                    // PerformanceCounters::t_wait (waiting for the slowest task) and
+                                                    // the transfer (t_comm - t_wait) can be told apart
     int mpi_min_n = -1;                             // MPI builds, System with a communicator: systems with at least this
                                                     // many particles at entry share their O(N^2) loops over the tasks
                                                     // (< 0: the library default, 128; see set_mpi_fcomm)
@@ -139,6 +142,7 @@ struct PerformanceCounters {
     double t_mst = 0, t_total = 0, t_sync = 0;   // wall seconds
     long launches = 0;                  // kernel launches issued
     double t_force = 0, t_comm = 0;     // wall seconds in the force launches (messages included) and in MPI messages
+    double t_wait = 0;                  // Options::mpi_time_detail: the part of t_comm spent waiting for the slowest task
     double mean_tree_depth = 0;         // mean number of edges from the root, last tree built
     int mpi_tasks = 1;                  // tasks that shared the last run() (1: not shared)
 };

@@ -1536,6 +1536,10 @@ struct Engine {
             fdsp[q] = (int)(4 * a0);
         }
         const double t0 = wall();
+        if (o.options.mpi_time_detail) {
+            MPI_Barrier(comm);
+            o.perf.t_wait += wall() - t0;
+        }
         MPI_Allgatherv(MPI_IN_PLACE, 0, MPI_DATATYPE_NULL, fb.data(), fcnt.data(), fdsp.data(), MPI_DOUBLE, comm);
         o.perf.t_comm += wall() - t0;
         Kokkos::parallel_for("mstar_force_fill", Kokkos::RangePolicy<Exec>(0, (int)L), KOKKOS_LAMBDA(int lr) {
